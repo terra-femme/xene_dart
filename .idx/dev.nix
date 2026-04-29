@@ -14,13 +14,12 @@
     pkgs.xcodebuild # Provides Xcode command-line tools
     pkgs.cocoapods
     # ADDED: Android development tools (adjust as needed based on Nixpkgs)
-    pkgs.android-tools.androidsdk
-    pkgs.android-tools.platform-tools
+    pkgs.android-tools
   ];
   # Sets environment variables in the workspace
   env = {
     # It's often helpful to explicitly set ANDROID_HOME
-    ANDROID_HOME = "${pkgs.android-tools.androidsdk}/libexec/android-sdk";
+    ANDROID_HOME = "${pkgs.android-tools}/libexec/android-sdk";
   };
   idx = {
     # Search for the extensions you want on https://open-vsx.org/ and use "publisher.id"
