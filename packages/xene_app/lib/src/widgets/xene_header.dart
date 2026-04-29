@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 /// ELI5: The "Top Header." 
 /// This is the direct mirror of Header.jsx. It's a row of buttons 
@@ -36,8 +37,8 @@ class XeneHeader extends StatelessWidget implements PreferredSizeWidget {
     return Container(
       height: 56,
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.95),
-        border: Border(bottom: BorderSide(color: Colors.white.withOpacity(0.05))),
+        color: Colors.black.withValues(alpha: 0.95),
+        border: Border(bottom: BorderSide(color: Colors.white.withValues(alpha: 0.05))),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: SafeArea(
