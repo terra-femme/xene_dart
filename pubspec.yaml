@@ -3,17 +3,18 @@ description: Xene Dart Monorepo Workspace
 version: 1.0.0
 publish_to: none
 
+workspace:
+  - packages/xene_app
+  - packages/xene_backend
+  - packages/xene_domain
+
 environment:
-  sdk: '>=3.0.0 <4.0.0'
+  sdk: '>=3.5.0 <4.0.0'
 
 dependencies:
   melos: ^7.0.0
 
 melos:
-  packages:
-    - packages/xene_app
-    - packages/xene_backend
-    - packages/xene_domain
   scripts:
     analyze:
       run: melos exec -- "dart analyze"
