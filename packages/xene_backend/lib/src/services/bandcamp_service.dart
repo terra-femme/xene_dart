@@ -2,7 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:logging/logging.dart';
 import 'package:xml/xml.dart';
 import 'package:xene_domain/xene_domain.dart';
-import 'database.dart';
+import '../database.dart';
 
 final _logger = Logger('BandcampService');
 
