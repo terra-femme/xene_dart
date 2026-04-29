@@ -4,7 +4,6 @@ import '../providers/feed_provider.dart';
 import '../providers/player_provider.dart';
 import '../widgets/xene_feed_card.dart';
 import '../widgets/magazine_hero.dart';
-import '../widgets/bottom_player.dart';
 import '../widgets/xene_content_modal.dart';
 
 /// ELI5: The "Main Stage." 

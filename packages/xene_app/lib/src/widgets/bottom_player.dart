@@ -20,7 +20,7 @@ class BottomPlayer extends ConsumerWidget {
       height: 70,
       decoration: BoxDecoration(
         color: const Color(0xFF111111),
-        border: Border(top: BorderSide(color: Colors.white.withOpacity(0.1))),
+        border: Border(top: BorderSide(color: Colors.white.withValues(alpha: 0.1))),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(

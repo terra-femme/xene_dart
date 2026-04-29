@@ -17,6 +17,7 @@ dependencies:
 dependency_overrides:
   test_api: 0.7.10
   matcher: 0.12.19
+  analyzer: ^6.11.0
 
 melos:
   scripts:

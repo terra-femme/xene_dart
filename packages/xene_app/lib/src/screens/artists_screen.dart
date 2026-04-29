@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:xene_domain/xene_domain.dart';
-import '../widgets/platform_badge.dart';
 
 /// ELI5: The "Artist Library."
 /// A simple, searchable list of every artist you follow.
@@ -35,7 +34,7 @@ class _ArtistsScreenState extends ConsumerState<ArtistsScreen> {
               hintText: 'Search artists...',
               prefixIcon: const Icon(Icons.search, color: Colors.white24),
               filled: true,
-              fillColor: Colors.white.withOpacity(0.05),
+              fillColor: Colors.white.withValues(alpha: 0.05),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
                 borderSide: BorderSide.none,
@@ -48,7 +47,7 @@ class _ArtistsScreenState extends ConsumerState<ArtistsScreen> {
             ? const Center(child: Text('No artists found', style: TextStyle(color: Colors.white24)))
             : ListView.separated(
                 itemCount: filteredArtists.length,
-                separatorBuilder: (context, index) => Divider(color: Colors.white.withOpacity(0.05), height: 1),
+                separatorBuilder: (context, index) => Divider(color: Colors.white.withValues(alpha: 0.05), height: 1),
                 itemBuilder: (context, index) {
                   final artist = filteredArtists[index];
                   return ListTile(

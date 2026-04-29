@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'feed_screen.dart';
 import 'artists_screen.dart';
 import 'network_screen.dart';

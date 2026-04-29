@@ -90,7 +90,7 @@ class _MagazineHeroState extends State<MagazineHero> {
                         end: Alignment.bottomCenter,
                         colors: [
                           Colors.transparent,
-                          Colors.black.withOpacity(0.8),
+                          Colors.black.withValues(alpha: 0.8),
                         ],
                       ),
                     ),
@@ -144,7 +144,7 @@ class _MagazineHeroState extends State<MagazineHero> {
                     shape: BoxShape.circle,
                     color: _activeIndex == index
                         ? const Color(0xFFFF5500)
-                        : Colors.white.withOpacity(0.3),
+                        : Colors.white.withValues(alpha: 0.3),
                   ),
                 );
               }),
