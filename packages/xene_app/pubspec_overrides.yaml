@@ -1,0 +1,4 @@
+# melos_managed_dependency_overrides: xene_domain
+dependency_overrides:
+  xene_domain:
+    path: ../xene_domain
