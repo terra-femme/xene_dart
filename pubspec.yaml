@@ -1,0 +1,15 @@
+name: xene_dart_workspace
+description: Xene Dart Monorepo Workspace
+version: 1.0.0
+publish_to: none
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  melos: ^7.0.0
+
+scripts:
+  analyze: melos exec -- "dart analyze"
+  format: melos exec -- "dart format ."
+  test: melos exec -- "dart test"

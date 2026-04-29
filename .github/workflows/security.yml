@@ -17,6 +17,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Debug - List Files
+        run: ls -R
+
       # ── Mobile/Dart: Flutter security tools ────────────────────────
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -24,20 +27,40 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Install Melos
-        run: dart pub global activate melos
-
-      - name: Melos Bootstrap
-        run: melos bootstrap
+      - name: Setup and Bootstrap Melos
+        run: |
+          dart pub global activate melos
+          export PATH="$HOME/.pub-cache/bin:$PATH"
+          
+          echo "📂 Current Directory: $(pwd)"
+          echo "📄 Root Files:"
+          ls -la
+          
+          if [ ! -f "melos.yaml" ]; then
+            echo "❌ ERROR: melos.yaml is missing from the repository root!"
+            exit 1
+          fi
+          
+          echo "📄 melos.yaml content:"
+          cat melos.yaml
+          
+          echo "📦 Bootstrapping Workspace..."
+          melos bootstrap --verbose
+        working-directory: ${{ github.workspace }}
 
       - name: Dart Analyze (monorepo)
         id: dart-analyze
-        run: melos run analyze
+        run: |
+          export PATH="$PATH:$HOME/.pub-cache/bin"
+          melos exec -- "dart analyze"
+        working-directory: ${{ github.workspace }}
 
-      - name: Dart Pub Audit (check for CVEs in dependencies)
+      - name: Dart Pub Audit
         id: dart-audit
-        # Runs audit on all packages. Some might fail if they have no direct dependencies to audit.
-        run: melos exec -- "dart pub audit || true"
+        run: |
+          export PATH="$PATH:$HOME/.pub-cache/bin"
+          melos exec -- "dart pub audit || true"
+        working-directory: ${{ github.workspace }}
 
       - name: Supabase RLS & Stack Audit
         run: |
