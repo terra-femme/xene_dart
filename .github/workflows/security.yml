@@ -28,39 +28,35 @@ jobs:
           cache: true
 
       - name: Install Melos
-        run: dart pub global activate melos
-
-      - name: Add Melos to PATH
-        run: echo "$HOME/.pub-cache/bin" >> $GITHUB_PATH
-
-      - name: Verify Melos workspace structure
         run: |
-          echo "Current directory: $(pwd)"
-          ls -la
-          if [ ! -f "melos.yaml" ]; then
-            echo "ERROR: melos.yaml not found in root!"
-            exit 1
-          fi
-          cat melos.yaml
+          dart pub global activate melos
+          echo "$HOME/.pub-cache/bin" >> $GITHUB_PATH
+          echo "PATH=$PATH:$HOME/.pub-cache/bin" >> $GITHUB_ENV
 
       - name: Verify Melos Accessibility
         run: |
-          which melos || echo "melos not in PATH"
-          melos --version || echo "melos command failed"
+          export PATH="$PATH:$HOME/.pub-cache/bin"
+          melos --version
 
       - name: Melos Bootstrap
-        run: melos bootstrap --verbose
+        run: |
+          export PATH="$PATH:$HOME/.pub-cache/bin"
+          melos bootstrap --verbose
         working-directory: ${{ github.workspace }}
 
       - name: Dart Analyze (monorepo)
         id: dart-analyze
-        run: melos run analyze
+        run: |
+          export PATH="$PATH:$HOME/.pub-cache/bin"
+          melos run analyze
         working-directory: ${{ github.workspace }}
 
       - name: Dart Pub Audit (check for CVEs in dependencies)
         id: dart-audit
-        # Runs audit on all packages. Some might fail if they have no direct dependencies to audit.
-        run: melos exec -- "dart pub audit || true"
+        run: |
+          export PATH="$PATH:$HOME/.pub-cache/bin"
+          melos exec -- "dart pub audit || true"
+        working-directory: ${{ github.workspace }}
 
       - name: Supabase RLS & Stack Audit
         run: |
