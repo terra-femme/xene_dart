@@ -29,7 +29,7 @@
     ];
     # Workspace lifecycle hooks
     workspace = {
-      # Runs when a workspace is first created
+      # onCreate only runs once when the environment is first created.
       onCreate = {
         # Initialize web support for the app (needed for IDX preview)
         # It's better to run `flutter create .` from the app directory after Flutter is installed.
@@ -41,7 +41,7 @@
         # After everything is set up, run flutter doctor to catch any remaining issues
         flutter-doctor = "flutter doctor";
       };
-      # Runs when the workspace is (re)started
+      # onStart runs every time the workspace starts up.
       onStart = {
         # Ensure dependencies are synced on restart
         melos-bootstrap = "melos bootstrap";
@@ -49,6 +49,20 @@
         melos-generate = "melos run generate";
         # Run flutter doctor on start too
         flutter-doctor = "flutter doctor";
+        # Ensure web/ios support and generated files exist for existing workspaces
+        setup = ''
+          if [ ! -d "packages/xene_app/web" ] || [ ! -d "packages/xene_app/ios" ]; then
+            cd packages/xene_app && flutter create --platforms web,ios . && cd ../..
+          fi
+          
+          # Always bootstrap to ensure links are correct
+          melos bootstrap
+          
+          # Generate code if missing
+          if [ ! -f "packages/xene_domain/lib/src/models/artist.freezed.dart" ]; then
+            melos run generate
+          fi
+        '';
       };
     };
     # Preview configuration
