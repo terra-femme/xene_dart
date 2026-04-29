@@ -42,7 +42,7 @@ class BottomPlayer extends ConsumerWidget {
           // 2. Track Info
           Expanded(
             child: Column(
-              mainAxisAlignment: CrossAxisAlignment.center,
+              mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(

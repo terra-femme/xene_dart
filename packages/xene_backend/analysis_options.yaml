@@ -1,0 +1,7 @@
+include: package:flutter_lints/analysis_options.yaml
+
+linter:
+  rules:
+    - always_declare_return_types
+    - cancel_subscriptions
+    - close_sinks
