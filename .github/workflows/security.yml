@@ -41,13 +41,21 @@ jobs:
             echo "ERROR: melos.yaml not found in root!"
             exit 1
           fi
+          cat melos.yaml
+
+      - name: Verify Melos Accessibility
+        run: |
+          which melos || echo "melos not in PATH"
+          melos --version || echo "melos command failed"
 
       - name: Melos Bootstrap
         run: melos bootstrap --verbose
+        working-directory: ${{ github.workspace }}
 
       - name: Dart Analyze (monorepo)
         id: dart-analyze
         run: melos run analyze
+        working-directory: ${{ github.workspace }}
 
       - name: Dart Pub Audit (check for CVEs in dependencies)
         id: dart-audit
