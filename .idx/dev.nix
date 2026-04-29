@@ -21,6 +21,8 @@
     workspace = {
       # Runs when a workspace is first created
       onCreate = {
+        # Initialize web support for the app (needed for IDX preview)
+        web-setup = "cd packages/xene_app && flutter create --platforms web .";
         # Bootstrap Melos and generate code
         melos-bootstrap = "melos bootstrap";
         melos-generate = "melos run generate";
@@ -36,7 +38,9 @@
       enable = true;
       previews = {
         web = {
-          command = ["flutter" "run" "--machine" "-d" "web-server" "--web-port" "$PORT" "packages/xene_app/lib/main.dart"];
+          # Run from the app directory to ensure package resolution works correctly
+          command = ["flutter" "run" "--machine" "-d" "web-server" "--web-port" "$PORT" "--target" "lib/main.dart"];
+          cwd = "packages/xene_app";
           manager = "flutter";
         };
       };
