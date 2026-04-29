@@ -1,0 +1,46 @@
+repos:
+  # 1. detect-secrets — catches API keys, tokens, passwords
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: ['--baseline', '.secrets.baseline']
+        exclude: '(\.secrets\.baseline|\.env\.example)'
+
+  # 2. Dart/Flutter (monorepo via melos)
+  - repo: local
+    hooks:
+      - id: melos-format
+        name: melos format
+        entry: melos run format
+        language: system
+        files: \.dart$
+        pass_filenames: false
+      - id: melos-analyze
+        name: melos analyze
+        entry: melos run analyze
+        language: system
+        files: \.dart$
+        pass_filenames: false
+      - id: melos-test
+        name: melos test
+        entry: melos run test
+        language: system
+        files: \.dart$
+        pass_filenames: false
+        stages: [push] # Only run tests on push to save time
+
+  # 3. Standard hygiene
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+        args: ['--maxkb=500']
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-json
+      - id: check-toml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: no-commit-to-branch
+        args: ['--branch', 'main', '--branch', 'master']

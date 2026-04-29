@@ -1,0 +1,22 @@
+# ── Dart & Flutter ──────────────────────────────────
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+build/
+
+# ── Generated Code (The "Hidden" files) ──────────────
+# We don't upload these because 'build_runner' recreates them
+*.freezed.dart
+*.g.dart
+
+# ── Secrets ──────────────────────────────────────────
+.env
+*.secret
+
+# ── OS ───────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Folders to ignore ───────────────────────────────
+docs/

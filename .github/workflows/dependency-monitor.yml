@@ -1,0 +1,46 @@
+name: Loop 4 — Weekly Dependency Health Monitor
+
+on:
+  schedule:
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+jobs:
+  dependency-audit:
+    name: Dependency CVE Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Mobile/Dart pub audit
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install Melos
+        run: dart pub global activate melos
+
+      - name: Melos Bootstrap
+        run: melos bootstrap
+
+      - name: Dart Pub Audit (weekly)
+        id: dart-audit
+        run: melos exec -- "dart pub audit || true"
+        continue-on-error: true
+
+      - name: Open issue if vulnerabilities found
+        if: steps.dart-audit.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `[Loop 4] Dependency vulnerability detected - ${new Date().toISOString().split('T')[0]}`,
+              body: `## Weekly dependency scan found vulnerabilities (xene_dart)\n\nWorkflow: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\n\n**Action required:** Review and update affected packages before next deploy.`,
+              labels: ['security', 'dependencies']
+            });

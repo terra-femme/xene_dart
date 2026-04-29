@@ -1,0 +1,4 @@
+name: xene_dart
+
+packages:
+  - packages/**

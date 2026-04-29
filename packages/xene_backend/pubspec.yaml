@@ -1,0 +1,22 @@
+name: xene_backend
+description: Dart Frog backend for Xene.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  dart_frog: ^1.1.0
+  supabase: ^2.3.4
+  dio: ^5.4.1
+  dio_cookie_manager: ^3.1.1
+  xene_domain:
+    path: ../xene_domain
+  cron: ^0.5.1
+  logging: ^1.2.0
+  xml: ^6.5.0
+
+dev_dependencies:
+  test: ^1.24.9
+  mocktail: ^1.0.3

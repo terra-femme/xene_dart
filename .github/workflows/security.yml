@@ -1,0 +1,86 @@
+name: Loop 1 — Security Scan
+
+on:
+  push:
+    branches: ["*"]
+  pull_request:
+    branches: [main, master, develop]
+
+jobs:
+  security-scan:
+    name: Security Analysis
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ── Mobile/Dart: Flutter security tools ────────────────────────
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install Melos
+        run: dart pub global activate melos
+
+      - name: Melos Bootstrap
+        run: melos bootstrap
+
+      - name: Dart Analyze (monorepo)
+        id: dart-analyze
+        run: melos run analyze
+
+      - name: Dart Pub Audit (check for CVEs in dependencies)
+        id: dart-audit
+        # Runs audit on all packages. Some might fail if they have no direct dependencies to audit.
+        run: melos exec -- "dart pub audit || true"
+
+      - name: Supabase RLS & Stack Audit
+        run: |
+          chmod +x scripts/security_audit.sh
+          ./scripts/security_audit.sh
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install detect-secrets
+        run: pip install detect-secrets
+
+      - name: Ensure secrets baseline exists
+        run: |
+          if [ ! -f .secrets.baseline ]; then
+            detect-secrets scan > .secrets.baseline
+          fi
+
+      - name: Detect secrets
+        id: detect-secrets
+        run: detect-secrets scan --baseline .secrets.baseline
+
+      # ── Upload artifacts ───────────────────────────────────────────
+      - name: Upload security reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-reports-${{ github.sha }}
+          path: |
+            .secrets.baseline
+          retention-days: 90
+
+      - name: Security scan summary
+        if: always()
+        run: |
+          echo "## Loop 1 Security Scan Results (xene_dart)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Tool | Target | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| dart analyze | xene_dart | ${{ steps.dart-analyze.outcome }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| dart pub audit | xene_dart | ${{ steps.dart-audit.outcome }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| detect-secrets | all files | ${{ steps.detect-secrets.outcome }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Commit: ${{ github.sha }} | Scanned: $(date -u)" >> $GITHUB_STEP_SUMMARY

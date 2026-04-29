@@ -1,0 +1,25 @@
+include:
+  - packages/xene_app/analysis_options.yaml
+  - packages/xene_backend/analysis_options.yaml
+  - packages/xene_domain/analysis_options.yaml
+
+analyzer:
+  strong-mode:
+    implicit-casts: false
+    implicit-dynamic: false
+  errors:
+    # Treat security-related lints as errors
+    avoid_unnecessary_containers: warning
+    no_logic_in_create_state: error
+    use_build_context_synchronously: error
+    unnecessary_const: ignore
+
+linter:
+  rules:
+    - always_declare_return_types
+    - cancel_subscriptions
+    - close_sinks
+    - avoid_web_libraries_in_flutter
+    - secure_pubspec_urls
+    - throw_in_finally
+    - control_flow_in_finally

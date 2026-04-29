@@ -1,0 +1,29 @@
+name: xene_app
+description: The official Xene cross-platform application.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_riverpod: ^2.4.9
+  go_router: ^13.1.0
+  dio: ^5.4.1
+  just_audio: ^0.9.36
+  cached_network_image: ^3.3.1
+  flutter_svg: ^2.0.9
+  url_launcher: ^6.2.4
+  google_fonts: ^6.1.0
+  xene_domain:
+    path: ../xene_domain
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+
+flutter:
+  uses-material-design: true
