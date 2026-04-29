@@ -4,7 +4,7 @@ import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 import 'package:cookie_jar/cookie_jar.dart';
 import 'package:logging/logging.dart';
 import 'package:xene_domain/xene_domain.dart';
-import 'database.dart';
+import '../database.dart';
 
 final _logger = Logger('BeatportService');
 
