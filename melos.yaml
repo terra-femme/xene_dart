@@ -1,7 +1,9 @@
 name: xene_dart
 
 packages:
-  - packages/*
+  - packages/xene_app
+  - packages/xene_backend
+  - packages/xene_domain
 
 scripts:
   analyze:
