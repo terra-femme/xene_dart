@@ -30,8 +30,20 @@ jobs:
       - name: Install Melos
         run: dart pub global activate melos
 
+      - name: Add Melos to PATH
+        run: echo "$HOME/.pub-cache/bin" >> $GITHUB_PATH
+
+      - name: Verify Melos workspace structure
+        run: |
+          echo "Current directory: $(pwd)"
+          ls -la
+          if [ ! -f "melos.yaml" ]; then
+            echo "ERROR: melos.yaml not found in root!"
+            exit 1
+          fi
+
       - name: Melos Bootstrap
-        run: melos bootstrap
+        run: melos bootstrap --verbose
 
       - name: Dart Analyze (monorepo)
         id: dart-analyze
