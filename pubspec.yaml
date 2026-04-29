@@ -3,33 +3,8 @@ description: Xene Dart Monorepo Workspace
 version: 1.0.0
 publish_to: none
 
-workspace:
-  - packages/xene_app
-  - packages/xene_backend
-  - packages/xene_domain
-
 environment:
-  sdk: '>=3.5.0 <4.0.0'
+  sdk: '>=3.3.0 <4.0.0'
 
 dependencies:
   melos: ^7.0.0
-
-dependency_overrides:
-  test_api: 0.7.10
-  matcher: 0.12.19
-  analyzer: ^6.11.0
-
-melos:
-  scripts:
-    analyze:
-      run: melos exec -- "dart analyze"
-      description: Run dart analyze on all packages
-    format:
-      run: melos exec -- "dart format ."
-      description: Run dart format on all packages
-    test:
-      run: melos exec -- "dart test"
-      description: Run tests on all packages
-    generate:
-      run: melos exec -- "dart run build_runner build --delete-conflicting-outputs"
-      description: Generate code for all packages
