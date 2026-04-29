@@ -24,7 +24,7 @@ class NetworkScreen extends ConsumerWidget {
             padding: EdgeInsets.symmetric(horizontal: 40),
             child: Text(
               'Connect your platforms to discover deep links between your favorite artists.',
-              textAlign: Center,
+              textAlign: TextAlign.center,
               style: TextStyle(color: Colors.white38, fontSize: 14),
             ),
           ),

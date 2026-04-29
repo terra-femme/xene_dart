@@ -26,7 +26,7 @@ class XeneFeedCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: const Color(0xFF111111),
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.white.withOpacity(0.05)),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -72,7 +72,7 @@ class XeneFeedCard extends StatelessWidget {
                   ),
                   if (item.body != null && item.body!.isNotEmpty)
                     Padding(
-                      padding: const EdgeInsets.top(4),
+                      padding: const EdgeInsets.only(top: 4),
                       child: Text(
                         item.body!,
                         style: const TextStyle(
@@ -100,9 +100,9 @@ class _TypePill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, py: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.05),
+        color: Colors.white.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(4),
       ),
       child: Text(

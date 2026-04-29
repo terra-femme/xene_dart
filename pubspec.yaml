@@ -13,3 +13,4 @@ scripts:
   analyze: melos exec -- "dart analyze"
   format: melos exec -- "dart format ."
   test: melos exec -- "dart test"
+  generate: melos exec -- "dart run build_runner build --delete-conflicting-outputs"
