@@ -1,11 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:xene_domain/xene_domain.dart';
-import 'platform_badge.dart';
 
-/// ELI5: The "Track Card." 
-/// It's a single row that shows one song or video. 
-/// It has a picture on the left and the info on the right.
 class XeneFeedCard extends StatelessWidget {
   const XeneFeedCard({
     super.key,
@@ -18,65 +15,70 @@ class XeneFeedCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
+    return GestureDetector(
       onTap: onTap,
       child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-        padding: const EdgeInsets.all(12),
+        height: 84, // Mandate: Small variant height
+        margin: const EdgeInsets.fromLTRB(6, 0, 6, 2),
+        padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
-          color: const Color(0xFF111111),
+          color: Colors.white,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
+          border: Border.all(color: const Color(0xFFE0E0E0), width: 1),
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 1. Artwork (The Picture)
-            if (item.artworkUrl != null)
-              ClipRRect(
-                borderRadius: BorderRadius.circular(5),
-                child: CachedNetworkImage(
-                  imageUrl: item.artworkUrl!,
-                  width: 60,
-                  height: 60,
-                  fit: BoxFit.cover,
-                  placeholder: (context, url) => Container(color: Colors.black12),
-                  errorWidget: (context, url, error) => const Icon(Icons.music_note),
-                ),
+            // 1. Thumbnail (Left)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(5),
+              child: CachedNetworkImage(
+                imageUrl: item.artworkUrl ?? '',
+                width: 39,
+                height: 39,
+                fit: BoxFit.cover,
+                placeholder: (context, url) => Container(color: const Color(0xFFF5F5F5)),
+                errorWidget: (context, url, error) => const Icon(Icons.music_note, size: 20),
               ),
+            ),
             
-            const SizedBox(width: 12),
+            const SizedBox(width: 7),
 
-            // 2. Content (The Info)
+            // 2. Content Frame (Right)
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Top Row: Pills & Badges
                   Row(
                     children: [
                       _TypePill(type: item.contentType),
-                      const SizedBox(width: 6),
-                      PlatformBadge(platform: item.platform),
+                      const SizedBox(width: 4),
+                      _PlatformBadge(platform: item.platform),
                     ],
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 4),
+                  
+                  // Title
                   Text(
                     item.title ?? 'Untitled',
-                    style: const TextStyle(
-                      color: Color(0xFFCCCCCC),
+                    style: GoogleFonts.archivo(
+                      color: Colors.black,
                       fontWeight: FontWeight.bold,
-                      fontSize: 14,
+                      fontSize: 13,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
+                  
+                  // Snippet
                   if (item.body != null && item.body!.isNotEmpty)
                     Padding(
-                      padding: const EdgeInsets.only(top: 4),
+                      padding: const EdgeInsets.only(top: 2),
                       child: Text(
                         item.body!,
-                        style: const TextStyle(
-                          color: Color(0xFF555555),
+                        style: GoogleFonts.archivo(
+                          color: const Color(0xFF888888),
                           fontSize: 10,
                         ),
                         maxLines: 2,
@@ -99,20 +101,79 @@ class _TypePill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final color = _getPillColor(type);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
+        color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(4),
       ),
       child: Text(
         type.toUpperCase(),
-        style: const TextStyle(
-          color: Colors.white70,
+        style: TextStyle(
+          color: color,
           fontSize: 8,
           fontWeight: FontWeight.bold,
+          fontFamily: 'DM Mono',
         ),
       ),
     );
+  }
+
+  Color _getPillColor(String type) {
+    switch (type.toUpperCase()) {
+      case 'MIX':
+        return const Color(0xFFC9A96E);
+      case 'RELEASE':
+        return const Color(0xFF4E9A06);
+      case 'TRACK':
+      default:
+        return const Color(0xFFFF5500);
+    }
+  }
+}
+
+class _PlatformBadge extends StatelessWidget {
+  const _PlatformBadge({required this.platform});
+  final String platform;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = _getPlatformColor(platform);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      height: 18,
+      decoration: BoxDecoration(
+        border: Border.all(color: color, width: 1),
+        borderRadius: BorderRadius.circular(2),
+      ),
+      child: Center(
+        child: Text(
+          platform.toUpperCase(),
+          style: GoogleFonts.dmMono(
+            color: color,
+            fontSize: 8,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Color _getPlatformColor(String platform) {
+    switch (platform.toLowerCase()) {
+      case 'soundcloud':
+        return const Color(0xFFFF5500);
+      case 'instagram':
+        return const Color(0xFFE1306C);
+      case 'bandcamp':
+        return const Color(0xFF4E9A06);
+      case 'twitch':
+        return const Color(0xFF9146FF);
+      case 'youtube':
+        return const Color(0xFFFF4444);
+      default:
+        return Colors.grey;
+    }
   }
 }
