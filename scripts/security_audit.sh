@@ -19,10 +19,10 @@ echo "Verify that RLS is enabled on all tables in your Supabase dashboard."
 
 # 3. Check for Melos monorepo consistency
 echo "Checking Melos configuration..."
-if [ -f "melos.yaml" ]; then
+if [ -f "melos.yaml" ] || grep -q "^melos:" pubspec.yaml; then
     echo "✅ Melos configuration found."
 else
-    echo "❌ ERROR: melos.yaml missing in root!"
+    echo "❌ ERROR: Melos configuration missing (no melos.yaml or 'melos:' in pubspec.yaml)!"
 fi
 
 # 4. Check for unencrypted .env files

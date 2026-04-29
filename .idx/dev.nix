@@ -21,13 +21,14 @@
     workspace = {
       # Runs when a workspace is first created
       onCreate = {
-        # Example: install JS dependencies from NPM
-        # npm-install = "npm install";
+        # Bootstrap Melos and generate code
+        melos-bootstrap = "melos bootstrap";
+        melos-generate = "melos run generate";
       };
       # Runs when the workspace is (re)started
       onStart = {
-        # Example: start a background task to watch and re-build backend code
-        # watch-backend = "npm run watch-backend";
+        # Ensure dependencies are synced on restart
+        melos-bootstrap = "melos bootstrap";
       };
     };
     # Preview configuration
@@ -35,7 +36,7 @@
       enable = true;
       previews = {
         web = {
-          command = ["flutter" "run" "--machine" "-d" "web-server" "--web-port" "$PORT"];
+          command = ["flutter" "run" "--machine" "-d" "web-server" "--web-port" "$PORT" "packages/xene_app/lib/main.dart"];
           manager = "flutter";
         };
       };
