@@ -31,12 +31,13 @@ class _ArtistsScreenState extends ConsumerState<ArtistsScreen> {
           child: TextField(
             onChanged: (val) => setState(() => _searchQuery = val),
             decoration: InputDecoration(
-              hintText: 'Search artists...',
-              prefixIcon: const Icon(Icons.search, color: Color.fromARGB(61, 255, 255, 255)),
+              hintText: 'SEARCH ARTISTS...',
+              hintStyle: const TextStyle(fontFamily: 'Teko', fontSize: 14, color: Color(0xFF888888)),
+              prefixIcon: const Icon(Icons.search, color: Color(0xFF888888)),
               filled: true,
-              fillColor: const Color.fromARGB(12, 255, 255, 255),
+              fillColor: const Color(0xFFF5F5F5),
               border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(8),
                 borderSide: BorderSide.none,
               ),
             ),
@@ -44,17 +45,17 @@ class _ArtistsScreenState extends ConsumerState<ArtistsScreen> {
         ),
         Expanded(
           child: filteredArtists.isEmpty 
-            ? const Center(child: Text('No artists found', style: TextStyle(color: Color.fromARGB(61, 255, 255, 255))))
+            ? const Center(child: Text('NO ARTISTS FOUND', style: TextStyle(fontFamily: 'Teko', color: Color(0xFF888888))))
             : ListView.separated(
                 itemCount: filteredArtists.length,
-                separatorBuilder: (context, index) => Divider(color: const Color.fromARGB(12, 255, 255, 255), height: 1),
+                separatorBuilder: (context, index) => const Divider(color: Color(0xFFF5F5F5), height: 1),
                 itemBuilder: (context, index) {
                   final artist = filteredArtists[index];
                   return ListTile(
-                    title: Text(artist.name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500)),
+                    title: Text(artist.name.toUpperCase(), style: const TextStyle(fontFamily: 'Teko', color: Colors.black, fontSize: 18)),
                     subtitle: Text('${artist.entityType.toUpperCase()} • ${artist.identityConfidence} CONFIDENCE', 
-                      style: const TextStyle(fontSize: 10, color: Color.fromARGB(96, 255, 255, 255))),
-                    trailing: const Icon(Icons.chevron_right, color: Color.fromARGB(61, 255, 255, 255)),
+                      style: const TextStyle(fontFamily: 'Archivo', fontSize: 10, color: Color(0xFF888888))),
+                    trailing: const Icon(Icons.chevron_right, color: Color(0xFF888888)),
                     onTap: () {
                       // Navigate to Detail
                     },

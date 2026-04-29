@@ -50,6 +50,9 @@ jobs:
           
           echo "📦 Bootstrapping Workspace..."
           melos bootstrap --verbose
+          
+          echo "🛠️ Generating Code..."
+          melos run generate
         working-directory: ${{ github.workspace }}
 
       - name: Dart Analyze (monorepo)

@@ -1,7 +1,10 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:dio/dio.dart';
+import 'package:logging/logging.dart';
 import 'package:xene_domain/xene_domain.dart';
 import 'package:logging/logging.dart';
+
+final _logger = Logger('FeedNotifier');
 
 final _logger = Logger('FeedNotifier');
 
