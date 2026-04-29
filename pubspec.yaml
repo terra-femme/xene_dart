@@ -8,3 +8,8 @@ environment:
 
 dependencies:
   melos: ^7.0.0
+
+scripts:
+  analyze: melos exec -- "dart analyze"
+  format: melos exec -- "dart format ."
+  test: melos exec -- "dart test"

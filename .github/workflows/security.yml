@@ -52,7 +52,7 @@ jobs:
         id: dart-analyze
         run: |
           export PATH="$PATH:$HOME/.pub-cache/bin"
-          melos run analyze
+          melos exec -- "dart analyze"
         working-directory: ${{ github.workspace }}
 
       - name: Dart Pub Audit
