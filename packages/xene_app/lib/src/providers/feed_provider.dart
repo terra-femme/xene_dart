@@ -1,6 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:dio/dio.dart';
+import 'package:logging/logging.dart';
 import 'package:xene_domain/xene_domain.dart';
+
+final _logger = Logger('FeedNotifier');
 
 /// ELI5: The "Newsroom" provider. 
 /// It's a special department that is responsible for fetching 

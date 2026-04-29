@@ -19,6 +19,7 @@ dependencies:
   flutter_svg: ^2.0.10
   url_launcher: ^6.3.0
   google_fonts: ^6.2.1
+  logging: ^1.2.0
   xene_domain:
     path: ../xene_domain
 

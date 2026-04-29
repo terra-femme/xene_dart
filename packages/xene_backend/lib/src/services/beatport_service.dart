@@ -162,8 +162,8 @@ class BeatportService {
           'content_type': i.contentType,
           'title': i.title,
           'body': i.body,
-          'artwork_url': i.artwork_url,
-          'external_url': i.external_url,
+          'artwork_url': i.artworkUrl,
+          'external_url': i.externalUrl,
           'published_at': i.publishedAt.toIso8601String(),
           'updated_at': DateTime.now().toUtc().toIso8601String(),
         }).toList();
