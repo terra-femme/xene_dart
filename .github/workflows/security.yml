@@ -36,13 +36,17 @@ jobs:
           echo "📄 Root Files:"
           ls -la
           
-          if [ ! -f "melos.yaml" ]; then
-            echo "❌ ERROR: melos.yaml is missing from the repository root!"
+          if [ ! -f "melos.yaml" ] && ! grep -q "^melos:" pubspec.yaml; then
+            echo "❌ ERROR: Melos configuration is missing! (Neither melos.yaml nor 'melos:' in pubspec.yaml found)"
             exit 1
           fi
           
-          echo "📄 melos.yaml content:"
-          cat melos.yaml
+          if [ -f "melos.yaml" ]; then
+            echo "📄 melos.yaml content:"
+            cat melos.yaml
+          else
+            echo "📄 melos configuration found in pubspec.yaml"
+          fi
           
           echo "📦 Bootstrapping Workspace..."
           melos bootstrap --verbose
