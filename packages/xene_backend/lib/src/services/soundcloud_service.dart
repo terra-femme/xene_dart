@@ -2,7 +2,7 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:logging/logging.dart';
 import 'package:xene_domain/xene_domain.dart';
-import 'database.dart';
+import '../database.dart';
 
 final _logger = Logger('SoundCloudService');
 
@@ -124,7 +124,7 @@ class SoundCloudService {
             publishedAt: DateTime.parse(normalizedDate),
             durationSeconds: (track['duration'] as int) ~/ 1000,
             playCount: track['playback_count'] as int?,
-            like_count: track['likes_count'] as int?, // Note: match model fields
+            likeCount: track['likes_count'] as int?, // Corrected to likeCount
           ));
         } catch (e) {
           _logger.warning('Error parsing track: $e');
@@ -139,8 +139,8 @@ class SoundCloudService {
         'content_type': i.contentType,
         'title': i.title,
         'body': i.body,
-        'artwork_url': i.artwork_url,
-        'external_url': i.external_url,
+        'artwork_url': i.artworkUrl,
+        'external_url': i.externalUrl,
         'published_at': i.publishedAt.toIso8601String(),
         'updated_at': DateTime.now().toUtc().toIso8601String(),
       }).toList();

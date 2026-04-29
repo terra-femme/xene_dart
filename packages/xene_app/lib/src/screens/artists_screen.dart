@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:xene_domain/xene_domain.dart';
-import '../widgets/platform_badge.dart';
 
 /// ELI5: The "Artist Library."
 /// A simple, searchable list of every artist you follow.
@@ -33,9 +32,9 @@ class _ArtistsScreenState extends ConsumerState<ArtistsScreen> {
             onChanged: (val) => setState(() => _searchQuery = val),
             decoration: InputDecoration(
               hintText: 'Search artists...',
-              prefixIcon: const Icon(Icons.search, color: Colors.white24),
+              prefixIcon: const Icon(Icons.search, color: Color.fromARGB(61, 255, 255, 255)),
               filled: true,
-              fillColor: Colors.white.withOpacity(0.05),
+              fillColor: const Color.fromARGB(12, 255, 255, 255),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
                 borderSide: BorderSide.none,
@@ -45,17 +44,17 @@ class _ArtistsScreenState extends ConsumerState<ArtistsScreen> {
         ),
         Expanded(
           child: filteredArtists.isEmpty 
-            ? const Center(child: Text('No artists found', style: TextStyle(color: Colors.white24)))
+            ? const Center(child: Text('No artists found', style: TextStyle(color: Color.fromARGB(61, 255, 255, 255))))
             : ListView.separated(
                 itemCount: filteredArtists.length,
-                separatorBuilder: (context, index) => Divider(color: Colors.white.withOpacity(0.05), height: 1),
+                separatorBuilder: (context, index) => Divider(color: const Color.fromARGB(12, 255, 255, 255), height: 1),
                 itemBuilder: (context, index) {
                   final artist = filteredArtists[index];
                   return ListTile(
                     title: Text(artist.name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500)),
                     subtitle: Text('${artist.entityType.toUpperCase()} • ${artist.identityConfidence} CONFIDENCE', 
-                      style: const TextStyle(fontSize: 10, color: Colors.white38)),
-                    trailing: const Icon(Icons.chevron_right, color: Colors.white24),
+                      style: const TextStyle(fontSize: 10, color: Color.fromARGB(96, 255, 255, 255))),
+                    trailing: const Icon(Icons.chevron_right, color: Color.fromARGB(61, 255, 255, 255)),
                     onTap: () {
                       // Navigate to Detail
                     },
@@ -67,4 +66,3 @@ class _ArtistsScreenState extends ConsumerState<ArtistsScreen> {
     );
   }
   }
-

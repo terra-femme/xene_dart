@@ -2,8 +2,10 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-<module fileurl="file://$PROJECT_DIR$/melos_xene_dart.iml" filepath="$PROJECT_DIR$/melos_xene_dart.iml"/>
-<module fileurl="file://$PROJECT_DIR$/melos_xene_dart_workspace.iml" filepath="$PROJECT_DIR$/melos_xene_dart_workspace.iml"/>
+      <module fileurl="file://$PROJECT_DIR$/packages/xene_app/melos_xene_app.iml" filepath="$PROJECT_DIR$/packages/xene_app/melos_xene_app.iml" />
+      <module fileurl="file://$PROJECT_DIR$/packages/xene_backend/melos_xene_backend.iml" filepath="$PROJECT_DIR$/packages/xene_backend/melos_xene_backend.iml" />
+      <module fileurl="file://$PROJECT_DIR$/packages/xene_domain/melos_xene_domain.iml" filepath="$PROJECT_DIR$/packages/xene_domain/melos_xene_domain.iml" />
+      <module fileurl="file://$PROJECT_DIR$/melos_xene_dart.iml" filepath="$PROJECT_DIR$/melos_xene_dart.iml" />
     </modules>
   </component>
 </project>

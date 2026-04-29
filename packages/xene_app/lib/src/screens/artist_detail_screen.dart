@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:xene_domain/xene_domain.dart';
 import '../providers/feed_provider.dart';
 import '../widgets/xene_feed_card.dart';
