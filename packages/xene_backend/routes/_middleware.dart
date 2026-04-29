@@ -20,14 +20,45 @@ final _scheduler = SchedulerService(
   bandcamp: _bandcamp,
 )..start();
 
-Middleware middleware() {
-  return (handler) {
-    return handler
-        .use(provider<DatabaseService>((_) => _db))
-        .use(provider<SoundCloudService>((_) => _soundcloud))
-        .use(provider<YouTubeService>((_) => _youtube))
-        .use(provider<BeatportService>((_) => _beatport))
-        .use(provider<BandcampService>((_) => _bandcamp))
-        .use(provider<SchedulerService>((_) => _scheduler));
+// This must be a top-level variable (Handler Function(Handler)) 
+// to match the generated Dart Frog server code.
+final middleware = (Handler handler) {
+  return handler
+      .use(_corsMiddleware)
+      .use(provider<DatabaseService>((_) => _db))
+      .use(provider<SoundCloudService>((_) => _soundcloud))
+      .use(provider<YouTubeService>((_) => _youtube))
+      .use(provider<BeatportService>((_) => _beatport))
+      .use(provider<BandcampService>((_) => _bandcamp))
+      .use(provider<SchedulerService>((_) => _scheduler));
+};
+
+/// Custom CORS Middleware
+Handler _corsMiddleware(Handler handler) {
+  return (context) async {
+    // 1. Handle preflight (OPTIONS) requests
+    if (context.request.method == HttpMethod.options) {
+      return Response(
+        statusCode: 204,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
+        },
+      );
+    }
+
+    // 2. Process the actual request
+    final response = await handler(context);
+
+    // 3. Inject CORS headers into the final response
+    return response.copyWith(
+      headers: {
+        ...response.headers,
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
+      },
+    );
   };
 }

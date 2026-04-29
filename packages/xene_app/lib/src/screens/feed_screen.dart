@@ -25,17 +25,18 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
   void initState() {
     super.initState();
     _scrollController = ScrollController();
-    _startCrawl();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _startCrawl());
   }
 
   void _startCrawl() {
+    _crawlTimer?.cancel();
     _crawlTimer = Timer.periodic(const Duration(milliseconds: 16), (timer) {
       if (!_isPaused && _scrollController.hasClients) {
         final maxScroll = _scrollController.position.maxScrollExtent;
         final currentScroll = _scrollController.offset;
         
-        // Infinite loop logic: If we're past half way, we jump back to maintain the illusion
-        // (Note: This assumes we duplicate the list items for a seamless loop)
+        if (maxScroll <= 0) return;
+        
         if (currentScroll >= maxScroll / 2) {
           _scrollController.jumpTo(0);
         } else {
@@ -46,15 +47,14 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
   }
 
   void _pauseCrawl() {
-    setState(() => _isPaused = true);
+    if (!_isPaused) setState(() => _isPaused = true);
     _resumeTimer?.cancel();
   }
 
   void _resumeCrawl() {
+    _resumeTimer?.cancel();
     _resumeTimer = Timer(const Duration(milliseconds: 1500), () {
-      if (mounted) {
-        setState(() => _isPaused = false);
-      }
+      if (mounted) setState(() => _isPaused = false);
     });
   }
 
@@ -69,60 +69,55 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
   @override
   Widget build(BuildContext context) {
     final feedAsync = ref.watch(feedProvider);
-    final viewWidth = MediaQuery.of(context).size.width;
+    final size = MediaQuery.of(context).size;
+
+    if (size.height < 150) return const SizedBox.shrink();
 
     return Column(
       children: [
-        // 1. "JUST DROPPED" Header
+        // 1. Header (Fixed Overflow)
         Container(
           height: 80,
           width: double.infinity,
           alignment: Alignment.bottomRight,
           padding: const EdgeInsets.only(right: 16, bottom: 12),
-          child: Text(
-            'JUST DROPPED',
-            style: GoogleFonts.teko(
-              fontSize: (viewWidth * 0.08).clamp(32.0, 52.0),
-              fontWeight: FontWeight.w700,
-              color: Colors.black,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              'JUST DROPPED',
+              style: GoogleFonts.teko(
+                fontSize: (size.width * 0.08).clamp(32.0, 52.0),
+                fontWeight: FontWeight.w700,
+                color: Colors.black,
+              ),
             ),
           ),
         ),
-
-        // 2. Control Bar
+        // 2. Control Bar (Fixed Overflow)
         Container(
           height: 32,
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                'CHANNELS +',
-                style: GoogleFonts.teko(
-                  fontSize: 11,
-                  color: const Color(0xFF888888),
-                  letterSpacing: 1.1,
-                ),
-              ),
-              Text(
-                'FILTER BY -',
-                style: GoogleFonts.teko(
-                  fontSize: 11,
-                  color: const Color(0xFF888888),
-                  letterSpacing: 1.1,
-                ),
-              ),
+              Flexible(
+                child: Text('CHANNELS +', 
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.teko(fontSize: 11, color: const Color(0xFF888888)))),
+              Flexible(
+                child: Text('FILTER BY -', 
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.teko(fontSize: 11, color: const Color(0xFF888888)))),
             ],
           ),
         ),
-
-        // 3. The Crawl (Auto-Scroll Feed)
+        // 3. Feed
         Expanded(
           child: feedAsync.when(
             data: (items) {
               if (items.isEmpty) return const Center(child: Text('Empty feed'));
               
-              // Duplicate items for seamless infinite scroll
+              // We duplicate items for the "infinite crawl" effect
               final duplicatedItems = [...items, ...items];
               
               return Listener(
@@ -130,6 +125,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                 onPointerUp: (_) => _resumeCrawl(),
                 child: ListView.separated(
                   controller: _scrollController,
+                  physics: const ClampingScrollPhysics(),
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   itemCount: duplicatedItems.length,
                   separatorBuilder: (context, index) {
@@ -138,17 +134,22 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                         ? duplicatedItems[index + 1] 
                         : null;
                     
-                    // Show date divider if the date changes
-                    if (next != null && 
-                        DateFormat('MM.dd.yy').format(current.publishedAt) != 
-                        DateFormat('MM.dd.yy').format(next.publishedAt)) {
-                      return _DateDivider(date: next.publishedAt);
+                    if (next != null && current.publishedAt != null && next.publishedAt != null) {
+                      if (DateFormat('MM.dd.yy').format(current.publishedAt!) != 
+                          DateFormat('MM.dd.yy').format(next.publishedAt!)) {
+                        return _DateDivider(
+                          key: ValueKey('divider_${index}_${next.id}'),
+                          date: next.publishedAt!
+                        );
+                      }
                     }
                     return const SizedBox(height: 2);
                   },
                   itemBuilder: (context, index) {
                     final item = duplicatedItems[index];
                     return XeneFeedCard(
+                      // IMPORTANT: Unique key prevents "laid out exactly once" error
+                      key: ValueKey('feed_card_${index}_${item.id}'),
                       item: item,
                       onTap: () {
                         ref.read(playerProvider.notifier).playTrack(item);
@@ -169,7 +170,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
 }
 
 class _DateDivider extends StatelessWidget {
-  const _DateDivider({required this.date});
+  const _DateDivider({super.key, required this.date});
   final DateTime date;
 
   @override

@@ -20,6 +20,7 @@ dependencies:
   logging: ^1.2.0
   xene_domain:
     path: ../xene_domain
+  intl: ^0.20.2
 
 dev_dependencies:
   flutter_test:

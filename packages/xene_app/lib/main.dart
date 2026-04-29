@@ -2,21 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'src/screens/feed_screen.dart';
-import 'src/screens/artists_screen.dart';
-import 'src/screens/network_screen.dart';
-import 'src/widgets/xene_header.dart';
-import 'src/widgets/xene_sidebar.dart';
-import 'src/widgets/bottom_player.dart';
+
+import 'package:xene_app/src/screens/feed_screen.dart';
+import 'package:xene_app/src/screens/artists_screen.dart';
+import 'package:xene_app/src/screens/network_screen.dart';
+import 'package:xene_app/src/widgets/xene_header.dart';
+import 'package:xene_app/src/widgets/xene_sidebar.dart';
+import 'package:xene_app/src/widgets/bottom_player.dart';
 
 void main() {
-  runApp(
-    const ProviderScope(child: XeneApp()),
-  );
+  runApp(const ProviderScope(child: XeneApp()));
 }
 
-/// ELI5: The "Page Wrapper."
-/// Updated to match the 30/70 split layout with a fixed header.
 class PageLayout extends StatelessWidget {
   const PageLayout({super.key, required this.child});
   final Widget child;
@@ -27,10 +24,10 @@ class PageLayout extends StatelessWidget {
       backgroundColor: Colors.white,
       body: Stack(
         children: [
-          // 1. Main Content Area (Sidebar + Feed)
+          // 1. Sidebar & Content Area
           Column(
             children: [
-              const SizedBox(height: 56), // Header offset
+              const SizedBox(height: 56), 
               Expanded(
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -38,9 +35,7 @@ class PageLayout extends StatelessWidget {
                     const XeneSidebar(),
                     Expanded(
                       child: Container(
-                        decoration: const BoxDecoration(
-                          color: Colors.white,
-                        ),
+                        color: Colors.white,
                         child: child,
                       ),
                     ),
@@ -50,7 +45,7 @@ class PageLayout extends StatelessWidget {
             ],
           ),
           
-          // 2. Fixed Top Navigation (Absolute Position)
+          // 2. Fixed Header
           const Positioned(
             top: 0,
             left: 0,
@@ -58,7 +53,7 @@ class PageLayout extends StatelessWidget {
             child: XeneHeader(),
           ),
 
-          // 3. Bottom Player (Optional/Overlay)
+          // 3. Fixed Player
           const Positioned(
             bottom: 0,
             left: 0,
@@ -77,18 +72,9 @@ final _router = GoRouter(
     ShellRoute(
       builder: (context, state, child) => PageLayout(child: child),
       routes: [
-        GoRoute(
-          path: '/',
-          builder: (context, state) => const FeedScreen(),
-        ),
-        GoRoute(
-          path: '/artists',
-          builder: (context, state) => const ArtistsScreen(),
-        ),
-        GoRoute(
-          path: '/network',
-          builder: (context, state) => const NetworkScreen(),
-        ),
+        GoRoute(path: '/', builder: (context, state) => const FeedScreen()),
+        GoRoute(path: '/artists', builder: (context, state) => const ArtistsScreen()),
+        GoRoute(path: '/network', builder: (context, state) => const NetworkScreen()),
       ],
     ),
   ],
@@ -103,8 +89,7 @@ class XeneApp extends StatelessWidget {
       title: 'Xene',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        useMaterial3: false, // Mandate: Disable Material3 for exact control
-        brightness: Brightness.light,
+        useMaterial3: false, 
         primaryColor: const Color(0xFFFF5500),
         scaffoldBackgroundColor: Colors.white,
         textTheme: GoogleFonts.archivoTextTheme(
@@ -118,4 +103,3 @@ class XeneApp extends StatelessWidget {
     );
   }
 }
-
