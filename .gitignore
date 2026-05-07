@@ -20,3 +20,25 @@ Thumbs.db
 
 # ── Folders to ignore ───────────────────────────────
 docs/
+
+# Local IDE / agent state
+.claude/
+.dart_appdata/
+.vscode/
+.idea/libraries/
+.idea/workspace.xml
+.idea/runConfigurations/main_dart.xml
+*.iml
+
+# Flutter local metadata
+.metadata
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# Local scratch/debug files
+terminal_debug.txt
+nvidia-test.json
+
+.idea/modules.xml
+.idea/runConfigurations/
+packages/xene_app/.metadata
