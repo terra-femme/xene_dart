@@ -7,7 +7,7 @@ environment:
   sdk: "^3.11.5"
 
 dependencies:
-  melos: ^7.0.0
+  melos: ^7.7.0
   device_preview_plus: ^2.7.1
 
 workspace:
