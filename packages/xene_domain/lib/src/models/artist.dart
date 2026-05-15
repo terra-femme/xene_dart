@@ -4,7 +4,7 @@ part 'artist.freezed.dart';
 part 'artist.g.dart';
 
 @freezed
-class Artist with _$Artist {
+abstract class Artist with _$Artist {
   const Artist._(); // Needed for custom methods
 
   const factory Artist({
@@ -14,9 +14,6 @@ class Artist with _$Artist {
     String? soundcloudUsername,
     String? soundcloudUrl,
     @Default('LOW') String soundcloudAuthority,
-    String? instagramUsername,
-    String? instagramUrl,
-    @Default('LOW') String instagramAuthority,
     String? bandcampUrl,
     @Default('LOW') String bandcampAuthority,
     String? youtubeChannelId,
@@ -36,7 +33,14 @@ class Artist with _$Artist {
     String? twitterUsername,
     String? twitterUrl,
     @Default('LOW') String twitterAuthority,
+    String? instagramUsername,
+    String? instagramUrl,
+    @Default('LOW') String instagramAuthority,
+    String? appleMusiciId,
+    String? deezerId,
+    String? tidalId,
     String? analysis,
+    @Default([]) List<Map<String, dynamic>> edges,
     List<String>? soundcloudRepostLabels,
     @Default(false) bool manuallyVerified,
     required DateTime createdAt,

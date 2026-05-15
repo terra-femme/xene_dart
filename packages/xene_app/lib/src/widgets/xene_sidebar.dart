@@ -1,78 +1,109 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/widget_previews.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:xene_app/src/providers/articles_provider.dart';
+import 'package:xene_app/src/providers/preset_provider.dart';
+import 'package:xene_app/src/widgets/preset_dial.dart';
 
-class XeneSidebar extends StatefulWidget {
+class XeneSidebar extends ConsumerStatefulWidget {
   const XeneSidebar({super.key});
 
   @override
-  State<XeneSidebar> createState() => _XeneSidebarState();
+  ConsumerState<XeneSidebar> createState() => _XeneSidebarState();
 }
 
-class _XeneSidebarState extends State<XeneSidebar> {
-  late ScrollController _scrollController;
-  Timer? _scrollTimer;
-  bool _isHovered = false;
+class _XeneSidebarState extends ConsumerState<XeneSidebar>
+    with SingleTickerProviderStateMixin {
+  late final ScrollController _scrollController;
+  Ticker? _crawlTicker;
+  Duration _lastTickTime = Duration.zero;
+  bool _isPaused = false;
   Orientation? _lastOrientation;
-  Size _screenSize = Size.zero;
-  Orientation _orientation = Orientation.portrait;
+  bool _isLandscape = false;
+  bool _needsScroll = false;
 
   // contentThreshold is the height of one content set
   double _getSetHeight(bool isLandscape) => isLandscape ? 740.0 : 700.0;
   static const double _contentThreshold = 600.0;
+  static const double _crawlPixelsPerMillisecond = 0.043;
 
   @override
   void initState() {
     super.initState();
     _scrollController = ScrollController();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _startCrawl());
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     final mediaQuery = MediaQuery.of(context);
-    _screenSize = mediaQuery.size;
-    _orientation = mediaQuery.orientation;
+    final orientation = mediaQuery.orientation;
 
-    if (_lastOrientation == Orientation.landscape &&
-        _orientation == Orientation.portrait) {
+    if (_lastOrientation != orientation) {
+      _isLandscape = orientation == Orientation.landscape;
+      _lastTickTime = Duration.zero;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && _scrollController.hasClients) {
           _scrollController.jumpTo(0);
         }
       });
     }
-    _lastOrientation = _orientation;
+    _lastOrientation = orientation;
   }
 
   void _startCrawl() {
-    _scrollTimer?.cancel();
-    _scrollTimer = Timer.periodic(const Duration(milliseconds: 20), (timer) {
-      if (!mounted) return;
+    if (_crawlTicker?.isActive ?? false) return;
 
-      final availableHeight = _screenSize.height - 56;
-      final isLandscape = _orientation == Orientation.landscape;
+    _lastTickTime = Duration.zero;
+    _crawlTicker ??= createTicker((elapsed) {
+      if (!_isPaused && _needsScroll && _scrollController.hasClients) {
+        final delta = _lastTickTime == Duration.zero
+            ? Duration.zero
+            : elapsed - _lastTickTime;
+        _lastTickTime = elapsed;
 
-      final needsScroll = isLandscape || (availableHeight < _contentThreshold);
+        final pixels =
+            delta.inMicroseconds / 1000.0 * _crawlPixelsPerMillisecond;
+        final singleExtent = _getSetHeight(_isLandscape);
+        final current = _scrollController.offset;
 
-      if (needsScroll && !_isHovered && _scrollController.hasClients) {
-        final currentScroll = _scrollController.offset;
-        final setHeight = _getSetHeight(isLandscape);
-
-        if (currentScroll >= setHeight) {
-          _scrollController.jumpTo(currentScroll - setHeight);
-        } else {
-          _scrollController.jumpTo(currentScroll + 0.3);
+        double next = current + pixels;
+        if (singleExtent > 0 && next >= singleExtent) {
+          next -= singleExtent;
         }
+
+        _scrollController.jumpTo(next);
+      } else {
+        _lastTickTime = elapsed;
       }
     });
+
+    _crawlTicker!.start();
+  }
+
+  void _stopCrawl() {
+    _crawlTicker?.stop();
+    _lastTickTime = Duration.zero;
+  }
+
+  void _setPaused(bool paused) {
+    if (_isPaused == paused) return;
+
+    setState(() => _isPaused = paused);
+    if (paused) {
+      _lastTickTime = Duration.zero;
+    } else {
+      _startCrawl();
+    }
   }
 
   @override
   void dispose() {
-    _scrollTimer?.cancel();
+    _crawlTicker?.dispose();
     _scrollController.dispose();
     super.dispose();
   }
@@ -83,7 +114,7 @@ class _XeneSidebarState extends State<XeneSidebar> {
     final double logoBoxHeight = isLandscape ? 220.0 : 160.0;
     // GAP ADJUSTMENT: Logo now sits higher to align with the Feed header
     final double topSetPadding = isLandscape ? 10.0 : 20.0;
-    final double logoToNavGap = isLandscape ? 130.0 : 110.0;
+    final double logoToDialGap = isLandscape ? 95.0 : 95.0;
 
     return SizedBox(
       height: _getSetHeight(isLandscape),
@@ -126,34 +157,9 @@ class _XeneSidebarState extends State<XeneSidebar> {
               ],
             ),
           ),
-          SizedBox(height: logoToNavGap),
-          const SizedBox(height: 50),
+          SizedBox(height: logoToDialGap),
 
-          Align(
-            alignment: isLandscape
-                ? Alignment.centerRight
-                : Alignment.centerLeft,
-            child: Column(
-              crossAxisAlignment: isLandscape
-                  ? CrossAxisAlignment.end
-                  : CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'ARTICLES',
-                  textAlign: isLandscape ? TextAlign.right : TextAlign.left,
-                  style: const TextStyle(
-                    fontFamily: 'Teko',
-                    fontSize: 12,
-                    color: Color(0xFF666666),
-                    letterSpacing: 1.44,
-                    height: 1.66,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                _ArticlesSlider(isLandscape: isLandscape),
-              ],
-            ),
-          ),
+          _PresetDialDock(isLandscape: isLandscape),
         ],
       ),
     );
@@ -168,6 +174,21 @@ class _XeneSidebarState extends State<XeneSidebar> {
     final currentOrientation = MediaQuery.of(context).orientation;
     final isLandscape = currentOrientation == Orientation.landscape;
     final needsScroll = isLandscape || (availableHeight < _contentThreshold);
+    _isLandscape = isLandscape;
+    _needsScroll = needsScroll;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+
+      if (needsScroll && _scrollController.hasClients) {
+        _startCrawl();
+      } else {
+        _stopCrawl();
+        if (_scrollController.hasClients && _scrollController.offset != 0) {
+          _scrollController.jumpTo(0);
+        }
+      }
+    });
 
     final width = size.width * 0.30;
     final clampedWidth = width.clamp(180.0, 210.0);
@@ -191,12 +212,12 @@ class _XeneSidebarState extends State<XeneSidebar> {
                 context,
               ).copyWith(scrollbars: false),
               child: Listener(
-                onPointerDown: (_) => setState(() => _isHovered = true),
-                onPointerUp: (_) => setState(() => _isHovered = false),
-                onPointerCancel: (_) => setState(() => _isHovered = false),
+                onPointerDown: (_) => _setPaused(true),
+                onPointerUp: (_) => _setPaused(false),
+                onPointerCancel: (_) => _setPaused(false),
                 child: MouseRegion(
-                  onEnter: (_) => setState(() => _isHovered = true),
-                  onExit: (_) => setState(() => _isHovered = false),
+                  onEnter: (_) => _setPaused(true),
+                  onExit: (_) => _setPaused(false),
                   child: ListView(
                     controller: _scrollController,
                     clipBehavior: Clip.hardEdge,
@@ -207,7 +228,6 @@ class _XeneSidebarState extends State<XeneSidebar> {
                     children: [
                       _buildContentSet(isLandscape),
                       if (needsScroll) _buildContentSet(isLandscape),
-                      if (needsScroll) _buildContentSet(isLandscape),
                     ],
                   ),
                 ),
@@ -215,31 +235,8 @@ class _XeneSidebarState extends State<XeneSidebar> {
             ),
           ),
           // PINNED BOTTOM SECTION
-          Column(
-            crossAxisAlignment: isLandscape
-                ? CrossAxisAlignment.end
-                : CrossAxisAlignment.start,
-            children: [
-              /*
-              Text(
-                'FRESH\nFEED',
-                textAlign: isLandscape ? TextAlign.right : TextAlign.left,
-                style: const TextStyle(
-                  fontFamily: 'Teko',
-                  fontSize: 40,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black,
-                  height: 1.0
-                )
-              ),
-              const SizedBox(height: 10),
-              */
-              /*
-              const _JumpingChevron(),
-              */
-            ],
-          ),
-          const SizedBox(height: 30),
+          _ArticlesDock(isLandscape: isLandscape),
+          SizedBox(height: isLandscape ? 12 : 30),
         ],
       ),
     );
@@ -247,91 +244,126 @@ class _XeneSidebarState extends State<XeneSidebar> {
 }
 
 class _ArticlesSlider extends StatefulWidget {
-  const _ArticlesSlider({required this.isLandscape});
+  const _ArticlesSlider({
+    super.key,
+    required this.isLandscape,
+    required this.articles,
+  });
   final bool isLandscape;
+  final List<ArticleItem> articles;
+
   @override
   State<_ArticlesSlider> createState() => _ArticlesSliderState();
 }
 
+// Sidebar article carousel. The title/source/snippet text rendering for the
+// pinned ARTICLES block is controlled in this widget.
 class _ArticlesSliderState extends State<_ArticlesSlider> {
-  final PageController _pageController = PageController();
+  late final PageController _pageController;
   int _currentPage = 0;
   Timer? _timer;
-
-  final List<Map<String, String>> _mockArticles = [
-    {
-      'title': 'R3IDY - SPINDLE',
-      'snippet': 'Yamatai Records announce the return...',
-    },
-    {
-      'title': 'THE FUTURE OF D&B',
-      'snippet': 'Exploring the underground sounds...',
-    },
-  ];
 
   @override
   void initState() {
     super.initState();
+    _pageController = PageController();
+    _startTimer();
+  }
+
+  Future<void> _openArticle(String url) async {
+    if (url.isEmpty) return;
+    final uri = Uri.tryParse(url);
+    if (uri == null) return;
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  void _startTimer() {
+    _timer?.cancel();
+    if (widget.articles.length <= 1) return;
     _timer = Timer.periodic(const Duration(seconds: 5), (timer) {
-      if (_pageController.hasClients) {
-        _currentPage = (_currentPage + 1) % _mockArticles.length;
+      if (!mounted || !_pageController.hasClients) return;
+      _currentPage = (_currentPage + 1) % widget.articles.length;
+      // try-catch: if the widget is deactivated mid-animation the scroll-end
+      // notification can reach an inactive Material._InkFeatures element.
+      // Swallowing here is safe — the next tick will succeed if still mounted.
+      try {
         _pageController.animateToPage(
           _currentPage,
           duration: const Duration(milliseconds: 500),
           curve: Curves.easeInOut,
         );
-      }
+      } catch (_) {}
     });
   }
 
   @override
   void dispose() {
     _timer?.cancel();
+    // Settle any in-flight animation synchronously before dispose so that
+    // PageController.dispose() does not trigger ScrollEndNotification while
+    // the Material ancestor's _InkFeatures element is already inactive.
+    try {
+      if (_pageController.hasClients) {
+        _pageController.jumpToPage(_currentPage);
+      }
+    } catch (_) {}
     _pageController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final height = widget.isLandscape ? 96.0 : 210.0;
+    final crossAxis = widget.isLandscape
+        ? CrossAxisAlignment.end
+        : CrossAxisAlignment.start;
+    final textAlign =
+        widget.isLandscape ? TextAlign.right : TextAlign.left;
+
     return SizedBox(
-      height: 140,
+      height: height,
       child: PageView.builder(
         controller: _pageController,
-        itemCount: _mockArticles.length,
+        itemCount: widget.articles.length,
         itemBuilder: (context, index) {
-          final article = _mockArticles[index];
-          return Column(
-            crossAxisAlignment: widget.isLandscape
-                ? CrossAxisAlignment.end
-                : CrossAxisAlignment.start,
-            children: [
-              Text(
-                article['title']!,
-                textAlign: widget.isLandscape
-                    ? TextAlign.right
-                    : TextAlign.left,
-                style: GoogleFonts.teko(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.black,
-                ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
+          final article = widget.articles[index];
+          return MouseRegion(
+            cursor: article.url.isNotEmpty
+                ? SystemMouseCursors.click
+                : MouseCursor.defer,
+            child: GestureDetector(
+              onTap: () => _openArticle(article.url),
+              child: Column(
+                crossAxisAlignment: crossAxis,
+                children: [
+                  Text(
+                    article.title,
+                    textAlign: textAlign,
+                    style: GoogleFonts.teko(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.black,
+                      height: 1.05,
+                    ),
+                    maxLines: widget.isLandscape ? 2 : null,
+                    overflow: widget.isLandscape
+                        ? TextOverflow.ellipsis
+                        : TextOverflow.visible,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    article.snippet,
+                    textAlign: textAlign,
+                    style: GoogleFonts.archivo(
+                      fontSize: 12,
+                      color: const Color(0xFF444444),
+                    ),
+                    maxLines: widget.isLandscape ? 2 : 8,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
               ),
-              const SizedBox(height: 4),
-              Text(
-                article['snippet']!,
-                textAlign: widget.isLandscape
-                    ? TextAlign.right
-                    : TextAlign.left,
-                style: GoogleFonts.archivo(
-                  fontSize: 12,
-                  color: const Color(0xFF444444),
-                ),
-                maxLines: 4,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
+            ),
           );
         },
       ),
@@ -461,5 +493,141 @@ class _ChevronPainter extends CustomPainter {
 
 @Preview(name: 'Sidebar - Default')
 Widget previewXeneSidebar() {
-  return const Material(child: XeneSidebar());
+  return const ProviderScope(child: Material(child: XeneSidebar()));
+}
+
+class _ArticlesDock extends ConsumerWidget {
+  const _ArticlesDock({required this.isLandscape});
+
+  final bool isLandscape;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final articlesAsync = ref.watch(presetArticlesProvider);
+    final slug = ref.watch(activePresetSlugProvider);
+
+    return Align(
+      alignment: isLandscape ? Alignment.centerRight : Alignment.centerLeft,
+      child: Column(
+        crossAxisAlignment: isLandscape
+            ? CrossAxisAlignment.end
+            : CrossAxisAlignment.start,
+        children: [
+          Text(
+            'ARTICLES',
+            textAlign: isLandscape ? TextAlign.right : TextAlign.left,
+            style: const TextStyle(
+              fontFamily: 'Teko',
+              fontSize: 12,
+              color: Color(0xFF666666),
+              letterSpacing: 1.44,
+              height: 1.66,
+            ),
+          ),
+          const SizedBox(height: 4),
+          articlesAsync.when(
+            data: (articles) {
+              if (articles.isEmpty) {
+                return const SizedBox(
+                  height: 60,
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'No articles yet',
+                      style: TextStyle(
+                        fontFamily: 'Archivo',
+                        fontSize: 11,
+                        color: Color(0xFFAAAAAA),
+                      ),
+                    ),
+                  ),
+                );
+              }
+              return _ArticlesSlider(
+                key: ValueKey(slug),
+                isLandscape: isLandscape,
+                articles: articles,
+              );
+            },
+            loading: () => SizedBox(
+              height: isLandscape ? 96.0 : 260.0,
+              child: const Center(
+                child: SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 1.5,
+                    color: Color(0xFFBBBBBB),
+                  ),
+                ),
+              ),
+            ),
+            error: (_, __) => const SizedBox.shrink(),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PresetDialDock extends ConsumerWidget {
+  const _PresetDialDock({required this.isLandscape});
+
+  final bool isLandscape;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final dialAsync = ref.watch(presetDialProvider);
+
+    return Align(
+      alignment: Alignment.center,
+      child: Padding(
+        padding: const EdgeInsets.only(top: 3),
+        child: SizedBox(
+          width: 150,
+          height: 160,
+          child: dialAsync.when(
+            data: (state) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  const Text(
+                    'PRESETS',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontFamily: 'Teko',
+                      fontSize: 12,
+                      color: Color(0xFF666666),
+                      letterSpacing: 1.44,
+                      height: 1.66,
+                    ),
+                  ),
+                  const SizedBox(
+                    height: 2,
+                  ), // GAP ADJUSTMENT: Reduced gap between label and dial for better balance
+                  PresetDial(
+                    slots: state.slots,
+                    activeSlug: state.activePresetSlug,
+                    onChanged: (slot) {
+                      ref
+                          .read(presetDialProvider.notifier)
+                          .selectPreset(slot.slug);
+                    },
+                  ),
+                ],
+              );
+            },
+            loading: () => const Center(
+              child: SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+            error: (_, __) => const SizedBox.shrink(),
+          ),
+        ),
+      ),
+    );
+  }
 }

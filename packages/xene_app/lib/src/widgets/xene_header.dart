@@ -170,6 +170,14 @@ class _XeneHeaderState extends ConsumerState<XeneHeader> {
             context.go('/network');
             return;
           }
+          if (value == 'presets') {
+            context.go('/dev/presets');
+            return;
+          }
+          if (value == 'monitor') {
+            context.go('/dev/monitor');
+            return;
+          }
           if (value == 'test') {
             final seed = DateTime.now().add(Duration(days: _seedDayOffset));
             final seedStr = seed.toIso8601String().substring(0, 10);
@@ -180,6 +188,8 @@ class _XeneHeaderState extends ConsumerState<XeneHeader> {
         itemBuilder: (context) => [
           _devMenuItem('artist', 'ARTIST'),
           _devMenuItem('network', 'NETWORK'),
+          _devMenuItem('presets', 'PRESET PLAYGROUND'),
+          _devMenuItem('monitor', 'MONITOR'),
           _devMenuItem('test', 'TEST +${_seedDayOffset}D'),
         ],
         child: Padding(

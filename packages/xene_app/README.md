@@ -1,16 +1,17 @@
 # xene_app
 
-A new Flutter project.
+Flutter PWA for the Xene music discovery feed.
 
-## Getting Started
+Part of the `xene_dart` monorepo — see the [root README](../../README.md) for full architecture and setup instructions.
 
-This project is a starting point for a Flutter application.
+## Run
 
-A few resources to get you started if this is your first Flutter project:
+```bash
+flutter run -d chrome --dart-define=BACKEND_URL=http://localhost:8080
+```
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+## Build
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+```bash
+flutter build web --dart-define=BACKEND_URL=https://your-backend.run.app
+```

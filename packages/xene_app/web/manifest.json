@@ -1,11 +1,11 @@
 {
-    "name": "xene_app",
-    "short_name": "xene_app",
+    "name": "Xene",
+    "short_name": "Xene",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#ffffff",
+    "theme_color": "#ffffff",
+    "description": "Your artists. Every platform. One feed.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

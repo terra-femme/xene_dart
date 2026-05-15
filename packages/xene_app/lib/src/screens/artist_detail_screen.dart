@@ -26,12 +26,12 @@ class ArtistDetailScreen extends ConsumerWidget {
             SliverAppBar(
               expandedHeight: 250,
               pinned: true,
-              backgroundColor: Colors.black,
+              backgroundColor: Colors.white,
               flexibleSpace: FlexibleSpaceBar(
                 title: Text(
                   artist.name,
                   style: const TextStyle(
-                    color: Colors.white,
+                    color: Colors.black,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
@@ -39,14 +39,14 @@ class ArtistDetailScreen extends ConsumerWidget {
                   fit: StackFit.expand,
                   children: [
                     // Background Image (Using placeholder or artist image)
-                    Container(color: const Color(0xFF1A1A1A)),
+                    Container(color: const Color(0xFFF5F5F5)),
                     // Gradient overlay to make text readable
                     Container(
                       decoration: const BoxDecoration(
                         gradient: LinearGradient(
                           begin: Alignment.topCenter,
                           end: Alignment.bottomCenter,
-                          colors: [Colors.transparent, Colors.black],
+                          colors: [Colors.transparent, Colors.white],
                         ),
                       ),
                     ),
@@ -64,7 +64,7 @@ class ArtistDetailScreen extends ConsumerWidget {
                     const Text(
                       'CONNECT',
                       style: TextStyle(
-                        color: Colors.white54,
+                        color: Colors.black54,
                         fontSize: 10,
                         fontWeight: FontWeight.bold,
                         letterSpacing: 2,
@@ -73,20 +73,41 @@ class ArtistDetailScreen extends ConsumerWidget {
                     const SizedBox(height: 12),
                     Wrap(
                       spacing: 8,
+                      runSpacing: 6,
                       children: [
-                        if (artist.soundcloudUsername != null)
-                          const PlatformBadge(platform: 'soundcloud'),
+                        if (artist.soundcloudUrl != null)
+                          PlatformBadge(platform: 'soundcloud', url: artist.soundcloudUrl),
                         if (artist.youtubeUrl != null)
-                          const PlatformBadge(platform: 'youtube'),
-                        if (artist.beatportArtistId != null)
-                          const PlatformBadge(platform: 'beatport'),
+                          PlatformBadge(platform: 'youtube', url: artist.youtubeUrl),
+                        if (artist.spotifyUrl != null)
+                          PlatformBadge(platform: 'spotify', url: artist.spotifyUrl),
+                        if (artist.bandcampUrl != null)
+                          PlatformBadge(platform: 'bandcamp', url: artist.bandcampUrl),
+                        if (artist.beatportUrl != null)
+                          PlatformBadge(platform: 'beatport', url: artist.beatportUrl),
+                        if (artist.instagramUrl != null)
+                          PlatformBadge(platform: 'instagram', url: artist.instagramUrl),
+                        if (artist.twitterUrl != null)
+                          PlatformBadge(platform: 'twitter', url: artist.twitterUrl),
+                        if (artist.twitchUrl != null)
+                          PlatformBadge(platform: 'twitch', url: artist.twitchUrl),
+                        if (artist.websiteUrl != null)
+                          PlatformBadge(platform: 'website', url: artist.websiteUrl),
+                        // Extra links stored in edges (tiktok, patreon, gumroad, etc.)
+                        for (final edge in artist.edges.where(
+                          (e) => e['type'] == 'SC_WEB_PROFILE',
+                        ))
+                          PlatformBadge(
+                            platform: edge['targetName'] as String? ?? 'link',
+                            url: edge['sourceUrl'] as String?,
+                          ),
                       ],
                     ),
                     const SizedBox(height: 24),
                     const Text(
                       'RECENT RELEASES',
                       style: TextStyle(
-                        color: Colors.white,
+                        color: Colors.black,
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
                       ),

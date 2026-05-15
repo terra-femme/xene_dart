@@ -4,7 +4,7 @@ part 'feed_item.freezed.dart';
 part 'feed_item.g.dart';
 
 @freezed
-class FeedItem with _$FeedItem {
+abstract class FeedItem with _$FeedItem {
   const factory FeedItem({
     required String id,
     required String platform,
@@ -21,6 +21,7 @@ class FeedItem with _$FeedItem {
     String? waveformUrl,
     int? durationSeconds,
     int? trackCount,
+    @Default(false) bool isNew,
   }) = _FeedItem;
 
   factory FeedItem.fromJson(Map<String, dynamic> json) => _$FeedItemFromJson(json);
