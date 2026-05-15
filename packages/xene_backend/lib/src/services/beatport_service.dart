@@ -107,6 +107,39 @@ class BeatportService {
     return token;
   }
 
+  /// Search Beatport artists by name for the discovery identity gate.
+  /// Returns a list of candidates with id, name, and url fields.
+  Future<List<Map<String, dynamic>>> searchArtists(String name) async {
+    final token = await _getToken();
+    if (token == null) return [];
+
+    try {
+      final response = await _dio.get<Map<String, dynamic>>(
+        '/catalog/search/',
+        queryParameters: {'q': name, 'type': 'artists', 'per_page': 10},
+        options: Options(headers: {'Authorization': 'Bearer $token'}),
+      );
+      final results = (response.data?['results'] as List? ?? [])
+          .cast<Map<String, dynamic>>();
+      _logger.info('[beatport] searchArtists "$name": ${results.length} results');
+
+      return results.map((r) {
+        final id = r['id']?.toString() ?? '';
+        final slug = r['slug'] as String? ?? '';
+        return {
+          'id': id,
+          'name': r['name'] as String? ?? '',
+          'url': id.isNotEmpty && slug.isNotEmpty
+              ? 'https://www.beatport.com/artist/$slug/$id'
+              : '',
+        };
+      }).toList();
+    } catch (e) {
+      _logger.warning('[beatport] searchArtists failed for "$name": $e');
+      return [];
+    }
+  }
+
   /// Fetch releases for a label.
   /// ELI5: Checking the "New Arrivals" shelf for a specific record label.
   Future<List<FeedItem>> getLabelReleases(String labelId, {String? labelName, int limit = 20}) async {

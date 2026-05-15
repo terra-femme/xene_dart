@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/widget_previews.dart';
 
 class BottomPlayer extends StatelessWidget {
   const BottomPlayer({super.key});
@@ -13,9 +14,9 @@ class BottomPlayer extends StatelessWidget {
       ),
       child: const Center(
         child: Text(
-          'PLAYER CONTROLS', 
+          'PLAYER CONTROLS',
           style: TextStyle(
-            color: Colors.white, 
+            color: Colors.white,
             letterSpacing: 2,
             fontSize: 14,
             fontWeight: FontWeight.bold,
@@ -24,4 +25,9 @@ class BottomPlayer extends StatelessWidget {
       ),
     );
   }
+}
+
+@Preview(name: 'Bottom Player')
+Widget previewBottomPlayer() {
+  return const Material(child: BottomPlayer());
 }

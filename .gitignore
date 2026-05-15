@@ -20,3 +20,45 @@ Thumbs.db
 
 # ── Folders to ignore ───────────────────────────────
 docs/
+audit_reports/
+test/
+tools/
+supabase/
+
+# Local IDE / agent state
+.claude/
+.dart_appdata/
+.vscode/
+.idea/libraries/
+.idea/workspace.xml
+.idea/runConfigurations/main_dart.xml
+*.iml
+
+# Flutter local metadata
+.metadata
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# Local scratch/debug files
+terminal_debug.txt
+nvidia-test.json
+gen_key.dart
+WhySoLong.txt
+
+# Root-level scratch Flutter app (not part of any package)
+/lib/
+/windows/
+/assets/
+devtools_options.yaml
+
+# Generated Dart Frog server bootstrap (only the backend one is intentionally tracked)
+packages/xene_app/.dart_frog/
+
+# Session/planning docs generated during dev sessions
+ARCHIVE_FEED_EXPOSURE_PLAN.md
+PRESET_CURATION_PLAN.md
+SESSION_CHANGELOG_*.md
+
+.idea/modules.xml
+.idea/runConfigurations/
+packages/xene_app/.metadata
