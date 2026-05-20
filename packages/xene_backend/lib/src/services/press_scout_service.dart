@@ -85,10 +85,13 @@ class PressScoutService {
 
   /// Scout a batch of artists in one Gemini grounded call.
   /// Falls back to individual OpenRouter calls per artist if Gemini fails.
-  Future<void> _scoutBatch(List<Map<String, dynamic>> artists) async {
+  Future<void> _scoutBatch(
+    List<Map<String, dynamic>> artists, {
+    String? presetSlug,
+  }) async {
     final names = artists.map((a) => a['name'] as String).toList();
 
-    final prompt = _buildBatchPrompt(names);
+    final prompt = _buildBatchPrompt(names, presetSlug: presetSlug);
 
     Map<String, List<Map<String, dynamic>>>? batchResult;
 
@@ -97,22 +100,20 @@ class PressScoutService {
     }
 
     if (batchResult != null) {
-      // Save results for each artist from the batch response
       for (final artist in artists) {
         final name = artist['name'] as String;
         final artistId = artist['id'] as String;
         final articles = batchResult[name] ?? [];
-        await _saveAndUpdate(artistId, name, articles);
+        await _saveAndUpdate(artistId, name, articles, presetSlug: presetSlug);
       }
     } else {
-      // Batch failed — fall back to per-artist OpenRouter calls
       _logger.warning('[press_scout] Batch Gemini failed — falling back to OpenRouter per artist');
       for (final artist in artists) {
         final name = artist['name'] as String;
         final entityType = (artist['entity_type'] as String?) ?? 'artist';
         final artistId = artist['id'] as String;
-        final articles = await _scoutWithOpenRouter(name, entityType);
-        await _saveAndUpdate(artistId, name, articles);
+        final articles = await _scoutWithOpenRouter(name, entityType, presetSlug: presetSlug);
+        await _saveAndUpdate(artistId, name, articles, presetSlug: presetSlug);
       }
     }
   }
@@ -174,11 +175,19 @@ class PressScoutService {
     }
   }
 
-  String _buildBatchPrompt(List<String> names) {
+  String _buildBatchPrompt(List<String> names, {String? presetSlug}) {
     final artistList = names.map((n) => '"$n"').join(', ');
-    return '''For each of the following music artists, find the 3 most high-value editorial pieces (interviews, reviews, features) from the last 12 months.
+    final genreContext = presetSlug != null
+        ? 'These are all music artists from the "$presetSlug" scene. '
+        : '';
+    return '''${genreContext}For each of the following music artists, find the 3 most high-value editorial pieces (interviews, reviews, features) from the last 12 months.
 
 Artists: $artistList
+
+DISAMBIGUATION RULE (critical): You are searching for MUSIC ARTISTS only. Many of these names are ambiguous — they may share names with sports teams, scientific terms, brands, or other non-music concepts. For every article you consider:
+- Confirm the article is primarily ABOUT this person or group as a music act.
+- Reject any article where the name appears only in passing or refers to a non-music subject.
+- If you cannot find articles that are unambiguously about a music artist by this name, return an empty array for that artist.
 
 SEARCH STRATEGY:
 1. EXHAUSTIVE COVERAGE: Search across the entire spectrum of music media:
@@ -193,11 +202,58 @@ SEARCH STRATEGY:
 
 3. DIVERSITY MANDATE: Include both major outlet and small community blog coverage where available.
 
-Return a JSON object keyed by artist name. Use an empty array for any artist with no results found:
+Return a JSON object keyed by artist name. Use an empty array for any artist with no verified results:
 {
   "Artist Name": [{"title": "", "url": "", "snippet": "", "site_tier": "Mainstream/Genre-Specific/Independent"}],
   ...
 }''';
+  }
+
+  /// Scout press for all artists in a specific preset.
+  /// Skips the stale interval — when called manually the caller wants fresh
+  /// results right now, not filtered by the 60-day window.
+  Future<void> scoutArticlesForPreset(String presetSlug) async {
+    _logger.info('[press_scout] Starting preset scout for slug="$presetSlug"');
+
+    if (!rotator.hasKeys) {
+      final orKey = Platform.environment['OPENROUTER_API_KEY'];
+      if (orKey == null || orKey.isEmpty) {
+        _logger.warning('[press_scout] No LLM provider available — preset scout skipped');
+        return;
+      }
+    }
+
+    rotator.reset();
+
+    // Template preset lookup ignores userId for public presets, so 'local_user'
+    // is a safe placeholder here.
+    final artists = await db.getArtistsForPreset('local_user', presetSlug);
+    if (artists.isEmpty) {
+      _logger.warning('[press_scout] No artists found for preset "$presetSlug"');
+      return;
+    }
+
+    // No stale filter — scout all artists in the preset, capped at max run size.
+    final toScout = artists.take(_kMaxArtistsPerRun).toList();
+    _logger.info(
+      '[press_scout] Preset "$presetSlug": ${toScout.length} artists to scout — '
+      '${toScout.map((a) => a['name']).toList()}',
+    );
+
+    final batchSize = int.tryParse(
+          Platform.environment['PRESS_SCOUT_BATCH_SIZE'] ?? '',
+        ) ??
+        _kDefaultBatchSize;
+
+    for (var i = 0; i < toScout.length; i += batchSize) {
+      final end = (i + batchSize).clamp(0, toScout.length);
+      final chunk = toScout.sublist(i, end);
+      _logger.info('[press_scout] Preset batch ${i ~/ batchSize + 1}: ${chunk.map((a) => a['name']).toList()}');
+      await _scoutBatch(chunk, presetSlug: presetSlug);
+      await Future<void>.delayed(const Duration(seconds: 2));
+    }
+
+    _logger.info('[press_scout] Preset scout complete for "$presetSlug"');
   }
 
   /// Scout articles for a single artist immediately (used on artist add from routes).
@@ -268,8 +324,13 @@ Return a JSON object keyed by artist name. Use an empty array for any artist wit
     }
   }
 
-  String _buildSinglePrompt(String name) {
-    return '''Identify the musical genre of "$name" and perform a comprehensive search for recent press.
+  String _buildSinglePrompt(String name, {String? presetSlug}) {
+    final genreContext = presetSlug != null
+        ? 'This artist is part of the "$presetSlug" music scene. '
+        : '';
+    return '''You are searching for press coverage of the MUSIC ARTIST named "$name". ${genreContext}Identify their musical genre and perform a comprehensive search for recent editorial coverage.
+
+DISAMBIGUATION RULE (critical): "$name" may be an ambiguous name that refers to non-music subjects (sports, science, brands, etc.). You must only include articles that are unambiguously about this person or group as a music act. If an article merely mentions the name in a non-music context, reject it. If you cannot find articles clearly about a music artist named "$name", return an empty array.
 
 GOAL: Find the 5 most high-value editorial pieces (interviews, reviews, features) from the last 12 months.
 
@@ -292,10 +353,11 @@ Return as a JSON list: [{"title": "", "url": "", "snippet": "", "site_tier": "Ma
   Future<void> _saveAndUpdate(
     String artistId,
     String name,
-    List<Map<String, dynamic>> articles,
-  ) async {
+    List<Map<String, dynamic>> articles, {
+    String? presetSlug,
+  }) async {
     if (articles.isNotEmpty) {
-      final dbArticles = _mapArticlesToDb(artistId, articles);
+      final dbArticles = _mapArticlesToDb(artistId, name, articles, presetSlug: presetSlug);
       if (await db.saveArtistArticles(dbArticles)) {
         await db.updateLastPressScout(artistId);
         _logger.info('[press_scout] Saved ${dbArticles.length} articles for $name');
@@ -309,8 +371,9 @@ Return as a JSON list: [{"title": "", "url": "", "snippet": "", "site_tier": "Ma
 
   Future<List<Map<String, dynamic>>> _scoutWithOpenRouter(
     String name,
-    String entityType,
-  ) async {
+    String entityType, {
+    String? presetSlug,
+  }) async {
     final apiKey = Platform.environment['OPENROUTER_API_KEY'];
     if (apiKey == null || apiKey.isEmpty) {
       print('[XENE OPENROUTER] *** PRESS SCOUT FALLBACK SKIPPED — OPENROUTER_API_KEY not set ***');
@@ -322,7 +385,7 @@ Return as a JSON list: [{"title": "", "url": "", "snippet": "", "site_tier": "Ma
     print('[XENE OPENROUTER] ▶▶▶ Press scout OpenRouter fallback for "$name"');
     _logger.info('[press_scout._scoutWithOpenRouter] ▶ calling OpenRouter for "$name" [$entityType]');
 
-    final prompt = _buildSinglePrompt(name);
+    final prompt = _buildSinglePrompt(name, presetSlug: presetSlug);
 
     try {
       final dio = Dio();
@@ -389,8 +452,10 @@ Return as a JSON list: [{"title": "", "url": "", "snippet": "", "site_tier": "Ma
 
   List<Map<String, dynamic>> _mapArticlesToDb(
     String artistId,
-    List<Map<String, dynamic>> articles,
-  ) {
+    String artistName,
+    List<Map<String, dynamic>> articles, {
+    String? presetSlug,
+  }) {
     return articles.map((art) {
       final rawDate = art['published_date'] ?? art['Date'];
       final pubDate = rawDate?.toString().trim().toLowerCase();
@@ -400,11 +465,13 @@ Return as a JSON list: [{"title": "", "url": "", "snippet": "", "site_tier": "Ma
               : null;
       return {
         'artist_id': artistId,
+        'artist_name': artistName,
         'title': art['title'] ?? art['Title'] ?? 'Untitled',
         'url': art['url'] ?? art['URL'] ?? '#',
         'snippet': art['snippet'] ?? art['Snippet'] ?? 'No snippet available',
         'source': art['source'] ?? art['Source'] ?? art['site_tier'] ?? art['Site_tier'],
         'published_at': pubDateVal,
+        if (presetSlug != null) 'preset_slug': presetSlug,
       };
     }).toList();
   }

@@ -67,7 +67,9 @@ Future<Response> onRequest(RequestContext context) async {
     'full_archive=$fullArchive',
   );
   if (platformFilter != null) {
-    _logger.info('[feed.merged] platformFilter active: ${platformFilter.join(',')}');
+    _logger.info(
+      '[feed.merged] platformFilter active: ${platformFilter.join(',')}',
+    );
   }
 
   final db = context.read<DatabaseService>();
@@ -80,7 +82,25 @@ Future<Response> onRequest(RequestContext context) async {
   // Returns a flat newest-first list of up to 50 matching DB rows.
   if (searchQuery != null && searchQuery.isNotEmpty) {
     final searchLimit = int.tryParse(params['limit'] ?? '50') ?? 50;
-    final rows = await db.searchFeedItems(searchQuery, limit: searchLimit);
+    Set<String>? artistNames;
+    if (presetSlug != null && presetSlug.trim().isNotEmpty) {
+      final artists = await db.getArtistsForPreset(userId, presetSlug.trim());
+      artistNames = artists
+          .map((artist) => artist['name'] as String?)
+          .whereType<String>()
+          .toSet();
+      if (artistNames.isEmpty) {
+        _logger.info(
+          '[feed.merged] search q="$searchQuery" preset=$presetSlug has no source artists',
+        );
+        return Response.json(body: <dynamic>[]);
+      }
+    }
+    final rows = await db.searchFeedItems(
+      searchQuery,
+      limit: searchLimit,
+      artistNames: artistNames,
+    );
     final items = rows.map(feedItemFromRow).whereType<FeedItem>().toList();
     _logger.info(
       '[feed.merged] search q="$searchQuery" returning ${items.length} items',
@@ -108,7 +128,8 @@ Future<Response> onRequest(RequestContext context) async {
     for (final artist in artists) {
       final name = artist['name'] as String? ?? 'Unknown';
 
-      final scIdentifier = (artist['soundcloud_url'] as String? ?? '').isNotEmpty
+      final scIdentifier =
+          (artist['soundcloud_url'] as String? ?? '').isNotEmpty
           ? artist['soundcloud_url'] as String
           : artist['soundcloud_username'] as String?;
       if (scIdentifier != null &&
@@ -116,7 +137,10 @@ Future<Response> onRequest(RequestContext context) async {
           (platformFilter == null || platformFilter.contains('soundcloud'))) {
         await db.deleteSystemCache('last_polled:soundcloud:$name');
         await db.deleteSystemCache('feed_empty_window:soundcloud:$name:31d');
-        _logger.info('[feed.merged] force_refresh: cleared SC cache markers for $name');
+        await db.deleteSystemCache('feed_refresh_lock:soundcloud:$name');
+        _logger.info(
+          '[feed.merged] force_refresh: cleared SC cache markers for $name',
+        );
       }
 
       final ytId = (artist['youtube_channel_id'] as String? ?? '').isNotEmpty
@@ -127,16 +151,24 @@ Future<Response> onRequest(RequestContext context) async {
           (platformFilter == null || platformFilter.contains('youtube'))) {
         await db.deleteSystemCache('last_polled:youtube:$name');
         await db.deleteSystemCache('feed_empty_window:youtube:$name:31d');
-        _logger.info('[feed.merged] force_refresh: cleared YT cache markers for $name');
+        await db.deleteSystemCache('feed_refresh_lock:youtube:$name');
+        _logger.info(
+          '[feed.merged] force_refresh: cleared YT cache markers for $name',
+        );
       }
 
       final bcUrl = artist['bandcamp_url'] as String?;
       if (bcUrl != null &&
           bcUrl.isNotEmpty &&
           (platformFilter == null || platformFilter.contains('bandcamp'))) {
-        await db.deleteSystemCache('feed_empty_window:bandcamp:$name:${_bandcampCacheDays}d');
+        await db.deleteSystemCache(
+          'feed_empty_window:bandcamp:$name:${_bandcampCacheDays}d',
+        );
         await db.deleteSystemCache('last_polled:bandcamp:$name');
-        _logger.info('[feed.merged] force_refresh: cleared BC cache markers for $name');
+        await db.deleteSystemCache('feed_refresh_lock:bandcamp:$name');
+        _logger.info(
+          '[feed.merged] force_refresh: cleared BC cache markers for $name',
+        );
       }
     }
   }
@@ -176,6 +208,7 @@ Future<Response> onRequest(RequestContext context) async {
             name,
             _platformTtls['soundcloud']!,
             () => scService.getTracks(scIdentifier, name),
+            backgroundOnMiss: true,
           ),
         );
       } else {
@@ -194,12 +227,10 @@ Future<Response> onRequest(RequestContext context) async {
             'bandcamp',
             name,
             _platformTtls['bandcamp']!,
-            () => bcService.getFeed(
-              bcUrl,
-              name,
-              bypassMemoryCache: forceRefresh,
-            ),
+            () =>
+                bcService.getFeed(bcUrl, name, bypassMemoryCache: forceRefresh),
             cacheDays: _bandcampCacheDays,
+            backgroundOnMiss: true,
           ),
         );
       } else {
@@ -225,6 +256,7 @@ Future<Response> onRequest(RequestContext context) async {
             name,
             _platformTtls['youtube']!,
             () => ytService.getVideos(ytId, name),
+            backgroundOnMiss: true,
           ),
         );
       } else {

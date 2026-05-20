@@ -5,6 +5,13 @@ import 'package:logging/logging.dart';
 
 final _logger = Logger('Database');
 
+const _optionalFeedItemColumns = {
+  'is_repost',
+  'reposted_by_name',
+  'reposted_at',
+  'feed_source_path',
+};
+
 class DatabaseService {
   SupabaseClient? _client;
 
@@ -59,6 +66,7 @@ class DatabaseService {
   Future<List<Map<String, dynamic>>> searchFeedItems(
     String query, {
     int limit = 50,
+    Set<String>? artistNames,
   }) async {
     try {
       // Strip PostgREST .or() delimiter chars before interpolating into the
@@ -72,11 +80,20 @@ class DatabaseService {
           .replaceAll(')', ' ')
           .trim();
       final q = '%$safe%';
-      _logger.info('[db] searchFeedItems query="$query" safe="$safe" limit=$limit');
-      final response = await client
+      _logger.info(
+        '[db] searchFeedItems query="$query" safe="$safe" limit=$limit '
+        'artistNames=${artistNames?.length ?? 'all'}',
+      );
+      var request = client
           .from('feed_items')
           .select()
-          .or('title.ilike.$q,body.ilike.$q,artist_name.ilike.$q')
+          .or('title.ilike.$q,body.ilike.$q,artist_name.ilike.$q');
+
+      if (artistNames != null) {
+        request = request.inFilter('artist_name', artistNames.toList());
+      }
+
+      final response = await request
           .order('published_at', ascending: false)
           .limit(limit);
       final rows = List<Map<String, dynamic>>.from(response);
@@ -90,19 +107,20 @@ class DatabaseService {
 
   Future<void> saveFeedItems(List<Map<String, dynamic>> items) async {
     if (items.isEmpty) return;
+    final seen = <String>{};
+    final deduped = items.where((item) {
+      final key = '${item['platform']}:${item['internal_id']}';
+      return seen.add(key);
+    }).toList();
+    if (deduped.length < items.length) {
+      _logger.warning(
+        '[db] saveFeedItems: dropped ${items.length - deduped.length} duplicate(s) before upsert',
+      );
+    }
+
     try {
       // Dedup within the batch — Postgres 21000 if the same conflict key
       // appears twice in one upsert (e.g. SC reposts returning duplicate internal_id).
-      final seen = <String>{};
-      final deduped = items.where((item) {
-        final key = '${item['platform']}:${item['internal_id']}';
-        return seen.add(key);
-      }).toList();
-      if (deduped.length < items.length) {
-        _logger.warning(
-          '[db] saveFeedItems: dropped ${items.length - deduped.length} duplicate(s) before upsert',
-        );
-      }
       await client
           .from('feed_items')
           .upsert(deduped, onConflict: 'platform,internal_id');
@@ -111,7 +129,35 @@ class DatabaseService {
       // fetch. The caller still receives the fetched items, last_polled is still
       // stamped, and the 6h cache window prevents an infinite retry hammer loop.
       // The save will be retried on the next TTL expiry.
+      if (await _trySaveWithoutOptionalFeedColumns(deduped)) return;
       _logger.severe('Error saving feed items (non-fatal): $e');
+    }
+  }
+
+  Future<bool> _trySaveWithoutOptionalFeedColumns(
+    List<Map<String, dynamic>> items,
+  ) async {
+    if (!items.any((item) => _optionalFeedItemColumns.any(item.containsKey))) {
+      return false;
+    }
+    try {
+      final compatible = items
+          .map(
+            (item) => Map<String, dynamic>.from(item)
+              ..removeWhere(
+                (key, value) => _optionalFeedItemColumns.contains(key),
+              ),
+          )
+          .toList();
+      await client
+          .from('feed_items')
+          .upsert(compatible, onConflict: 'platform,internal_id');
+      _logger.warning(
+        'Saved feed items without repost metadata. Add optional feed_items columns to persist repost attribution: $_optionalFeedItemColumns',
+      );
+      return true;
+    } catch (_) {
+      return false;
     }
   }
 
@@ -268,6 +314,170 @@ class DatabaseService {
       _logger.severe('Error fetching preset template $slug: $e');
       return null;
     }
+  }
+
+  /// Resolve publication pipes for a preset using deterministic matching only.
+  ///
+  /// Matching order:
+  /// 1. Direct curated preset_publications rows.
+  /// 2. Artist genre_tags overlap with press_publications.genres.
+  /// 3. Preset slug tokens overlap with press_publications.genres.
+  ///
+  /// LLM fallback intentionally lives outside this method so it cannot be used
+  /// accidentally in the normal feed path.
+  Future<List<Map<String, dynamic>>> getPublicationMatchesForPreset(
+    String userId,
+    String presetSlug, {
+    int limit = 8,
+  }) async {
+    final slug = presetSlug.trim().isEmpty ? 'custom' : presetSlug.trim();
+
+    final curated = await _getCuratedPresetPublications(slug, limit: limit);
+    if (curated.isNotEmpty) return curated;
+
+    final artists = await getArtistsForPreset(userId, slug);
+    final artistGenreKeys = <String>{};
+    for (final artist in artists) {
+      final tags = artist['genre_tags'] as List?;
+      if (tags == null) continue;
+      for (final tag in tags) {
+        artistGenreKeys.addAll(_tagKeys(tag.toString()));
+      }
+    }
+
+    if (artistGenreKeys.isNotEmpty) {
+      final byArtistTags = await _scorePublicationsByTags(
+        artistGenreKeys,
+        matchMethod: 'tag_overlap',
+        contextSlug: slug,
+        limit: limit,
+      );
+      if (byArtistTags.isNotEmpty) return byArtistTags;
+    }
+
+    final presetKeys = _tagKeys(slug.replaceAll('-', ' '));
+    return _scorePublicationsByTags(
+      presetKeys,
+      matchMethod: 'preset_genre',
+      contextSlug: slug,
+      limit: limit,
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> _getCuratedPresetPublications(
+    String presetSlug, {
+    required int limit,
+  }) async {
+    try {
+      final response = await client
+          .from('preset_publications')
+          .select('priority, reason, press_publications(*)')
+          .eq('preset_slug', presetSlug)
+          .order('priority')
+          .limit(limit);
+
+      final rows = List<Map<String, dynamic>>.from(response);
+      final matches = <Map<String, dynamic>>[];
+      for (final row in rows) {
+        final publication = row['press_publications'];
+        if (publication is! Map) continue;
+        final pub = Map<String, dynamic>.from(publication);
+        if (pub['enabled'] == false) continue;
+        matches.add({
+          ...pub,
+          'match_method': 'preset_curated',
+          'context_slug': presetSlug,
+          'confidence': 1.0,
+          'reason': row['reason'],
+          'priority': row['priority'],
+        });
+      }
+      return matches;
+    } catch (e) {
+      _logger.warning(
+        '[db] getCuratedPresetPublications failed for $presetSlug: $e',
+      );
+      return [];
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _scorePublicationsByTags(
+    Set<String> targetKeys, {
+    required String matchMethod,
+    required String contextSlug,
+    required int limit,
+  }) async {
+    if (targetKeys.isEmpty) return [];
+    try {
+      final response = await client
+          .from('press_publications')
+          .select()
+          .eq('enabled', true);
+      final publications = List<Map<String, dynamic>>.from(response);
+
+      final scored = <Map<String, dynamic>>[];
+      for (final pub in publications) {
+        final rawGenres = pub['genres'] as List? ?? const [];
+        final pubKeys = <String>{};
+        for (final genre in rawGenres) {
+          pubKeys.addAll(_tagKeys(genre.toString()));
+        }
+        final overlap = targetKeys.intersection(pubKeys);
+        if (overlap.isEmpty) continue;
+
+        final confidence = overlap.length / pubKeys.length.clamp(1, 99);
+        scored.add({
+          ...pub,
+          'match_method': matchMethod,
+          'context_slug': contextSlug,
+          'confidence': confidence.clamp(0.0, 1.0),
+          'reason': 'Matched tags: ${overlap.toList()..sort()}',
+        });
+      }
+
+      scored.sort((a, b) {
+        final byConfidence = (b['confidence'] as num).compareTo(
+          a['confidence'] as num,
+        );
+        if (byConfidence != 0) return byConfidence;
+        final byTier = (a['tier'] as num? ?? 2).compareTo(
+          b['tier'] as num? ?? 2,
+        );
+        if (byTier != 0) return byTier;
+        return (a['name'] as String? ?? '').compareTo(
+          b['name'] as String? ?? '',
+        );
+      });
+
+      return scored.take(limit).toList();
+    } catch (e) {
+      _logger.warning('[db] scorePublicationsByTags failed: $e');
+      return [];
+    }
+  }
+
+  Set<String> _tagKeys(String value) {
+    final normalised = _searchKey(value);
+    if (normalised.isEmpty) return {};
+
+    final keys = <String>{normalised};
+    if (normalised.contains('drum') && normalised.contains('bass')) {
+      keys.add('dnb');
+    }
+    if (normalised.contains('dnb')) keys.add('dnb');
+    if (normalised.contains('liquid')) keys.add('liquid');
+    if (normalised.contains('garage') || normalised.contains('ukg')) {
+      keys.add('ukg');
+    }
+    if (normalised.contains('randb') || normalised == 'rnb') {
+      keys.add('rnb');
+    }
+    if (normalised.contains('hiphop')) keys.add('hiphop');
+    return keys;
+  }
+
+  String _searchKey(String value) {
+    return value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
   }
 
   Future<List<Map<String, dynamic>>> getPresetTemplateSourcesForAdmin(
@@ -641,22 +851,64 @@ class DatabaseService {
         .toList();
 
     final resolved = <Map<String, dynamic>>[];
+    final artistRowsById = <String, Map<String, dynamic>>{};
     if (artistIds.isNotEmpty) {
       try {
         final artistRows = await client
             .from('artists')
             .select()
             .inFilter('id', artistIds);
-        resolved.addAll(List<Map<String, dynamic>>.from(artistRows));
+        for (final artistRow in List<Map<String, dynamic>>.from(artistRows)) {
+          final id = artistRow['id'] as String?;
+          if (id != null) artistRowsById[id] = artistRow;
+        }
       } catch (e) {
         _logger.severe('Error resolving preset artist ids: $e');
       }
+    }
+
+    for (final row in rows) {
+      final artistId = row['artist_id'] as String?;
+      if (artistId == null) continue;
+
+      final artistRow = artistRowsById[artistId];
+      if (artistRow == null) continue;
+      resolved.add(_mergePresetSourceWithArtist(row, artistRow));
     }
 
     final fallbackRows = rows.where((row) => row['artist_id'] == null).toList();
     resolved.addAll(_presetSourcesToArtistRows(fallbackRows));
     resolved.shuffle(Random());
     return resolved;
+  }
+
+  Map<String, dynamic> _mergePresetSourceWithArtist(
+    Map<String, dynamic> source,
+    Map<String, dynamic> artist,
+  ) {
+    final merged = Map<String, dynamic>.from(artist);
+
+    void overrideIfPresent(String key) {
+      final value = source[key];
+      if (value is String && value.trim().isNotEmpty) {
+        merged[key] = value.trim();
+      } else if (value != null && value is! String) {
+        merged[key] = value;
+      }
+    }
+
+    final displayName = source['display_name'];
+    if (displayName is String && displayName.trim().isNotEmpty) {
+      merged['name'] = displayName.trim();
+    }
+
+    overrideIfPresent('soundcloud_username');
+    overrideIfPresent('soundcloud_url');
+    overrideIfPresent('bandcamp_url');
+    overrideIfPresent('youtube_channel_id');
+    overrideIfPresent('youtube_url');
+
+    return merged;
   }
 
   /// Retrieve a specific artist by ID.
@@ -768,6 +1020,77 @@ class DatabaseService {
           .maybeSingle();
     } catch (e) {
       _logger.severe('Error fetching artist by SC username $username: $e');
+      return null;
+    }
+  }
+
+  /// Merge new genre tags into an artist's genre_tags array (additive, deduped).
+  /// Matches by soundcloudUsername or bandcampUrl — whichever is provided.
+  /// Non-fatal: a failure here must never abort a feed fetch.
+  Future<void> updateArtistGenreTags(
+    List<String> tags, {
+    String? soundcloudUsername,
+    String? bandcampUrl,
+  }) async {
+    if (tags.isEmpty) return;
+    try {
+      Map<String, dynamic>? row;
+      if (soundcloudUsername != null) {
+        row = await getArtistBySoundCloudUsername(soundcloudUsername);
+      } else if (bandcampUrl != null) {
+        final normalised = bandcampUrl.trim().replaceAll(RegExp(r'/$'), '');
+        row = await client
+            .from('artists')
+            .select()
+            .ilike('bandcamp_url', normalised)
+            .maybeSingle();
+      }
+      if (row == null) {
+        _logger.fine(
+          '[db] updateArtistGenreTags: no artist found '
+          '(sc=$soundcloudUsername bc=$bandcampUrl) — skipping',
+        );
+        return;
+      }
+      final existingRaw = row['genre_tags'] as List?;
+      final existing = existingRaw?.cast<String>() ?? <String>[];
+      final cleaned = tags
+          .map((t) => t.trim().toLowerCase())
+          .where((t) => t.isNotEmpty)
+          .toSet();
+      final merged = {...existing, ...cleaned}.toList()..sort();
+      await client
+          .from('artists')
+          .update({'genre_tags': merged})
+          .eq('id', row['id'] as String);
+      _logger.info(
+        '[db] updateArtistGenreTags: artist=${row['name']} '
+        '→ ${merged.length} tags: $merged',
+      );
+    } catch (e) {
+      _logger.warning('[db] updateArtistGenreTags failed (non-fatal): $e');
+    }
+  }
+
+  /// Partial-update a preset_template_sources row directly.
+  /// Used when the source has no linked artist_id.
+  Future<Map<String, dynamic>?> updatePresetTemplateSource(
+    String sourceId,
+    Map<String, dynamic> data,
+  ) async {
+    try {
+      final response = await client
+          .from('preset_template_sources')
+          .update(data)
+          .eq('id', sourceId)
+          .select()
+          .maybeSingle();
+      _logger.info(
+        '[db] updatePresetTemplateSource: $sourceId fields=${data.keys.toList()}',
+      );
+      return response;
+    } catch (e) {
+      _logger.severe('[db] updatePresetTemplateSource error for $sourceId: $e');
       return null;
     }
   }
@@ -1196,6 +1519,74 @@ class DatabaseService {
     } catch (e) {
       _logger.severe('Error writing system_cache for $key: $e');
       return false;
+    }
+  }
+
+  /// Try to claim a short-lived lease represented by a system_cache row.
+  ///
+  /// Returns an owner token when this process claimed the lease, or null when a
+  /// non-expired lease already exists. The insert relies on system_cache.key
+  /// being unique, which is already required by the upsert-based cache helpers.
+  Future<String?> tryClaimSystemCacheLease(
+    String key, {
+    required Duration ttl,
+    Map<String, dynamic> metadata = const {},
+  }) async {
+    final now = DateTime.now().toUtc();
+    final nowIso = now.toIso8601String();
+    try {
+      final existing = await client
+          .from('system_cache')
+          .select('value, expires_at')
+          .eq('key', key)
+          .maybeSingle();
+
+      if (existing != null) {
+        final expiresAtRaw = existing['expires_at'] as String?;
+        final expiresAt = expiresAtRaw == null
+            ? null
+            : DateTime.tryParse(expiresAtRaw)?.toUtc();
+        if (expiresAt != null && expiresAt.isAfter(now)) {
+          return null;
+        }
+
+        // Clear expired or malformed leases before trying to claim.
+        await client.from('system_cache').delete().eq('key', key);
+      }
+
+      final owner =
+          '${now.microsecondsSinceEpoch}-${Random().nextInt(0x7fffffff)}';
+      await client.from('system_cache').insert({
+        'key': key,
+        'value': {
+          'owner': owner,
+          'claimed_at': nowIso,
+          ...metadata,
+        },
+        'expires_at': now.add(ttl).toIso8601String(),
+        'updated_at': nowIso,
+      });
+      return owner;
+    } catch (e) {
+      // Most commonly a unique-key race: another process claimed first.
+      _logger.fine('System cache lease not claimed for $key: $e');
+      return null;
+    }
+  }
+
+  /// Release a lease only if it is still owned by the given owner token.
+  Future<void> releaseSystemCacheLease(String key, String owner) async {
+    try {
+      final existing = await client
+          .from('system_cache')
+          .select('value')
+          .eq('key', key)
+          .maybeSingle();
+      final value = existing?['value'] as Map<String, dynamic>?;
+      if (value?['owner'] != owner) return;
+      await client.from('system_cache').delete().eq('key', key);
+    } catch (e) {
+      _logger.fine('Error releasing system_cache lease for $key: $e');
     }
   }
 

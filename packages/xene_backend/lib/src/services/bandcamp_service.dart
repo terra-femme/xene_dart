@@ -115,6 +115,8 @@ class BandcampService {
   static final _embeddedPlayerSrcRe = RegExp(
     r'<iframe[^>]+src="(https://bandcamp\.com/EmbeddedPlayer/[^"]+)"',
   );
+  // Genre tag extraction — matches <a class="tag">drum and bass</a>
+  static final _bcTagRe = RegExp(r'<a[^>]+class="tag"[^>]*>([^<]+)<\/a>');
 
   final _dio = Dio(
     BaseOptions(
@@ -185,11 +187,13 @@ class BandcampService {
     List<FeedItem> scraperItems = [];
     List<FeedItem> rssItems = [];
     Object? transientFailure;
+    // Collects genre tags from <a class="tag"> across all fetched release pages.
+    final genreTagSink = <String>{};
 
     await Future.wait([
       () async {
         try {
-          scraperItems = await _scrapeMusicPage(base, artistName, auditSink: auditSink);
+          scraperItems = await _scrapeMusicPage(base, artistName, auditSink: auditSink, genreTagSink: genreTagSink);
         } catch (e) {
           if (_isTransientBandcampError(e)) transientFailure ??= e;
           _logger.warning(
@@ -244,6 +248,19 @@ class BandcampService {
           .toList();
       await _db.saveFeedItems(dbItems);
 
+      // Persist genre tags collected from release page HTML (non-fatal).
+      if (genreTagSink.isNotEmpty) {
+        _logger.info('[bandcamp] Genre tags for $artistName: $genreTagSink');
+        await _db
+            .updateArtistGenreTags(
+              genreTagSink.toList(),
+              bandcampUrl: base,
+            )
+            .catchError((Object e) {
+          _logger.warning('[bandcamp] Genre tags update skipped for $artistName: $e');
+        });
+      }
+
       _feedCache[base] = _BcCacheEntry(items, DateTime.now().toUtc());
       _logger.info(
         '[bandcamp] Saved ${items.length} items for $artistName + wrote cache',
@@ -269,6 +286,7 @@ class BandcampService {
     String base,
     String artistName, {
     List<Map<String, dynamic>>? auditSink,
+    Set<String>? genreTagSink,
   }) async {
     final musicUrl = '$base/music';
     _logger.info('[bandcamp] Scraping music page: $musicUrl');
@@ -297,7 +315,7 @@ class BandcampService {
     // that aren't yet surfaced in data-client-items (CDN lag / brand-new releases).
     List<FeedItem> gridItems = [];
     try {
-      gridItems = await _scrapeGridHtml(html, base, artistName, auditSink: auditSink);
+      gridItems = await _scrapeGridHtml(html, base, artistName, auditSink: auditSink, genreTagSink: genreTagSink);
     } catch (e) {
       if (jsonItems.isEmpty || !_isTransientBandcampError(e)) rethrow;
       _logger.warning(
@@ -317,6 +335,7 @@ class BandcampService {
         artistName,
         alreadyProcessed: jsonItems,
         auditSink: auditSink,
+        genreTagSink: genreTagSink,
       );
     } catch (e) {
       _logger.warning(
@@ -352,6 +371,7 @@ class BandcampService {
     int skipCount = 40,
     int maxOverflow = 40,
     List<Map<String, dynamic>>? auditSink,
+    Set<String>? genreTagSink,
   }) async {
     final match = _clientItemsRe.firstMatch(html);
     if (match == null) return [];
@@ -405,7 +425,7 @@ class BandcampService {
     for (var i = 0; i < hrefs.length; i += 2) {
       final batch = hrefs.sublist(i, (i + 2).clamp(0, hrefs.length));
       final results = await Future.wait(
-        batch.map((url) => _fetchReleasePageDetail(url, artistName, path: 'overflow', auditSink: auditSink)),
+        batch.map((url) => _fetchReleasePageDetail(url, artistName, path: 'overflow', auditSink: auditSink, genreTagSink: genreTagSink)),
         eagerError: false,
       );
       for (final item in results) {
@@ -498,6 +518,7 @@ class BandcampService {
     String base,
     String artistName, {
     List<Map<String, dynamic>>? auditSink,
+    Set<String>? genreTagSink,
   }) async {
     final gridMatch = _musicGridRe.firstMatch(html);
     if (gridMatch == null) {
@@ -523,7 +544,7 @@ class BandcampService {
       final results = await Future.wait(
         batch.map((href) {
           final url = href.startsWith('http') ? href : '$base$href';
-          return _fetchReleasePageDetail(url, artistName, path: 'grid', auditSink: auditSink);
+          return _fetchReleasePageDetail(url, artistName, path: 'grid', auditSink: auditSink, genreTagSink: genreTagSink);
         }),
         eagerError: false,
       );
@@ -548,6 +569,7 @@ class BandcampService {
     String artistName, {
     String path = 'grid',
     List<Map<String, dynamic>>? auditSink,
+    Set<String>? genreTagSink,
   }) async {
     try {
       _logger.info('[bandcamp] Grid: fetching release page $url');
@@ -567,6 +589,14 @@ class BandcampService {
         return null;
       }
       final html = resp.data!;
+
+      // Extract <a class="tag"> elements for genre signal collection (Milestone 1).
+      if (genreTagSink != null) {
+        for (final m in _bcTagRe.allMatches(html)) {
+          final tag = m.group(1)?.trim().toLowerCase();
+          if (tag != null && tag.isNotEmpty) genreTagSink.add(tag);
+        }
+      }
 
       String? title;
       String? displayArtist;

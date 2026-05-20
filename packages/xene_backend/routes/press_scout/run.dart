@@ -13,12 +13,27 @@ Future<Response> onRequest(RequestContext context) async {
     return Response(statusCode: 405);
   }
 
-  _logger.info('[press_scout/run] Manual scout triggered');
-
   final scout = context.read<PressScoutService>();
+  final presetId = context.request.uri.queryParameters['preset_id']?.trim();
 
-  // Fire and forget — don't block the HTTP response.
-  // The scout can take several minutes for 10 artists.
+  // Fire and forget — scout can take several minutes for 10 artists.
+  if (presetId != null && presetId.isNotEmpty) {
+    _logger.info('[press_scout/run] Manual preset scout triggered for "$presetId"');
+    unawaited(scout.scoutArticlesForPreset(presetId).then((_) {
+      _logger.info('[press_scout/run] Preset scout completed for "$presetId"');
+    }).catchError((Object e) {
+      _logger.severe('[press_scout/run] Preset scout failed for "$presetId": $e');
+    }));
+    return Response.json(
+      body: {
+        'status': 'started',
+        'preset': presetId,
+        'message': 'Press scout running for preset "$presetId" — check server logs',
+      },
+    );
+  }
+
+  _logger.info('[press_scout/run] Manual full scout triggered');
   unawaited(scout.scoutArticlesForActiveArtists().then((_) {
     _logger.info('[press_scout/run] Manual scout completed');
   }).catchError((Object e) {

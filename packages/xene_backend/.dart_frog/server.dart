@@ -9,6 +9,7 @@ import 'package:dart_frog/dart_frog.dart';
 import '../routes/monitor.dart' as monitor;
 import '../routes/twitch/live.dart' as twitch_live;
 import '../routes/soundcloud/stream/[id].dart' as soundcloud_stream_$id;
+import '../routes/publications/matches.dart' as publications_matches;
 import '../routes/proxy/image.dart' as proxy_image;
 import '../routes/press_scout/run.dart' as press_scout_run;
 import '../routes/presets/index.dart' as presets_index;
@@ -57,6 +58,7 @@ Handler buildRootHandler() {
     ..mount('/', (context) => buildHandler()(context))
     ..mount('/twitch', (context) => buildTwitchHandler()(context))
     ..mount('/soundcloud/stream', (context) => buildSoundcloudStreamHandler()(context))
+    ..mount('/publications', (context) => buildPublicationsHandler()(context))
     ..mount('/proxy', (context) => buildProxyHandler()(context))
     ..mount('/press_scout', (context) => buildPressScoutHandler()(context))
     ..mount('/presets', (context) => buildPresetsHandler()(context))
@@ -92,6 +94,13 @@ Handler buildSoundcloudStreamHandler() {
   final pipeline = const Pipeline();
   final router = Router()
     ..all('/<id>', (context,id,) => soundcloud_stream_$id.onRequest(context,id,));
+  return pipeline.addHandler(router);
+}
+
+Handler buildPublicationsHandler() {
+  final pipeline = const Pipeline();
+  final router = Router()
+    ..all('/matches', (context) => publications_matches.onRequest(context,));
   return pipeline.addHandler(router);
 }
 
