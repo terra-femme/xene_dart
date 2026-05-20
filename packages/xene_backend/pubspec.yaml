@@ -14,7 +14,7 @@ dependencies:
   dio_cookie_manager: ^3.1.1
   xene_domain:
     path: ../xene_domain
-  cron: ^0.5.1
+  cron: ^0.6.2
   logging: ^1.2.0
   xml: ^6.5.0
   encrypt: ^5.0.3
