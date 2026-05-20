@@ -5,6 +5,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:device_preview_plus/device_preview_plus.dart';
 import 'package:flutter/foundation.dart';
 
+import 'package:xene_app/src/layout/xene_layout_metrics.dart';
+import 'package:xene_app/src/layout/xene_responsive_debug.dart';
 import 'package:xene_app/src/screens/feed_screen.dart';
 import 'package:xene_app/src/screens/artists_screen.dart';
 import 'package:xene_app/src/screens/network_screen.dart';
@@ -14,7 +16,6 @@ import 'package:xene_app/src/widgets/xene_header.dart';
 import 'package:xene_app/src/widgets/xene_sidebar.dart';
 import 'package:xene_app/src/widgets/xene_draggable_sheet.dart';
 import 'package:xene_app/src/widgets/logo_pip_player.dart';
-import 'package:xene_app/src/providers/app_state_provider.dart';
 import 'package:xene_app/src/sandbox/sandbox_preview.dart';
 import 'package:xene_app/src/widgets/loading_overlay.dart';
 
@@ -23,10 +24,7 @@ Future<void> main() async {
 
   // Await font loading so the first frame always renders in the correct fonts.
   if (kIsWeb) {
-    await GoogleFonts.pendingFonts([
-      GoogleFonts.archivo(),
-      GoogleFonts.teko(),
-    ]);
+    await GoogleFonts.pendingFonts([GoogleFonts.archivo(), GoogleFonts.teko()]);
   }
 
   runApp(
@@ -113,73 +111,73 @@ class _InnerPageLayout extends StatelessWidget {
   }
 }
 
-class PageLayout extends ConsumerWidget {
+class PageLayout extends StatelessWidget {
   const PageLayout({super.key, required this.child});
   final Widget child;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final double topOffset = MediaQuery.of(context).padding.top + 56;
-    final phase = ref.watch(appRevealProvider);
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final mediaQuery = MediaQuery.of(context);
+        final metrics = XeneLayoutMetrics.fromConstraints(
+          constraints: constraints,
+          safePadding: mediaQuery.padding,
+          viewInsets: mediaQuery.viewInsets,
+          textScaleFactor: mediaQuery.textScaler.scale(1),
+        );
+        final double topOffset = metrics.headerHeight;
 
-    const revealDuration = Duration(milliseconds: 450);
+        XeneResponsiveDebug.mediaQuery('PageLayout', mediaQuery);
+        XeneResponsiveDebug.constraints('PageLayout', constraints);
+        XeneResponsiveDebug.values('PageLayout.metrics', metrics.toDebugMap());
 
-    return Scaffold(
-      backgroundColor: Colors.white,
-      body: Stack(
-        children: [
-          // 1. Sidebar & Content Area
-          Column(
-            children: [
-              SizedBox(height: topOffset),
-              Expanded(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+        return XeneLayoutScope(
+          metrics: metrics,
+          child: Scaffold(
+            backgroundColor: Colors.white,
+            body: Stack(
+              children: [
+                // 1. Sidebar & Content Area — always at full opacity.
+                // The LoadingOverlay covers everything until reveal is complete.
+                Column(
                   children: [
-                    AnimatedOpacity(
-                      opacity: phase >= 2 ? 1.0 : 0.0,
-                      duration: revealDuration,
-                      child: const XeneSidebar(),
-                    ),
+                    SizedBox(height: topOffset),
                     Expanded(
-                      child: AnimatedOpacity(
-                        opacity: phase >= 3 ? 1.0 : 0.0,
-                        duration: revealDuration,
-                        child: Container(color: Colors.white, child: child),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const XeneSidebar(),
+                          Expanded(
+                            child: Container(color: Colors.white, child: child),
+                          ),
+                        ],
                       ),
                     ),
                   ],
                 ),
-              ),
-            ],
-          ),
 
-          // 2. Fixed Header
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: AnimatedOpacity(
-              opacity: phase >= 1 ? 1.0 : 0.0,
-              duration: revealDuration,
-              child: const XeneHeader(),
+                // 2. Fixed Header
+                const Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: XeneHeader(),
+                ),
+
+                // 3. Draggable Sheet
+                const XeneDraggableSheet(),
+
+                // 4. Logo PiP Player
+                const LogoPipPlayer(),
+
+                // 5. Loading Overlay (topmost — covers everything on first load)
+                const LoadingOverlay(),
+              ],
             ),
           ),
-
-          // 3. Draggable Sheet
-          AnimatedOpacity(
-            opacity: phase >= 4 ? 1.0 : 0.0,
-            duration: revealDuration,
-            child: const XeneDraggableSheet(),
-          ),
-
-          // 4. Logo PiP Player
-          const LogoPipPlayer(),
-
-          // 5. Loading Overlay (topmost — covers everything on first load)
-          const LoadingOverlay(),
-        ],
-      ),
+        );
+      },
     );
   }
 }

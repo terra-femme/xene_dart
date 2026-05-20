@@ -1,7 +1,13 @@
+import 'dart:async';
+import 'dart:math' show min;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
+import 'package:lottie/lottie.dart';
+import 'package:xene_app/src/layout/xene_layout_metrics.dart';
+import 'package:xene_app/src/layout/xene_responsive_debug.dart';
 import 'package:xene_domain/xene_domain.dart';
 import 'package:xene_app/src/providers/feed_provider.dart';
 import 'package:xene_app/src/providers/preset_provider.dart';
@@ -12,7 +18,9 @@ import 'package:xene_app/src/widgets/xene_feed_card.dart';
 const _kToggleHeight = 30.0;
 
 class XeneDraggableSheet extends ConsumerStatefulWidget {
-  const XeneDraggableSheet({super.key});
+  const XeneDraggableSheet({super.key, this.metrics});
+
+  final XeneLayoutMetrics? metrics;
 
   @override
   ConsumerState<XeneDraggableSheet> createState() => _XeneDraggableSheetState();
@@ -27,6 +35,27 @@ class _XeneDraggableSheetState extends ConsumerState<XeneDraggableSheet>
   bool _archiveFetched = false;
   String? _lastPresetSlug;
   FeedMode? _lastFeedMode;
+  // True after the first-load card stagger has run. Reset on preset/mode change.
+  bool _archiveCardsAnimated = false;
+  // Tracked so it can be cancelled when the archive reloads, preventing a stale
+  // timer from flipping _archiveCardsAnimated=true before the new stagger plays.
+  Timer? _staggerResetTimer;
+  // Incremented on preset/mode change — used in card keys so Flutter fully
+  // recreates _ArchiveFeedCard widgets (fresh initState) rather than reusing
+  // state where _animated is already locked to false.
+  int _archiveGeneration = 0;
+  // Deferred-stagger flags — see data branch in archiveAsync.when().
+  bool _sheetWasCollapsed = true;
+  bool _dataArrivedCollapsed = false;
+  Stopwatch? _archiveLoadWatch;
+  int _archiveLoadSeq = 0;
+  int _archiveLoadingLoggedGen = -1;
+  bool _archiveLottieVisible = false;
+
+  String _archiveElapsedLabel() {
+    final elapsed = _archiveLoadWatch?.elapsedMilliseconds;
+    return elapsed == null ? 'n/a' : '${elapsed}ms';
+  }
 
   @override
   void initState() {
@@ -62,6 +91,7 @@ class _XeneDraggableSheetState extends ConsumerState<XeneDraggableSheet>
 
   @override
   void dispose() {
+    _staggerResetTimer?.cancel();
     _jumpController.dispose();
     super.dispose();
   }
@@ -99,6 +129,8 @@ class _XeneDraggableSheetState extends ConsumerState<XeneDraggableSheet>
       child: Text(
         '8 – 31 DAYS',
         style: GoogleFonts.teko(fontSize: 18, color: const Color(0xFF888888)),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
       ),
     );
   }
@@ -159,8 +191,7 @@ class _XeneDraggableSheetState extends ConsumerState<XeneDraggableSheet>
     final isFullFeed = mode == FeedMode.fullFeed;
     return GestureDetector(
       onTap: () {
-        final next =
-            isFullFeed ? FeedMode.methodical : FeedMode.fullFeed;
+        final next = isFullFeed ? FeedMode.methodical : FeedMode.fullFeed;
         ref.read(feedModeProvider.notifier).state = next;
       },
       child: Container(
@@ -168,9 +199,7 @@ class _XeneDraggableSheetState extends ConsumerState<XeneDraggableSheet>
         decoration: BoxDecoration(
           color: Colors.white.withValues(alpha: 0.07),
           borderRadius: BorderRadius.circular(_kToggleHeight / 2),
-          border: Border.all(
-            color: Colors.white.withValues(alpha: 0.12),
-          ),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
         ),
         child: Stack(
           children: [
@@ -208,29 +237,36 @@ class _XeneDraggableSheetState extends ConsumerState<XeneDraggableSheet>
                         color: !isFullFeed ? Colors.white : Colors.white38,
                         letterSpacing: 1.2,
                       ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      softWrap: false,
                     ),
                   ),
                 ),
                 Expanded(
-                  child: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
                     child: Row(
-                      mainAxisSize: MainAxisSize.min,
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Text(
-                          'FULL GREED',
-                          style: GoogleFonts.teko(
-                            fontSize: 12,
-                            color:
-                                isFullFeed ? Colors.white : Colors.white38,
-                            letterSpacing: 1.2,
+                        Flexible(
+                          child: Text(
+                            'FULL GREED',
+                            style: GoogleFonts.teko(
+                              fontSize: 12,
+                              color: isFullFeed ? Colors.white : Colors.white38,
+                              letterSpacing: 1.2,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            softWrap: false,
                           ),
                         ),
                         const SizedBox(width: 3),
                         Icon(
                           Icons.warning_amber_rounded,
                           size: 11,
-                          color:
-                              isFullFeed ? Colors.white : Colors.white38,
+                          color: isFullFeed ? Colors.white : Colors.white38,
                         ),
                       ],
                     ),
@@ -244,7 +280,10 @@ class _XeneDraggableSheetState extends ConsumerState<XeneDraggableSheet>
     );
   }
 
-  List<Widget> _buildArchiveSlivers(List<_ArchiveDateSection> sections) {
+  List<Widget> _buildArchiveSlivers(
+    List<_ArchiveDateSection> sections, {
+    bool shouldAnimate = false,
+  }) {
     Widget padSliver(Widget sliver) {
       return SliverPadding(
         padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -258,6 +297,7 @@ class _XeneDraggableSheetState extends ConsumerState<XeneDraggableSheet>
 
     for (var sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
       final section = sections[sectionIndex];
+
       slivers.add(
         padSliver(
           SliverMainAxisGroup(
@@ -272,13 +312,22 @@ class _XeneDraggableSheetState extends ConsumerState<XeneDraggableSheet>
               SliverList(
                 delegate: SliverChildBuilderDelegate((context, itemIndex) {
                   final item = section.items[itemIndex];
-                  return XeneFeedCard(
+                  // Section-relative animIndex: each date group cascades in
+                  // after the previous. Using sectionIndex*3+itemIndex means
+                  // section 0 → indices 0,1,2; section 1 → 3,4,5; etc.
+                  // Capped at 12 (max delay 540ms) so no card waits longer
+                  // than 540ms regardless of how many sections there are.
+                  final sectionAnimIndex = min(
+                    sectionIndex * 3 + itemIndex,
+                    12,
+                  );
+                  return _ArchiveFeedCard(
                     key: ValueKey(
-                      'archive_${sectionIndex}_${itemIndex}_${item.id}',
+                      'arc_g${_archiveGeneration}_${sectionIndex}_$itemIndex',
                     ),
                     item: item,
-                    dark: true,
                     onTap: () => showXeneContent(context, item),
+                    animIndex: shouldAnimate ? sectionAnimIndex : -1,
                   );
                 }, childCount: section.items.length),
               ),
@@ -294,6 +343,16 @@ class _XeneDraggableSheetState extends ConsumerState<XeneDraggableSheet>
 
   @override
   Widget build(BuildContext context) {
+    final layoutMetrics = widget.metrics ?? XeneLayoutScope.maybeOf(context);
+    if (layoutMetrics != null) {
+      XeneResponsiveDebug.values('Sheet.receivedMetrics', {
+        'sheetMinHeight': layoutMetrics.sheetMinHeight,
+        'sheetMaxHeight': layoutMetrics.sheetMaxHeight,
+        'archiveSheetMinRatio': layoutMetrics.archiveSheetMinRatio,
+        'archiveSheetMaxRatio': layoutMetrics.archiveSheetMaxRatio,
+      });
+    }
+
     final screenHeight = MediaQuery.of(context).size.height;
     final topPadding = MediaQuery.of(context).padding.top;
     final topOffset = topPadding + 56;
@@ -304,11 +363,23 @@ class _XeneDraggableSheetState extends ConsumerState<XeneDraggableSheet>
     final archiveAsync = ref.watch(filteredArchiveFeedProvider);
     final feedMode = ref.watch(feedModeProvider);
 
-    // Reset the archive fetch gate when the feed mode changes so the sheet
-    // re-fetches with the new mode on its next open (or immediately if open).
+    // Reset animation state synchronously when mode changes so the first data
+    // build (not a delayed ref.listen callback) already sees shouldAnimate=true.
+    // CRITICAL: also cancel the stagger timer — if it was still ticking from the
+    // previous mode's load, it would fire and set _archiveCardsAnimated=true
+    // before the new data arrives, making shouldAnimate=false on first data build.
     if (_lastFeedMode != feedMode) {
       _lastFeedMode = feedMode;
       _archiveFetched = false;
+      _staggerResetTimer?.cancel();
+      _staggerResetTimer = null;
+      _archiveGeneration++;
+      _archiveCardsAnimated = false;
+      _sheetWasCollapsed = true;
+      _dataArrivedCollapsed = false;
+      debugPrint(
+        '[Sheet] MODE CHANGE → mode=$feedMode gen=$_archiveGeneration animated=false archiveAsync.isLoading=${archiveAsync.isLoading}',
+      );
     }
 
     final isLandscape =
@@ -323,13 +394,27 @@ class _XeneDraggableSheetState extends ConsumerState<XeneDraggableSheet>
     const double minHeight = 23.0;
     final minRatio = (minHeight / screenHeight).clamp(0.01, maxRatio);
 
+    // Capture collapse state now so archiveAsync.when(data:) can decide
+    // whether to skip the stagger. If data arrives via prewarm while the sheet
+    // is still closed, the animation would run and complete invisibly (the parent
+    // Opacity wrapper is 0.0 when collapsed), causing all cards to appear at
+    // full opacity simultaneously once the sheet opens.
+    double buildSize = minRatio;
+    if (sheetController.isAttached) {
+      buildSize = sheetController.size;
+    }
+    final isCollapsedAtBuild = (buildSize - minRatio).abs() < 0.001;
+
     return DraggableScrollableSheet(
       controller: sheetController,
       initialChildSize: minRatio,
       minChildSize: minRatio,
       maxChildSize: maxRatio,
       snap: true,
-      snapSizes: [minRatio, maxRatio],
+      // snapSizes omitted — min and max are the only snap targets, which
+      // is the default when snap:true has no explicit snapSizes. Passing
+      // [minRatio, maxRatio] triggers a Flutter assertion that snapSizes
+      // must be strictly between min and max (exclusive).
       builder: (context, scrollController) {
         return ListenableBuilder(
           listenable: sheetController,
@@ -346,9 +431,31 @@ class _XeneDraggableSheetState extends ConsumerState<XeneDraggableSheet>
 
             final isCollapsed = (currentSize - minRatio).abs() < 0.001;
 
+            // Detect collapse→expand transition and trigger deferred stagger.
+            if (_sheetWasCollapsed && !isCollapsed) {
+              _sheetWasCollapsed = false;
+              if (_dataArrivedCollapsed && !_archiveCardsAnimated) {
+                _dataArrivedCollapsed = false;
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) setState(() => _archiveGeneration++);
+                });
+              }
+            } else if (isCollapsed && !_sheetWasCollapsed) {
+              _sheetWasCollapsed = true;
+            }
+
             if (_lastPresetSlug != activePresetSlug) {
               _lastPresetSlug = activePresetSlug;
               _archiveFetched = false;
+              _staggerResetTimer?.cancel();
+              _staggerResetTimer = null;
+              _archiveGeneration++;
+              _archiveCardsAnimated = false;
+              _sheetWasCollapsed = true;
+              _dataArrivedCollapsed = false;
+              debugPrint(
+                '[Sheet] PRESET CHANGE → preset=$activePresetSlug gen=$_archiveGeneration animated=false',
+              );
             }
 
             // Prewarm one small archive page after the recent feed settles.
@@ -394,11 +501,18 @@ class _XeneDraggableSheetState extends ConsumerState<XeneDraggableSheet>
                 ),
                 child: Column(
                   children: [
-                    GestureDetector(
+                    // Listener bypasses the gesture arena so it always fires
+                    // regardless of what DraggableScrollableSheet's internal
+                    // recognizers are doing. GestureDetector (inside
+                    // _dragHandle) still handles the tap-to-collapse action.
+                    Listener(
                       behavior: HitTestBehavior.opaque,
-                      onVerticalDragUpdate: (details) {
+                      onPointerMove: (event) {
+                        // buttons == 0 means hover (no button / finger held down).
+                        if (event.buttons == 0) return;
+                        if (event.delta.dy.abs() < 0.5) return;
                         if (!sheetController.isAttached) return;
-                        final delta = -details.delta.dy / screenHeight;
+                        final delta = -event.delta.dy / screenHeight;
                         sheetController.jumpTo(
                           (sheetController.size + delta).clamp(
                             minRatio,
@@ -406,7 +520,19 @@ class _XeneDraggableSheetState extends ConsumerState<XeneDraggableSheet>
                           ),
                         );
                       },
-                      onVerticalDragEnd: (details) {
+                      onPointerUp: (_) {
+                        if (!sheetController.isAttached) return;
+                        final mid = (minRatio + maxRatio) / 2;
+                        final target = sheetController.size >= mid
+                            ? maxRatio
+                            : minRatio;
+                        sheetController.animateTo(
+                          target,
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.easeOut,
+                        );
+                      },
+                      onPointerCancel: (_) {
                         if (!sheetController.isAttached) return;
                         final mid = (minRatio + maxRatio) / 2;
                         final target = sheetController.size >= mid
@@ -422,7 +548,20 @@ class _XeneDraggableSheetState extends ConsumerState<XeneDraggableSheet>
                     ),
                     Expanded(
                       child: ClipRect(
-                        child: Opacity(opacity: opacity, child: child),
+                        // OverflowBox decouples the content layout from the
+                        // sheet's current height so no relayout happens during
+                        // drag.  The child is wrapped in a SizedBox(maxRatio *
+                        // screenHeight) so inner Expanded widgets have a real
+                        // bound rather than infinity (which would give them 0).
+                        // ClipRect hides any overflow when collapsed.
+                        child: Opacity(
+                          opacity: opacity,
+                          child: OverflowBox(
+                            maxHeight: double.infinity,
+                            alignment: Alignment.topCenter,
+                            child: child,
+                          ),
+                        ),
                       ),
                     ),
                   ],
@@ -430,93 +569,182 @@ class _XeneDraggableSheetState extends ConsumerState<XeneDraggableSheet>
               ),
             );
           },
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(24, 6, 24, 4),
-                child: _buildModeToggle(feedMode),
-              ),
-              Expanded(
-                child: archiveAsync.when(
-                  loading: () => CustomScrollView(
-                    controller: scrollController,
-                    physics: const BouncingScrollPhysics(),
-                    slivers: [
-                      SliverPadding(
-                        padding: const EdgeInsets.symmetric(horizontal: 24),
-                        sliver: SliverToBoxAdapter(child: _archiveHeader()),
-                      ),
-                      SliverPadding(
-                        padding: const EdgeInsets.symmetric(horizontal: 24),
-                        sliver: SliverList(
-                          delegate: SliverChildBuilderDelegate(
-                            (_, __) => const _ArchiveCardSkeleton(),
-                            childCount: 8,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  error: (e, _) => ListView(
-                    controller: scrollController,
-                    physics: const BouncingScrollPhysics(),
-                    padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
-                    children: [
-                      Center(
-                        child: Text(
-                          'Error loading archive',
-                          style: GoogleFonts.archivo(color: Colors.white54),
-                        ),
-                      ),
-                    ],
-                  ),
-                  data: (items) {
-                    if (items.isEmpty) {
-                      return ListView(
+          child: SizedBox(
+            // Explicit height gives the inner Expanded(archive) a real bound
+            // even though OverflowBox above passes infinity down.
+            // Subtract 20 (drag handle) so content doesn't clip the last card.
+            height: (maxRatio * screenHeight - 20).clamp(
+              200.0,
+              double.infinity,
+            ),
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 6, 24, 4),
+                  child: _buildModeToggle(feedMode),
+                ),
+                Expanded(
+                  child: archiveAsync.when(
+                    loading: () {
+                      if (_archiveLoadingLoggedGen != _archiveGeneration ||
+                          !_archiveLottieVisible) {
+                        _archiveLoadSeq++;
+                        _archiveLoadingLoggedGen = _archiveGeneration;
+                        _archiveLoadWatch = Stopwatch()..start();
+                        _archiveLottieVisible = true;
+                        debugPrint(
+                          '[Sheet][UX seq=$_archiveLoadSeq +0ms] '
+                          'Archive Lottie shown gen=$_archiveGeneration '
+                          'preset=$activePresetSlug mode=$feedMode',
+                        );
+                      }
+                      // Use scrollController so the DraggableScrollableSheet keeps
+                      // its scroll relationship intact. Without this, the sheet
+                      // detects a detached controller and snaps back to minRatio,
+                      // causing cards to appear invisible (opacity=0) on data arrival.
+                      return CustomScrollView(
                         controller: scrollController,
-                        physics: const BouncingScrollPhysics(),
-                        padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
-                        children: [
-                          _archiveHeader(),
-                          Padding(
-                            padding: const EdgeInsets.only(top: 24),
+                        physics: const NeverScrollableScrollPhysics(),
+                        slivers: [
+                          SliverFillRemaining(
+                            hasScrollBody: false,
                             child: Center(
-                              child: Text(
-                                'Nothing in the archive yet',
-                                style: GoogleFonts.archivo(
-                                  color: Colors.white38,
-                                ),
+                              child: Lottie.asset(
+                                'assets/animations/LoadingLottie.json',
+                                width: 120,
+                                height: 120,
+                                repeat: true,
+                                fit: BoxFit.contain,
                               ),
                             ),
                           ),
                         ],
                       );
-                    }
-
-                    final sections = _buildDateSections(items);
-
-                    return NotificationListener<ScrollNotification>(
-                      onNotification: (notification) {
-                        final metrics = notification.metrics;
-                        if (metrics.maxScrollExtent > 0 &&
-                            metrics.maxScrollExtent - metrics.pixels < 600) {
-                          ref
-                              .read(archiveFetchProvider.notifier)
-                              .fetchNextPage();
-                        }
-                        return false;
-                      },
-                      child: CustomScrollView(
+                    },
+                    error: (e, _) {
+                      if (_archiveLottieVisible) {
+                        _archiveLottieVisible = false;
+                        debugPrint(
+                          '[Sheet][UX seq=$_archiveLoadSeq +${_archiveElapsedLabel()}] '
+                          'Archive Lottie hidden -> error gen=$_archiveGeneration error=$e',
+                        );
+                      }
+                      return ListView(
                         controller: scrollController,
                         physics: const BouncingScrollPhysics(),
-                        slivers: _buildArchiveSlivers(sections),
-                      ),
-                    );
-                  },
+                        padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+                        children: [
+                          Center(
+                            child: Text(
+                              'Error loading archive',
+                              style: GoogleFonts.archivo(color: Colors.white54),
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                    data: (items) {
+                      if (_archiveLottieVisible) {
+                        _archiveLottieVisible = false;
+                        debugPrint(
+                          '[Sheet][UX seq=$_archiveLoadSeq +${_archiveElapsedLabel()}] '
+                          'Archive Lottie hidden -> data build gen=$_archiveGeneration '
+                          'items=${items.length} collapsed=$isCollapsedAtBuild',
+                        );
+                      }
+                      if (items.isEmpty) {
+                        return ListView(
+                          controller: scrollController,
+                          physics: const BouncingScrollPhysics(),
+                          padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+                          children: [
+                            _archiveHeader(),
+                            Padding(
+                              padding: const EdgeInsets.only(top: 24),
+                              child: Center(
+                                child: Text(
+                                  'Nothing in the archive yet',
+                                  style: GoogleFonts.archivo(
+                                    color: Colors.white38,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        );
+                      }
+
+                      final sections = _buildDateSections(items);
+
+                      // Prewarm fetch delivered data while the sheet was closed.
+                      // Don't mark _archiveCardsAnimated=true here — instead defer
+                      // the stagger to when the sheet first opens. The transition
+                      // detector in ListenableBuilder.builder will increment the
+                      // generation, rebuilding cards with shouldAnimate=true.
+                      if (isCollapsedAtBuild && !_archiveCardsAnimated) {
+                        _dataArrivedCollapsed = true;
+                        debugPrint(
+                          '[Sheet] DATA arrived COLLAPSED — deferring stagger gen=$_archiveGeneration',
+                        );
+                      }
+
+                      // No animation if: already animated, or data arrived while
+                      // collapsed (wait for sheet to open before triggering stagger).
+                      final shouldAnimate =
+                          !_archiveCardsAnimated && !isCollapsedAtBuild;
+
+                      debugPrint(
+                        '[Sheet] DATA BUILD gen=$_archiveGeneration items=${items.length} '
+                        'shouldAnimate=$shouldAnimate archiveCardsAnimated=$_archiveCardsAnimated '
+                        'timerActive=${_staggerResetTimer != null} collapsed=$isCollapsedAtBuild',
+                      );
+
+                      if (shouldAnimate) {
+                        _staggerResetTimer?.cancel();
+                        // Max animIndex=12 × 45ms interval + 260ms animation + 100ms buffer.
+                        const staggerMs = 12 * 45 + 260 + 100; // 900ms
+                        debugPrint(
+                          '[Sheet] scheduling stagger timer ${staggerMs}ms gen=$_archiveGeneration',
+                        );
+                        _staggerResetTimer = Timer(
+                          Duration(milliseconds: staggerMs),
+                          () {
+                            _staggerResetTimer = null;
+                            debugPrint(
+                              '[Sheet] stagger timer fired → archiveCardsAnimated=true gen=$_archiveGeneration',
+                            );
+                            if (mounted)
+                              setState(() => _archiveCardsAnimated = true);
+                          },
+                        );
+                      }
+
+                      return NotificationListener<ScrollNotification>(
+                        onNotification: (notification) {
+                          final metrics = notification.metrics;
+                          if (metrics.maxScrollExtent > 0 &&
+                              metrics.maxScrollExtent - metrics.pixels < 600) {
+                            ref
+                                .read(archiveFetchProvider.notifier)
+                                .fetchNextPage();
+                          }
+                          return false;
+                        },
+                        child: CustomScrollView(
+                          controller: scrollController,
+                          physics: const BouncingScrollPhysics(),
+                          slivers: _buildArchiveSlivers(
+                            sections,
+                            shouldAnimate: shouldAnimate,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
                 ),
-              ),
-            ],
-          ),
+              ],
+            ), // Column
+          ), // SizedBox
         );
       },
     );
@@ -543,6 +771,9 @@ class _ArchiveDateDivider extends StatelessWidget {
                 color: const Color(0xFFFF5500),
                 letterSpacing: 2.0,
               ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              softWrap: false,
             ),
           ),
           const Expanded(child: Divider(color: Colors.white12, thickness: 1)),
@@ -559,19 +790,105 @@ class _ArchiveDateSection {
   final List<FeedItem> items;
 }
 
-class _ArchiveCardSkeleton extends StatelessWidget {
-  const _ArchiveCardSkeleton();
+// Wraps XeneFeedCard with a one-shot fade + slide-up animation on first load.
+// animIndex >= 0 triggers the animation with a stagger delay of animIndex * 55ms.
+// animIndex == -1 renders the card immediately with no animation.
+class _ArchiveFeedCard extends StatefulWidget {
+  const _ArchiveFeedCard({
+    required super.key,
+    required this.item,
+    required this.onTap,
+    required this.animIndex,
+  });
+
+  final FeedItem item;
+  final VoidCallback onTap;
+  final int animIndex;
+
+  @override
+  State<_ArchiveFeedCard> createState() => _ArchiveFeedCardState();
+}
+
+class _ArchiveFeedCardState extends State<_ArchiveFeedCard>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  // Locked at initState — new generation keys recreate the widget so this is
+  // always set correctly for the current animation round.
+  late final bool _animated;
+
+  // Called on every animation tick so this widget rebuilds independently of
+  // any parent rebuild cycle. FadeTransition (AnimatedWidget) was the previous
+  // approach but its internal setState can be suppressed inside SliverList
+  // when the delegate's shouldRebuild=true causes the sliver to rebuild the
+  // element before AnimatedWidget's listener has a chance to fire.
+  void _onTick() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _animated = widget.animIndex >= 0;
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 260),
+    );
+
+    debugPrint(
+      '[ArchiveCard] initState key=${widget.key} animIndex=${widget.animIndex} _animated=$_animated',
+    );
+
+    if (_animated) {
+      _ctrl.addListener(_onTick);
+      if (widget.animIndex == 0) {
+        _ctrl.forward();
+      } else {
+        Future.delayed(Duration(milliseconds: widget.animIndex * 45), () {
+          if (mounted) _ctrl.forward();
+        });
+      }
+    } else {
+      _ctrl.value = 1.0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: 90,
-      margin: const EdgeInsets.fromLTRB(6, 0, 6, 2),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.06),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
-      ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        XeneResponsiveDebug.constraints('ArchiveCard', constraints);
+        XeneResponsiveDebug.values('ArchiveCard.item', {
+          'id': widget.item.id,
+          'platform': widget.item.platform,
+          'contentType': widget.item.contentType,
+          'animated': _animated,
+          'animIndex': widget.animIndex,
+        });
+
+        final card = XeneFeedCard(
+          item: widget.item,
+          dark: true,
+          onTap: widget.onTap,
+        );
+
+        if (!_animated) {
+          return card;
+        }
+        final t = Curves.easeOut.transform(_ctrl.value);
+        return Opacity(
+          opacity: t,
+          child: Transform.translate(
+            offset: Offset(0, (1.0 - t) * 10.0),
+            child: card,
+          ),
+        );
+      },
     );
   }
 }

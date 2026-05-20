@@ -35,16 +35,6 @@ Future<Response> _patchSource(
     return Response.json(statusCode: 400, body: {'error': 'Invalid JSON body'});
   }
 
-  final db = context.read<DatabaseService>();
-  final source = await db.getPresetTemplateSource(sourceId);
-  final artistId = source?['artist_id'] as String?;
-  if (artistId == null) {
-    return Response.json(
-      statusCode: 400,
-      body: {'error': 'No linked artist for source $sourceId'},
-    );
-  }
-
   const allowed = {
     'bandcamp_url',
     'youtube_url',
@@ -63,7 +53,43 @@ Future<Response> _patchSource(
     );
   }
 
-  // Saving platform links marks the artist as dev-curated (verified).
+  final db = context.read<DatabaseService>();
+  final source = await db.getPresetTemplateSource(sourceId);
+  final artistId = source?['artist_id'] as String?;
+
+  if (artistId == null) {
+    // No linked artist row — write platform links directly to the source row.
+    _logger.info(
+      '[presets.sources.id] PATCH source=$sourceId (no artist) fields=${patch.keys.toList()}',
+    );
+    final updated = await db.updatePresetTemplateSource(sourceId, patch);
+    if (updated == null) {
+      return Response.json(
+        statusCode: 500,
+        body: {'error': 'Failed to update source'},
+      );
+    }
+    unawaited(
+      _warmNewPlatforms(
+        db: db,
+        bandcamp: context.read<BandcampService>(),
+        youtube: context.read<YouTubeService>(),
+        artist: {
+          'name':
+              updated['display_name'] ??
+              updated['soundcloud_username'] ??
+              'Unknown',
+          'bandcamp_url': updated['bandcamp_url'],
+          'youtube_url': updated['youtube_url'],
+          'youtube_channel_id': updated['youtube_channel_id'],
+        },
+        patchKeys: patch.keys.toSet(),
+      ),
+    );
+    return Response.json(body: toApiRow(updated));
+  }
+
+  // Has a linked artist row — write to artists table and mark as verified.
   patch['manually_verified'] = true;
 
   _logger.info(
@@ -125,8 +151,7 @@ Future<void> _warmNewPlatforms({
       patchKeys.contains('youtube_channel_id')) {
     final ytChannelId = artist['youtube_channel_id'] as String?;
     final ytUrl = artist['youtube_url'] as String?;
-    final ytId =
-        (ytChannelId != null && ytChannelId.startsWith('UC'))
+    final ytId = (ytChannelId != null && ytChannelId.startsWith('UC'))
         ? ytChannelId
         : (ytUrl ?? ytChannelId);
     if (ytId != null && ytId.isNotEmpty) {

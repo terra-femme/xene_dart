@@ -20,6 +20,7 @@ Future<List<FeedItem>> fetchWithCache(
   Duration ttl,
   Future<List<FeedItem>> Function() fetchLive, {
   int cacheDays = 31,
+  bool backgroundOnMiss = false,
 }) async {
   final lastPolled = await db.getLastPolled(platform, artistName);
   final now = DateTime.now().toUtc();
@@ -87,9 +88,7 @@ Future<List<FeedItem>> fetchWithCache(
       }
     }
 
-    _logger.info(
-      '[feed_cache] Cache MISS $platform/$artistName - fetching live',
-    );
+    _logger.info('[feed_cache] Cache MISS $platform/$artistName');
   }
 
   // Live fetch - coalesced so concurrent requests share one scrape.
@@ -101,6 +100,55 @@ Future<List<FeedItem>> fetchWithCache(
     return await _inFlight[inflightKey]!;
   }
 
+  final leaseKey = _refreshLeaseCacheKey(platform, artistName);
+  final leaseOwner = await db.tryClaimSystemCacheLease(
+    leaseKey,
+    ttl: _refreshLeaseTtl(platform),
+    metadata: {
+      'platform': platform,
+      'artist_name': artistName,
+      'cache_days': cacheDays,
+      'background_on_miss': backgroundOnMiss,
+    },
+  );
+  if (leaseOwner == null) {
+    final rows = await db.getCachedFeedItems(
+      platform: platform,
+      artistName: artistName,
+      days: cacheDays,
+    );
+    if (rows.isNotEmpty) {
+      _logger.info(
+        '[feed_cache] Refresh lease BUSY $platform/$artistName - serving ${rows.length} cached rows',
+      );
+      return rows.map(feedItemFromRow).whereType<FeedItem>().toList();
+    }
+    _logger.info(
+      '[feed_cache] Refresh lease BUSY $platform/$artistName - no cached rows, returning empty',
+    );
+    return [];
+  }
+
+  _logger.info(
+    '[feed_cache] Refresh lease CLAIMED $platform/$artistName '
+    'ttl=${_refreshLeaseTtl(platform).inSeconds}s backgroundOnMiss=$backgroundOnMiss',
+  );
+
+  if (backgroundOnMiss) {
+    _backgroundRefresh(
+      db,
+      platform,
+      artistName,
+      fetchLive,
+      cacheDays,
+      ttl,
+      leaseKey: leaseKey,
+      leaseOwner: leaseOwner,
+      releaseLease: true,
+    );
+    return [];
+  }
+
   final liveWork = _runLiveFetch(
     db,
     platform,
@@ -108,6 +156,8 @@ Future<List<FeedItem>> fetchWithCache(
     fetchLive,
     cacheDays,
     ttl,
+    leaseKey: leaseKey,
+    leaseOwner: leaseOwner,
   );
   _inFlight[inflightKey] = liveWork;
   try {
@@ -124,9 +174,13 @@ Future<List<FeedItem>> _runLiveFetch(
   String artistName,
   Future<List<FeedItem>> Function() fetchLive,
   int cacheDays,
-  Duration ttl,
+  Duration ttl, {
+  String? leaseKey,
+  String? leaseOwner,
+  }
 ) async {
   final now = DateTime.now().toUtc();
+  var completed = false;
   try {
     final items = await fetchLive();
     await db.setLastPolled(platform, artistName);
@@ -147,6 +201,7 @@ Future<List<FeedItem>> _runLiveFetch(
         'reason': 'successful_live_fetch_returned_no_window_items',
       }, expiresAt: now.add(ttl));
     }
+    completed = true;
     return items;
   } catch (e) {
     _logger.severe(
@@ -165,6 +220,15 @@ Future<List<FeedItem>> _runLiveFetch(
       return rows.map(feedItemFromRow).whereType<FeedItem>().toList();
     }
     return [];
+  } finally {
+    if (completed && leaseKey != null && leaseOwner != null) {
+      await db.releaseSystemCacheLease(leaseKey, leaseOwner);
+      _logger.info('[feed_cache] Refresh lease RELEASED $platform/$artistName');
+    } else if (leaseKey != null && leaseOwner != null) {
+      _logger.warning(
+        '[feed_cache] Refresh lease RETAINED $platform/$artistName until expiry after failed live fetch',
+      );
+    }
   }
 }
 
@@ -191,8 +255,11 @@ void _backgroundRefresh(
   String artistName,
   Future<List<FeedItem>> Function() fetchLive,
   int cacheDays,
-  Duration ttl,
-) {
+  Duration ttl, {
+  String? leaseKey,
+  String? leaseOwner,
+  bool releaseLease = false,
+}) {
   // Skip if a synchronous live fetch is already in flight for this key.
   final inflightKey = '$platform:$artistName';
   if (_inFlight.containsKey(inflightKey)) {
@@ -203,11 +270,41 @@ void _backgroundRefresh(
   }
 
   Future(() async {
+    var claimedHere = false;
+    var completed = false;
     try {
+      if (leaseKey == null || leaseOwner == null) {
+        final claimKey = _refreshLeaseCacheKey(platform, artistName);
+        final owner = await db.tryClaimSystemCacheLease(
+          claimKey,
+          ttl: _refreshLeaseTtl(platform),
+          metadata: {
+            'platform': platform,
+            'artist_name': artistName,
+            'cache_days': cacheDays,
+            'background': true,
+          },
+        );
+        if (owner == null) {
+          _logger.info(
+            '[feed_cache] Refresh lease BUSY $platform/$artistName - background refresh skipped',
+          );
+          return;
+        }
+        leaseKey = claimKey;
+        leaseOwner = owner;
+        claimedHere = true;
+        releaseLease = true;
+        _logger.info(
+          '[feed_cache] Refresh lease CLAIMED $platform/$artistName '
+          'ttl=${_refreshLeaseTtl(platform).inSeconds}s background=true',
+        );
+      }
       _logger.fine(
         '[feed_cache] Background refresh started: $platform/$artistName',
       );
       final items = await fetchLive();
+      await db.setLastPolled(platform, artistName);
       final now = DateTime.now().toUtc();
       final cutoff = _cacheWindowCutoff(cacheDays);
       final emptyWindowKey = _emptyWindowCacheKey(
@@ -227,12 +324,41 @@ void _backgroundRefresh(
         '[feed_cache] Background refresh done: $platform/$artistName '
         '(${items.length} items)',
       );
+      completed = true;
     } catch (e) {
       _logger.warning(
         '[feed_cache] Background refresh failed: $platform/$artistName - $e',
       );
+    } finally {
+      if (completed && releaseLease && leaseKey != null && leaseOwner != null) {
+        await db.releaseSystemCacheLease(leaseKey!, leaseOwner!);
+        _logger.info(
+          '[feed_cache] Refresh lease RELEASED $platform/$artistName '
+          'background=${claimedHere || releaseLease}',
+        );
+      } else if (releaseLease && leaseKey != null && leaseOwner != null) {
+        _logger.warning(
+          '[feed_cache] Refresh lease RETAINED $platform/$artistName until expiry after failed background refresh',
+        );
+      }
     }
   });
+}
+
+String _refreshLeaseCacheKey(String platform, String artistName) =>
+    'feed_refresh_lock:$platform:$artistName';
+
+Duration _refreshLeaseTtl(String platform) {
+  switch (platform) {
+    case 'bandcamp':
+      return const Duration(minutes: 5);
+    case 'soundcloud':
+      return const Duration(minutes: 3);
+    case 'youtube':
+      return const Duration(minutes: 2);
+    default:
+      return const Duration(minutes: 3);
+  }
 }
 
 /// Convert a feed_items DB row (snake_case columns) to a FeedItem domain object.
@@ -244,7 +370,7 @@ FeedItem? feedItemFromRow(Map<String, dynamic> row) {
       artistName: row['artist_name'] as String,
       contentType: row['content_type'] as String,
       title: row['title'] as String?,
-      body: row['body'] as String?,
+      body: _bodyWithRepostAttribution(row),
       mediaUrl: row['media_url'] as String?,
       artworkUrl: row['artwork_url'] as String?,
       externalUrl: row['external_url'] as String,
@@ -259,4 +385,17 @@ FeedItem? feedItemFromRow(Map<String, dynamic> row) {
     _logger.warning('[feed_cache] Failed to map DB row to FeedItem: $e');
     return null;
   }
+}
+
+String? _bodyWithRepostAttribution(Map<String, dynamic> row) {
+  final body = (row['body'] as String?)?.trim();
+  final repostedBy = (row['reposted_by_name'] as String?)?.trim();
+  if (row['is_repost'] != true || repostedBy == null || repostedBy.isEmpty) {
+    return body?.isEmpty == true ? null : body;
+  }
+
+  final attribution = '\u21bb by $repostedBy';
+  if (body == null || body.isEmpty) return attribution;
+  if (body.startsWith(attribution)) return body;
+  return '$attribution\n$body';
 }

@@ -19,6 +19,18 @@ class _ScUserCacheEntry {
   _ScUserCacheEntry(this.data, this.fetchedAt);
 }
 
+class _ScRepostMeta {
+  const _ScRepostMeta({
+    required this.repostedByName,
+    required this.repostedAt,
+    required this.feedSourcePath,
+  });
+
+  final String repostedByName;
+  final DateTime? repostedAt;
+  final String feedSourcePath;
+}
+
 class SoundCloudService {
   SoundCloudService(this._db);
 
@@ -322,6 +334,7 @@ class SoundCloudService {
         .replaceFirst('-large.', '-t500x500.');
 
     final items = <FeedItem>[];
+    final repostMetaById = <String, _ScRepostMeta>{};
     final cutoff = DateTime.now().toUtc().subtract(const Duration(days: 31));
 
     // 1. Fetch own tracks
@@ -331,7 +344,14 @@ class SoundCloudService {
       cutoffDate: cutoff,
       auditSink: auditSink,
     );
-    _parseScTracks(tracks, items, artistDisplayName, avatarUrl, auditSink: auditSink);
+    _parseScTracks(
+      tracks,
+      items,
+      artistDisplayName,
+      avatarUrl,
+      auditSink: auditSink,
+      repostMetaById: repostMetaById,
+    );
 
     // 2. Fetch own playlists (EPs/Albums) - CRUCIAL for Nixxy Rain
     final ownPlaylists = await _getCollection(
@@ -340,7 +360,14 @@ class SoundCloudService {
       cutoffDate: cutoff,
       auditSink: auditSink,
     );
-    _parseScPlaylists(ownPlaylists, items, artistDisplayName, avatarUrl, auditSink: auditSink);
+    _parseScPlaylists(
+      ownPlaylists,
+      items,
+      artistDisplayName,
+      avatarUrl,
+      auditSink: auditSink,
+      repostMetaById: repostMetaById,
+    );
 
     // 3. Fetch track reposts
     final trackReposts = await _getCollection(
@@ -349,7 +376,14 @@ class SoundCloudService {
       cutoffDate: cutoff,
       auditSink: auditSink,
     );
-    _parseScTracks(trackReposts, items, artistDisplayName, avatarUrl, auditSink: auditSink);
+    _parseScTracks(
+      trackReposts,
+      items,
+      artistDisplayName,
+      avatarUrl,
+      auditSink: auditSink,
+      repostMetaById: repostMetaById,
+    );
 
     // 4. Fetch playlist reposts
     final playlistReposts = await _getCollection(
@@ -358,7 +392,14 @@ class SoundCloudService {
       cutoffDate: cutoff,
       auditSink: auditSink,
     );
-    _parseScPlaylists(playlistReposts, items, artistDisplayName, avatarUrl, auditSink: auditSink);
+    _parseScPlaylists(
+      playlistReposts,
+      items,
+      artistDisplayName,
+      avatarUrl,
+      auditSink: auditSink,
+      repostMetaById: repostMetaById,
+    );
 
     // Sort, trim to window, save.
     // Pre-orders (future publishedAt) are kept; only past-31d items are dropped.
@@ -366,8 +407,9 @@ class SoundCloudService {
     final windowItems = items.where((i) => i.publishedAt.isAfter(cutoff)).toList();
 
     final dbItems = windowItems
-        .map(
-          (i) => {
+        .map((i) {
+          final repostMeta = repostMetaById[i.id];
+          return {
             'platform': i.platform,
             'internal_id': i.id,
             'artist_name': artistDisplayName,
@@ -381,12 +423,35 @@ class SoundCloudService {
             'play_count': i.playCount,
             'like_count': i.likeCount,
             'track_count': i.trackCount,
+            'is_repost': repostMeta != null,
+            'reposted_by_name': repostMeta?.repostedByName,
+            'reposted_at': repostMeta?.repostedAt?.toUtc().toIso8601String(),
+            'feed_source_path': repostMeta?.feedSourcePath,
             'updated_at': DateTime.now().toUtc().toIso8601String(),
-          },
-        )
+          };
+        })
         .toList();
 
     await _db.saveFeedItems(dbItems);
+
+    // Extract genre signals from SC user profile for the discovery system.
+    // Uses the canonical SC username from the API (userData['username']) which
+    // matches the soundcloud_username key stored in the artists table.
+    // Non-fatal — genre update failure must never abort the feed fetch.
+    final scApiUsername = (userData['username'] as String?)?.toLowerCase().trim();
+    if (scApiUsername != null) {
+      final scGenre = userData['genre'] as String?;
+      final scTagList = userData['tag_list'] as String?;
+      final genreTags = _parseScGenreTags(scGenre, scTagList);
+      if (genreTags.isNotEmpty) {
+        _logger.info('[sc] Genre tags for $scApiUsername: $genreTags');
+        await _db
+            .updateArtistGenreTags(genreTags, soundcloudUsername: scApiUsername)
+            .catchError((Object e) {
+          _logger.warning('[sc] Genre tags update skipped for $scApiUsername: $e');
+        });
+      }
+    }
 
     // Write to in-memory track cache.
     _trackCache[username] = _ScTrackCacheEntry(windowItems, DateTime.now().toUtc());
@@ -553,6 +618,7 @@ class SoundCloudService {
     String artistName,
     String avatarUrl, {
     List<Map<String, dynamic>>? auditSink,
+    Map<String, _ScRepostMeta>? repostMetaById,
   }) {
     for (var trackData in data) {
       try {
@@ -563,30 +629,61 @@ class SoundCloudService {
             ? trackData['track'] as Map<String, dynamic>
             : trackData as Map<String, dynamic>;
 
+        // Guard: SC duration is in ms — 0 means unprocessed, removed, or ghost.
+        final rawDuration = track['duration'] as int? ?? 0;
+        if (rawDuration < 1000) {
+          _logger.warning(
+            '[sc] Dropping ghost track "${track['title']}" (duration=${rawDuration}ms) id=${track['id']}',
+          );
+          auditSink?.add({
+            'type': 'fetch_drop',
+            'reason': 'zero_duration',
+            'id': track['id']?.toString() ?? 'unknown',
+            'title': track['title']?.toString() ?? '',
+            'is_repost': isRepost,
+            'duration_ms': rawDuration,
+          });
+          continue;
+        }
+
         final String? repostCreatedAt =
             isRepost ? trackData['created_at'] as String? : null;
+        final repostedAt = _parseSoundCloudDate(repostCreatedAt);
         final publishedAt = isRepost
-            ? _parseSoundCloudDate(repostCreatedAt) ??
-                  _parsePublicTrackDate(track)
+            ? repostedAt ?? _parsePublicTrackDate(track)
             : _parsePublicTrackDate(track);
 
         // 2. Extract Producer Name (metadata_artist > user['username'])
         final producerName = _getProducerName(track, artistName);
 
         // 3. Mandatory Title Augmentation: "Producer - Title"
-        var title = track['title'] as String;
+        var title = track['title'] as String? ?? '';
+        if (title.trim().isEmpty) {
+          _logger.warning('[sc] Dropping track with blank title id=${track['id']}');
+          continue;
+        }
         if (!title.toLowerCase().contains(producerName.toLowerCase())) {
           title = '$producerName - $title';
         }
 
         final trackId = track['id'].toString();
+        if (isRepost) {
+          repostMetaById?[trackId] = _ScRepostMeta(
+            repostedByName: artistName,
+            repostedAt: repostedAt,
+            feedSourcePath: 'track-repost',
+          );
+        }
         final feedItem = FeedItem(
           id: trackId,
           platform: 'soundcloud',
           artistName: artistName,
           contentType: 'track',
           title: title,
-          body: track['description'] as String?,
+          body: _cardBody(
+            description: track['description'] as String?,
+            repostedBy: isRepost ? artistName : null,
+          ),
           artworkUrl:
               ((track['artwork_url'] as String?)?.replaceFirst(
                 '-large.',
@@ -621,6 +718,7 @@ class SoundCloudService {
     String artistName,
     String avatarUrl, {
     List<Map<String, dynamic>>? auditSink,
+    Map<String, _ScRepostMeta>? repostMetaById,
   }) {
     final artistLower = artistName.toLowerCase();
     for (var plData in data) {
@@ -633,7 +731,13 @@ class SoundCloudService {
             : plData as Map<String, dynamic>;
 
         final uploader = pl['user']['username'].toString().toLowerCase();
-        var title = pl['title'] as String;
+        var title = pl['title'] as String? ?? '';
+
+        // Guard: skip blank-title playlists.
+        if (title.trim().isEmpty) {
+          _logger.warning('[sc] Dropping playlist with blank title id=${pl['id']}');
+          continue;
+        }
 
         // Filter: if not uploader, artist name must be in title
         if (uploader != artistLower &&
@@ -650,11 +754,28 @@ class SoundCloudService {
           continue;
         }
 
+        // Guard: skip empty playlists — track_count=0 means nothing to play.
+        final trackCount = pl['track_count'] as int? ?? 0;
+        if (trackCount == 0) {
+          _logger.warning(
+            '[sc] Dropping empty playlist "$title" (track_count=0) id=${pl['id']}',
+          );
+          auditSink?.add({
+            'type': 'fetch_drop',
+            'reason': 'empty_playlist',
+            'id': 'playlist-${pl['id']}',
+            'title': title,
+            'is_repost': isRepost,
+            'track_count': trackCount,
+          });
+          continue;
+        }
+
         final String? repostCreatedAt =
             isRepost ? plData['created_at'] as String? : null;
+        final repostedAt = _parseSoundCloudDate(repostCreatedAt);
         final publishedAt = isRepost
-            ? _parseSoundCloudDate(repostCreatedAt) ??
-                  _parsePublicTrackDate(pl)
+            ? repostedAt ?? _parsePublicTrackDate(pl)
             : _parsePublicTrackDate(pl);
 
         // 2. Extract Producer Name
@@ -666,6 +787,13 @@ class SoundCloudService {
         }
 
         final plId = 'playlist-${pl['id']}';
+        if (isRepost) {
+          repostMetaById?[plId] = _ScRepostMeta(
+            repostedByName: artistName,
+            repostedAt: repostedAt,
+            feedSourcePath: 'playlist-repost',
+          );
+        }
         items.add(
           FeedItem(
             id: plId,
@@ -673,7 +801,10 @@ class SoundCloudService {
             artistName: artistName,
             contentType: 'release',
             title: title,
-            body: pl['description'] as String?,
+            body: _cardBody(
+              description: pl['description'] as String?,
+              repostedBy: isRepost ? artistName : null,
+            ),
             artworkUrl:
                 ((pl['artwork_url'] as String?)?.replaceFirst(
                   '-large.',
@@ -698,6 +829,20 @@ class SoundCloudService {
         _logger.warning('Error parsing SoundCloud playlist: $e');
       }
     }
+  }
+
+  String? _cardBody({required String? description, required String? repostedBy}) {
+    final cleanDescription = description?.trim();
+    if (repostedBy == null || repostedBy.trim().isEmpty) {
+      return cleanDescription?.isEmpty == true ? null : cleanDescription;
+    }
+
+    final attribution = '\u21bb by ${repostedBy.trim()}';
+    if (cleanDescription == null || cleanDescription.isEmpty) {
+      return attribution;
+    }
+    if (cleanDescription.startsWith(attribution)) return cleanDescription;
+    return '$attribution\n$cleanDescription';
   }
 
   /// Builds an audit entry capturing every raw date field seen for an item.
@@ -880,5 +1025,29 @@ class SoundCloudService {
     // midday UTC so US time zones do not shift them into the previous day when
     // recent/archive buckets compare local calendar days.
     return DateTime.utc(year, month, day, 12);
+  }
+
+  /// Parse SC profile genre + tag_list fields into a sorted, deduplicated list.
+  /// SC tag_list format: "drum and bass" "liquid" dnb neurofunk
+  /// (multi-word tags are double-quoted; single-word tags are unquoted)
+  static List<String> _parseScGenreTags(String? genre, String? tagList) {
+    final tags = <String>{};
+    if (genre != null && genre.trim().isNotEmpty) {
+      tags.add(genre.trim().toLowerCase());
+    }
+    if (tagList != null && tagList.trim().isNotEmpty) {
+      final quotedRe = RegExp(r'"([^"]+)"');
+      // Collect quoted multi-word tags first.
+      for (final m in quotedRe.allMatches(tagList)) {
+        final t = m.group(1)!.trim();
+        if (t.isNotEmpty) tags.add(t.toLowerCase());
+      }
+      // Collect remaining unquoted single-word tokens.
+      final remaining = tagList.replaceAll(quotedRe, '').trim();
+      for (final t in remaining.split(RegExp(r'\s+'))) {
+        if (t.isNotEmpty) tags.add(t.toLowerCase());
+      }
+    }
+    return tags.toList()..sort();
   }
 }

@@ -6,6 +6,7 @@ import 'package:xene_backend/src/services/soundcloud_service.dart';
 import 'package:xene_backend/src/services/youtube_service.dart';
 
 final _logger = Logger('presets.refresh_all');
+final _runningRefreshes = <String>{};
 
 /// POST /presets/templates/{slug}/refresh_all
 ///
@@ -27,6 +28,28 @@ Future<Response> onRequest(RequestContext context, String slug) async {
     return Response(statusCode: 405);
   }
 
+  final lockKey = slug.trim().toLowerCase();
+  if (!_runningRefreshes.add(lockKey)) {
+    _logger.info('[refresh_all] slug=$slug skipped: already running');
+    return Response.json(
+      statusCode: 409,
+      body: {
+        'slug': slug,
+        'ok': false,
+        'error': 'Refresh already running for preset $slug',
+        'code': 'refresh_already_running',
+      },
+    );
+  }
+
+  try {
+    return await _runRefreshAll(context, slug);
+  } finally {
+    _runningRefreshes.remove(lockKey);
+  }
+}
+
+Future<Response> _runRefreshAll(RequestContext context, String slug) async {
   final db = context.read<DatabaseService>();
   final sources = await db.getPresetTemplateSourcesForAdmin(slug);
   if (sources.isEmpty) {

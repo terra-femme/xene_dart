@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:xene_app/src/layout/xene_layout_metrics.dart';
+import 'package:xene_app/src/layout/xene_responsive_debug.dart';
 import 'package:xene_app/src/providers/player_provider.dart';
 import 'package:xene_app/src/widgets/soundcloud_embed.dart';
 import 'package:xene_app/src/widgets/youtube_embed.dart';
 
 class LogoPipPlayer extends ConsumerStatefulWidget {
-  const LogoPipPlayer({super.key});
+  const LogoPipPlayer({super.key, this.metrics});
+
+  final XeneLayoutMetrics? metrics;
 
   @override
   ConsumerState<LogoPipPlayer> createState() => _LogoPipPlayerState();
@@ -74,6 +78,14 @@ class _LogoPipPlayerState extends ConsumerState<LogoPipPlayer>
 
   @override
   Widget build(BuildContext context) {
+    final layoutMetrics = widget.metrics ?? XeneLayoutScope.maybeOf(context);
+    if (layoutMetrics != null) {
+      XeneResponsiveDebug.values('LogoPipPlayer.receivedMetrics', {
+        'playerWidth': layoutMetrics.playerWidth,
+        'playerHeight': layoutMetrics.playerHeight,
+      });
+    }
+
     final playerState = ref.watch(playerProvider);
     final mediaQuery = MediaQuery.of(context);
     final topPadding = mediaQuery.padding.top;
@@ -133,106 +145,139 @@ class _LogoPipPlayerState extends ConsumerState<LogoPipPlayer>
       right: isLandscape ? 16.0 - _dragOffset : null,
       child: SlideTransition(
         position: slideAnimation,
-        child: Container(
-          width: sheetWidth,
-          height: sheetHeight,
-          decoration: BoxDecoration(
-            color: bgColor,
-            borderRadius: isLandscape
-                ? BorderRadius.circular(24)
-                : const BorderRadius.only(
-                    topRight: Radius.circular(24),
-                    bottomRight: Radius.circular(24),
-                  ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: isLandscape ? 0.3 : 0.6),
-                blurRadius: 30,
-                spreadRadius: 5,
-                offset: isLandscape ? const Offset(0, 10) : const Offset(10, 0),
-              ),
-            ],
-          ),
-          child: Stack(
-            children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // Header
-                  Container(
-                    height: 32,
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Row(
-                      mainAxisAlignment: isLandscape
-                          ? MainAxisAlignment.start
-                          : MainAxisAlignment.end,
-                      children: [
-                        GestureDetector(
-                          onTap: _close,
-                          child: Icon(Icons.close, color: iconColor, size: 16),
-                        ),
-                      ],
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            XeneResponsiveDebug.constraints(
+              'LogoPipPlayer.positioned',
+              constraints,
+            );
+            XeneResponsiveDebug.values('LogoPipPlayer.geometry', {
+              'sheetWidth': sheetWidth,
+              'sheetHeight': sheetHeight,
+              'isLandscape': isLandscape,
+              'dragOffset': _dragOffset,
+            });
+
+            return Container(
+              width: sheetWidth,
+              height: sheetHeight,
+              decoration: BoxDecoration(
+                color: bgColor,
+                borderRadius: isLandscape
+                    ? BorderRadius.circular(24)
+                    : const BorderRadius.only(
+                        topRight: Radius.circular(24),
+                        bottomRight: Radius.circular(24),
+                      ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(
+                      alpha: isLandscape ? 0.3 : 0.6,
                     ),
+                    blurRadius: 30,
+                    spreadRadius: 5,
+                    offset: isLandscape
+                        ? const Offset(0, 10)
+                        : const Offset(10, 0),
+                  ),
+                ],
+              ),
+              child: Stack(
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // Header
+                      Container(
+                        height: 32,
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: Row(
+                          mainAxisAlignment: isLandscape
+                              ? MainAxisAlignment.start
+                              : MainAxisAlignment.end,
+                          children: [
+                            GestureDetector(
+                              onTap: _close,
+                              child: Icon(
+                                Icons.close,
+                                color: iconColor,
+                                size: 16,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      // Player Well
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 24),
+                          child: LayoutBuilder(
+                            builder: (context, wellConstraints) {
+                              XeneResponsiveDebug.constraints(
+                                'LogoPipPlayer.well',
+                                wellConstraints,
+                              );
+                              return Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.black,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                clipBehavior: Clip.antiAlias,
+                                child: switch (playerState.activePlatform) {
+                                  ActivePlatform.soundcloud => SoundCloudEmbed(
+                                    trackId: playerState.currentTrack!.id,
+                                    isVisual: true,
+                                  ),
+                                  ActivePlatform.youtube => YouTubeEmbed(
+                                    videoId: playerState.currentTrack!.id,
+                                    externalUrl:
+                                        playerState.currentTrack!.externalUrl,
+                                  ),
+                                  ActivePlatform.none =>
+                                    const SizedBox.shrink(),
+                                },
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
 
-                  // Player Well
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 24),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: Colors.black,
-                          borderRadius: BorderRadius.circular(12),
+                  // Drag Handle
+                  Positioned(
+                    top: 32,
+                    bottom: 0,
+                    left: isLandscape ? 0 : null,
+                    right: isLandscape ? null : 0,
+                    width: 50,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onHorizontalDragUpdate: _handleDragUpdate,
+                      onHorizontalDragEnd: _handleDragEnd,
+                      child: Align(
+                        alignment: isLandscape
+                            ? Alignment.centerLeft
+                            : Alignment.centerRight,
+                        child: Container(
+                          width: 4,
+                          height: 50,
+                          margin: isLandscape
+                              ? const EdgeInsets.only(left: 4)
+                              : const EdgeInsets.only(right: 4),
+                          decoration: BoxDecoration(
+                            color: handleColor,
+                            borderRadius: BorderRadius.circular(2),
+                          ),
                         ),
-                        clipBehavior: Clip.antiAlias,
-                        child: switch (playerState.activePlatform) {
-                          ActivePlatform.soundcloud => SoundCloudEmbed(
-                            trackId: playerState.currentTrack!.id,
-                            isVisual: true,
-                          ),
-                          ActivePlatform.youtube => YouTubeEmbed(
-                            videoId: playerState.currentTrack!.id,
-                            externalUrl: playerState.currentTrack!.externalUrl,
-                          ),
-                          ActivePlatform.none => const SizedBox.shrink(),
-                        },
                       ),
                     ),
                   ),
                 ],
               ),
-
-              // Drag Handle
-              Positioned(
-                top: 32,
-                bottom: 0,
-                left: isLandscape ? 0 : null,
-                right: isLandscape ? null : 0,
-                width: 50,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onHorizontalDragUpdate: _handleDragUpdate,
-                  onHorizontalDragEnd: _handleDragEnd,
-                  child: Align(
-                    alignment: isLandscape
-                        ? Alignment.centerLeft
-                        : Alignment.centerRight,
-                    child: Container(
-                      width: 4,
-                      height: 50,
-                      margin: isLandscape
-                          ? const EdgeInsets.only(left: 4)
-                          : const EdgeInsets.only(right: 4),
-                      decoration: BoxDecoration(
-                        color: handleColor,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
+            );
+          },
         ),
       ),
     );
