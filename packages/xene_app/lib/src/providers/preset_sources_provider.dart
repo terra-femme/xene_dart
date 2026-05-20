@@ -50,8 +50,10 @@ class PresetSource {
       soundcloudUrl:
           artist?['soundcloudUrl'] as String? ??
           json['soundcloudUrl'] as String?,
-      bandcampUrl: artist?['bandcampUrl'] as String?,
-      youtubeUrl: artist?['youtubeUrl'] as String?,
+      bandcampUrl:
+          artist?['bandcampUrl'] as String? ?? json['bandcampUrl'] as String?,
+      youtubeUrl:
+          artist?['youtubeUrl'] as String? ?? json['youtubeUrl'] as String?,
       manuallyVerified: (artist?['manuallyVerified'] as bool?) ?? false,
     );
   }
@@ -193,7 +195,9 @@ class PresetSourcesNotifier extends StateNotifier<PresetSourcesState> {
     state = state.copyWith(loadingRefreshAll: true, error: null);
     try {
       final dio = _dio ??= _createDio();
-      debugPrint('[presetSources] refreshAll POST /presets/templates/$slug/refresh_all');
+      debugPrint(
+        '[presetSources] refreshAll POST /presets/templates/$slug/refresh_all',
+      );
       final response = await dio.post<Map<String, dynamic>>(
         '/presets/templates/$slug/refresh_all',
         options: Options(receiveTimeout: const Duration(minutes: 5)),

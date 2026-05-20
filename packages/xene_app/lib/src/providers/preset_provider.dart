@@ -87,10 +87,12 @@ final presetDialProvider =
 const kDefaultPresetSlug = 'dnb-foundations';
 
 final activePresetSlugProvider = Provider<String>((ref) {
-  return ref.watch(presetDialProvider).maybeWhen(
-    data: (state) => state.activePresetSlug,
-    orElse: () => kDefaultPresetSlug,
-  );
+  return ref
+      .watch(presetDialProvider)
+      .maybeWhen(
+        data: (state) => state.activePresetSlug,
+        orElse: () => kDefaultPresetSlug,
+      );
 });
 
 class PresetDialNotifier extends AsyncNotifier<PresetDialState> {
@@ -159,14 +161,30 @@ class PresetDialNotifier extends AsyncNotifier<PresetDialState> {
     final previous = state.valueOrNull;
     if (previous == null || previous.activePresetSlug == slug) return;
 
+    final selectedSlot = previous.slots.firstWhere(
+      (slot) => slot.slug == slug,
+      orElse: () => previous.activeSlot,
+    );
+    debugPrint(
+      '[presetDialProvider] selectPreset slug=${selectedSlot.slug} '
+      'name=${selectedSlot.name} notch=${selectedSlot.notchIndex} '
+      'previous=${previous.activePresetSlug}',
+    );
     state = AsyncData(previous.copyWith(activePresetSlug: slug));
 
     try {
       final dio = _dio ??= _createDio();
-      await dio.post<Map<String, dynamic>>(
+      final response = await dio.post<Map<String, dynamic>>(
         '/presets',
         data: {'activePresetSlug': slug},
       );
+      final savedSlug = response.data?['activePresetSlug'] as String?;
+      debugPrint(
+        '[presetDialProvider] persisted activePresetSlug=${savedSlug ?? '<missing>'}',
+      );
+      if (savedSlug != null && savedSlug != slug) {
+        state = AsyncData(previous.copyWith(activePresetSlug: savedSlug));
+      }
     } catch (e) {
       debugPrint('[presetDialProvider] Failed to persist selection: $e');
     }

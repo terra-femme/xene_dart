@@ -5,12 +5,45 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/widget_previews.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:xene_app/src/layout/xene_layout_metrics.dart';
+import 'package:xene_app/src/layout/xene_responsive_debug.dart';
 import 'package:xene_app/src/providers/articles_provider.dart';
 import 'package:xene_app/src/providers/preset_provider.dart';
 import 'package:xene_app/src/widgets/preset_dial.dart';
 
+// PROTECTED UI SURFACE - DO NOT REFACTOR CASUALLY.
+//
+// This sidebar, its preset dial placement, and the articles dock/reveal timing
+// have been hand-tuned after repeated regressions involving clipping, jumping,
+// misplaced articles, and dial-label flicker. Any coding agent or developer
+// must leave this file's sidebar/dial/articles behavior untouched unless the
+// user explicitly asks for changes to this exact surface.
+//
+// SIDEBAR INVARIANTS:
+// - Do not change the authored XENE logo sizing, box dimensions, tracking, left
+//   alignment, line rhythm, or sidebar width clamp during responsive refactors.
+//   The logo lockup is intentional brand spacing, not layout debt.
+// - Do not enable sidebar auto-crawl in portrait. Portrait should remain still
+//   unless the product/design direction is explicitly changed.
+// - Do not move the authored ARTICLES dock placement or replace its fixed
+//   carousel heights with generic responsive metrics unless the visual design
+//   is explicitly revised.
+const double _xeneLogoLetterSpacing = -0.06 * 375;
+const double _articlesSliderHeightLandscape = 96.0;
+const double _articlesSliderHeightPortrait = 210.0;
+const double _articlesSliderHeightCompactPortrait = 28.0;
+const double _articlesHeaderHeight = 24.0;
+const double _articlesBottomGapLandscape = 12.0;
+const double _articlesBottomGapPortrait = 30.0;
+const double _articlesBottomGapCompactPortrait = 18.0;
+const double _presetArticleMinGap = 16.0;
+const double _presetDockLabelAndGapHeight = 24.0;
+const double _sidebarAutoCrawlMaxHeight = 540.0;
+
 class XeneSidebar extends ConsumerStatefulWidget {
-  const XeneSidebar({super.key});
+  const XeneSidebar({super.key, this.metrics});
+
+  final XeneLayoutMetrics? metrics;
 
   @override
   ConsumerState<XeneSidebar> createState() => _XeneSidebarState();
@@ -23,12 +56,10 @@ class _XeneSidebarState extends ConsumerState<XeneSidebar>
   Duration _lastTickTime = Duration.zero;
   bool _isPaused = false;
   Orientation? _lastOrientation;
-  bool _isLandscape = false;
   bool _needsScroll = false;
+  double _contentCycleHeight = 700.0;
+  bool _isDialOverlayActive = false;
 
-  // contentThreshold is the height of one content set
-  double _getSetHeight(bool isLandscape) => isLandscape ? 740.0 : 700.0;
-  static const double _contentThreshold = 600.0;
   static const double _crawlPixelsPerMillisecond = 0.043;
 
   @override
@@ -44,7 +75,6 @@ class _XeneSidebarState extends ConsumerState<XeneSidebar>
     final orientation = mediaQuery.orientation;
 
     if (_lastOrientation != orientation) {
-      _isLandscape = orientation == Orientation.landscape;
       _lastTickTime = Duration.zero;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && _scrollController.hasClients) {
@@ -68,7 +98,7 @@ class _XeneSidebarState extends ConsumerState<XeneSidebar>
 
         final pixels =
             delta.inMicroseconds / 1000.0 * _crawlPixelsPerMillisecond;
-        final singleExtent = _getSetHeight(_isLandscape);
+        final singleExtent = _contentCycleHeight;
         final current = _scrollController.offset;
 
         double next = current + pixels;
@@ -101,6 +131,11 @@ class _XeneSidebarState extends ConsumerState<XeneSidebar>
     }
   }
 
+  void _setDialOverlayActive(bool active) {
+    if (_isDialOverlayActive == active) return;
+    setState(() => _isDialOverlayActive = active);
+  }
+
   @override
   void dispose() {
     _crawlTicker?.dispose();
@@ -108,23 +143,41 @@ class _XeneSidebarState extends ConsumerState<XeneSidebar>
     super.dispose();
   }
 
-  Widget _buildContentSet(bool isLandscape) {
+  Widget _buildContentSet({
+    required bool isLandscape,
+    required bool compactPortrait,
+    required XeneLayoutMetrics? layoutMetrics,
+    required double contentCycleHeight,
+    required bool alignRight,
+  }) {
+    // Authored XENE logo lockup geometry. Keep these fixed unless the visual
+    // identity is deliberately redesigned; the custom tracking depends on them.
     final double baseLogoSize = isLandscape ? 220.0 : 200.0;
     final double logoNSize = baseLogoSize + 4.0;
     final double logoBoxHeight = isLandscape ? 220.0 : 160.0;
-    // GAP ADJUSTMENT: Logo now sits higher to align with the Feed header
     final double topSetPadding = isLandscape ? 10.0 : 20.0;
-    final double logoToDialGap = isLandscape ? 95.0 : 95.0;
+    final double logoToDialGap = 95.0;
+    final double logoWidth = isLandscape ? 240.0 : 191.0;
+
+    XeneResponsiveDebug.values('Sidebar.contentSet', {
+      'contentCycleHeight': contentCycleHeight,
+      'baseLogoSize': baseLogoSize,
+      'logoBoxHeight': logoBoxHeight,
+      'logoToDialGap': logoToDialGap,
+      'alignRight': alignRight,
+      'compactPortrait': compactPortrait,
+    });
 
     return SizedBox(
-      height: _getSetHeight(isLandscape),
+      height: contentCycleHeight,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(height: topSetPadding),
-          // LOGO SECTION
+          // Authored XENE logo lockup. Do not change text alignment, tracking,
+          // or line rhythm as part of responsive/layout cleanup.
           SizedBox(
-            width: isLandscape ? 240 : 191,
+            width: logoWidth,
             height: logoBoxHeight,
             child: Stack(
               clipBehavior: Clip.none,
@@ -147,7 +200,7 @@ class _XeneSidebarState extends ConsumerState<XeneSidebar>
                     style: GoogleFonts.jaro(
                       fontSize: baseLogoSize,
                       height: 0.68,
-                      letterSpacing: -0.06 * 375,
+                      letterSpacing: _xeneLogoLetterSpacing,
                       color: Colors.black,
                     ),
                     softWrap: false,
@@ -159,7 +212,11 @@ class _XeneSidebarState extends ConsumerState<XeneSidebar>
           ),
           SizedBox(height: logoToDialGap),
 
-          _PresetDialDock(isLandscape: isLandscape),
+          _PresetDialDock(
+            isLandscape: isLandscape,
+            metrics: layoutMetrics,
+            onOverlayChanged: _setDialOverlayActive,
+          ),
         ],
       ),
     );
@@ -167,77 +224,188 @@ class _XeneSidebarState extends ConsumerState<XeneSidebar>
 
   @override
   Widget build(BuildContext context) {
+    final layoutMetrics = widget.metrics ?? XeneLayoutScope.maybeOf(context);
+    if (layoutMetrics != null) {
+      XeneResponsiveDebug.values('Sidebar.receivedMetrics', {
+        'sidebarWidth': layoutMetrics.sidebarWidth,
+        'dialKnobSize': layoutMetrics.dialKnobSize,
+        'dialReservedHeight': layoutMetrics.dialReservedHeight,
+        'textScaleFactor': layoutMetrics.textScaleFactor,
+      });
+    }
+
     final size = MediaQuery.of(context).size;
     if (size.height < 150) return const SizedBox.shrink();
 
-    final availableHeight = size.height - 56;
     final currentOrientation = MediaQuery.of(context).orientation;
     final isLandscape = currentOrientation == Orientation.landscape;
-    final needsScroll = isLandscape || (availableHeight < _contentThreshold);
-    _isLandscape = isLandscape;
-    _needsScroll = needsScroll;
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-
-      if (needsScroll && _scrollController.hasClients) {
-        _startCrawl();
-      } else {
-        _stopCrawl();
-        if (_scrollController.hasClients && _scrollController.offset != 0) {
-          _scrollController.jumpTo(0);
-        }
-      }
-    });
-
-    final width = size.width * 0.30;
-    final clampedWidth = width.clamp(180.0, 210.0);
+    final alignRight = isLandscape && size.width > size.height;
+    // Authored sidebar width clamp. Do not narrow this from responsive metrics:
+    // the XENE logo lockup depends on this minimum horizontal room.
+    final sidebarWidth = (size.width * 0.30).clamp(180.0, 210.0);
+    final sidebarPadding = layoutMetrics?.sidebarPadding ?? 12.0;
 
     return Container(
-      width: clampedWidth,
+      width: sidebarWidth,
       height: double.infinity,
       decoration: const BoxDecoration(
         color: Colors.white,
         border: Border(right: BorderSide(color: Color(0xFFE0E0E0), width: 1)),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      child: Column(
-        crossAxisAlignment: isLandscape
-            ? CrossAxisAlignment.end
-            : CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: ScrollConfiguration(
-              behavior: ScrollConfiguration.of(
-                context,
-              ).copyWith(scrollbars: false),
-              child: Listener(
-                onPointerDown: (_) => _setPaused(true),
-                onPointerUp: (_) => _setPaused(false),
-                onPointerCancel: (_) => _setPaused(false),
-                child: MouseRegion(
-                  onEnter: (_) => _setPaused(true),
-                  onExit: (_) => _setPaused(false),
-                  child: ListView(
-                    controller: _scrollController,
-                    clipBehavior: Clip.hardEdge,
-                    physics: needsScroll
-                        ? const ClampingScrollPhysics()
-                        : const NeverScrollableScrollPhysics(),
-                    padding: EdgeInsets.zero,
-                    children: [
-                      _buildContentSet(isLandscape),
-                      if (needsScroll) _buildContentSet(isLandscape),
-                    ],
+      padding: EdgeInsets.symmetric(horizontal: sidebarPadding),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final availableHeight = constraints.maxHeight;
+          final topSetPadding = isLandscape ? 10.0 : 20.0;
+          final logoBoxHeight = isLandscape ? 220.0 : 160.0;
+          final normalLogoToDialGap = isLandscape ? 95.0 : 95.0;
+          final hintedDialReservedHeight =
+              layoutMetrics?.dialReservedHeight ?? 166.0;
+          final estimatedPresetLabelBottom =
+              topSetPadding +
+              logoBoxHeight +
+              normalLogoToDialGap +
+              _presetDockLabelAndGapHeight +
+              hintedDialReservedHeight;
+          final normalArticleReserve =
+              (isLandscape
+                  ? _articlesSliderHeightLandscape
+                  : _articlesSliderHeightPortrait) +
+              (isLandscape
+                  ? _articlesBottomGapLandscape
+                  : _articlesBottomGapPortrait);
+          final normalArticleTop = availableHeight - normalArticleReserve;
+          final compactPortrait =
+              !isLandscape &&
+              normalArticleTop <
+                  estimatedPresetLabelBottom + _presetArticleMinGap;
+          final articleSliderHeight = isLandscape
+              ? _articlesSliderHeightLandscape
+              : compactPortrait
+              ? _articlesSliderHeightCompactPortrait
+              : _articlesSliderHeightPortrait;
+          final articleBottomGap = isLandscape
+              ? _articlesBottomGapLandscape
+              : compactPortrait
+              ? _articlesBottomGapCompactPortrait
+              : _articlesBottomGapPortrait;
+          final bottomReserve = articleSliderHeight + articleBottomGap;
+          final scrollViewportHeight = (availableHeight - bottomReserve).clamp(
+            0.0,
+            double.infinity,
+          );
+          const presetLabelReserve = 28.0;
+          // Authored sidebar cycle height. Keep this independent from shared
+          // metrics so global density changes cannot move the logo/articles.
+          final contentCycleHeight = isLandscape ? 740.0 : 700.0;
+          final measuredContentCycleHeight =
+              contentCycleHeight + presetLabelReserve;
+          // Portrait mode is intentionally static. Auto-crawl is allowed only
+          // for genuinely short landscape sidebars where the authored content
+          // cannot fit vertically. Wide desktop/tablet windows must stay still.
+          final needsScroll =
+              isLandscape &&
+              availableHeight <= _sidebarAutoCrawlMaxHeight &&
+              availableHeight < measuredContentCycleHeight;
+
+          _needsScroll = needsScroll;
+          _contentCycleHeight = measuredContentCycleHeight;
+
+          XeneResponsiveDebug.constraints('Sidebar.inner', constraints);
+          XeneResponsiveDebug.values('Sidebar.layout', {
+            'sidebarWidth': sidebarWidth,
+            'sidebarPadding': sidebarPadding,
+            'availableHeight': availableHeight,
+            'bottomReserve': bottomReserve,
+            'scrollViewportHeight': scrollViewportHeight,
+            'contentCycleHeight': measuredContentCycleHeight,
+            'needsScroll': needsScroll,
+            'autoCrawlMaxHeight': _sidebarAutoCrawlMaxHeight,
+            'alignRight': alignRight,
+            'compactPortrait': compactPortrait,
+            'estimatedPresetLabelBottom': estimatedPresetLabelBottom,
+            'normalArticleTop': normalArticleTop,
+            'presetArticleMinGap': _presetArticleMinGap,
+          });
+
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+
+            if (needsScroll && _scrollController.hasClients) {
+              _startCrawl();
+            } else {
+              _stopCrawl();
+              if (_scrollController.hasClients &&
+                  _scrollController.offset != 0) {
+                _scrollController.jumpTo(0);
+              }
+            }
+          });
+
+          return Column(
+            crossAxisAlignment: alignRight
+                ? CrossAxisAlignment.end
+                : CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: ScrollConfiguration(
+                  behavior: ScrollConfiguration.of(
+                    context,
+                  ).copyWith(scrollbars: false),
+                  child: Listener(
+                    onPointerDown: (_) => _setPaused(true),
+                    onPointerUp: (_) => _setPaused(false),
+                    onPointerCancel: (_) => _setPaused(false),
+                    child: MouseRegion(
+                      onEnter: (_) => _setPaused(true),
+                      onExit: (_) => _setPaused(false),
+                      child: ListView(
+                        controller: _scrollController,
+                        clipBehavior: Clip.hardEdge,
+                        physics: needsScroll
+                            ? const ClampingScrollPhysics()
+                            : const NeverScrollableScrollPhysics(),
+                        padding: EdgeInsets.zero,
+                        children: [
+                          _buildContentSet(
+                            isLandscape: isLandscape,
+                            compactPortrait: compactPortrait,
+                            layoutMetrics: layoutMetrics,
+                            contentCycleHeight: measuredContentCycleHeight,
+                            alignRight: alignRight,
+                          ),
+                          if (needsScroll)
+                            _buildContentSet(
+                              isLandscape: isLandscape,
+                              compactPortrait: compactPortrait,
+                              layoutMetrics: layoutMetrics,
+                              contentCycleHeight: measuredContentCycleHeight,
+                              alignRight: alignRight,
+                            ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
               ),
-            ),
-          ),
-          // PINNED BOTTOM SECTION
-          _ArticlesDock(isLandscape: isLandscape),
-          SizedBox(height: isLandscape ? 12 : 30),
-        ],
+              // PINNED BOTTOM SECTION
+              AnimatedOpacity(
+                opacity: _isDialOverlayActive ? 0.0 : 1.0,
+                duration: const Duration(milliseconds: 120),
+                curve: Curves.easeOut,
+                child: IgnorePointer(
+                  ignoring: _isDialOverlayActive,
+                  child: _ArticlesDock(
+                    isLandscape: isLandscape,
+                    alignRight: alignRight,
+                    compactPortrait: compactPortrait,
+                  ),
+                ),
+              ),
+              SizedBox(height: articleBottomGap),
+            ],
+          );
+        },
       ),
     );
   }
@@ -245,11 +413,14 @@ class _XeneSidebarState extends ConsumerState<XeneSidebar>
 
 class _ArticlesSlider extends StatefulWidget {
   const _ArticlesSlider({
-    super.key,
     required this.isLandscape,
+    required this.alignRight,
+    required this.compactPortrait,
     required this.articles,
   });
   final bool isLandscape;
+  final bool alignRight;
+  final bool compactPortrait;
   final List<ArticleItem> articles;
 
   @override
@@ -313,12 +484,15 @@ class _ArticlesSliderState extends State<_ArticlesSlider> {
 
   @override
   Widget build(BuildContext context) {
-    final height = widget.isLandscape ? 96.0 : 210.0;
-    final crossAxis = widget.isLandscape
+    final crossAxis = widget.alignRight
         ? CrossAxisAlignment.end
         : CrossAxisAlignment.start;
-    final textAlign =
-        widget.isLandscape ? TextAlign.right : TextAlign.left;
+    final textAlign = widget.alignRight ? TextAlign.right : TextAlign.left;
+    final height = widget.isLandscape
+        ? _articlesSliderHeightLandscape
+        : widget.compactPortrait
+        ? _articlesSliderHeightCompactPortrait
+        : _articlesSliderHeightPortrait;
 
     return SizedBox(
       height: height,
@@ -345,24 +519,92 @@ class _ArticlesSliderState extends State<_ArticlesSlider> {
                       color: Colors.black,
                       height: 1.05,
                     ),
-                    maxLines: widget.isLandscape ? 2 : null,
-                    overflow: widget.isLandscape
-                        ? TextOverflow.ellipsis
-                        : TextOverflow.visible,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    article.snippet,
-                    textAlign: textAlign,
-                    style: GoogleFonts.archivo(
-                      fontSize: 12,
-                      color: const Color(0xFF444444),
-                    ),
-                    maxLines: widget.isLandscape ? 2 : 8,
+                    maxLines: widget.compactPortrait
+                        ? 1
+                        : widget.isLandscape
+                        ? 2
+                        : 3,
                     overflow: TextOverflow.ellipsis,
                   ),
+                  if (!widget.compactPortrait) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      article.snippet,
+                      textAlign: textAlign,
+                      style: GoogleFonts.archivo(
+                        fontSize: 12,
+                        color: const Color(0xFF444444),
+                      ),
+                      maxLines: widget.isLandscape ? 2 : 8,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
                 ],
               ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _DelayedTopFadeIn extends StatefulWidget {
+  const _DelayedTopFadeIn({
+    super.key,
+    required this.height,
+    required this.child,
+  });
+
+  final double height;
+  final Widget child;
+
+  @override
+  State<_DelayedTopFadeIn> createState() => _DelayedTopFadeInState();
+}
+
+// Articles reveal invariant: loading/error/data must reserve the same dock
+// height, and the title must be inside this delayed reveal. Otherwise the
+// ARTICLES header or carousel flashes/jumps before the fade begins.
+class _DelayedTopFadeInState extends State<_DelayedTopFadeIn>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  Timer? _delayTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    );
+    _delayTimer = Timer(const Duration(seconds: 1), () {
+      if (mounted) _controller.forward();
+    });
+  }
+
+  @override
+  void dispose() {
+    _delayTimer?.cancel();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: widget.height,
+      child: AnimatedBuilder(
+        animation: _controller,
+        child: SizedBox(height: widget.height, child: widget.child),
+        builder: (context, child) {
+          final reveal = Curves.easeOutCubic.transform(_controller.value);
+          final opacity = Curves.easeOut.transform(_controller.value);
+          return ClipRect(
+            child: Align(
+              alignment: Alignment.topCenter,
+              heightFactor: reveal,
+              child: Opacity(opacity: opacity, child: child),
             ),
           );
         },
@@ -497,83 +739,115 @@ Widget previewXeneSidebar() {
 }
 
 class _ArticlesDock extends ConsumerWidget {
-  const _ArticlesDock({required this.isLandscape});
+  const _ArticlesDock({
+    required this.isLandscape,
+    required this.alignRight,
+    required this.compactPortrait,
+  });
 
   final bool isLandscape;
+  final bool alignRight;
+  final bool compactPortrait;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final articlesAsync = ref.watch(presetArticlesProvider);
     final slug = ref.watch(activePresetSlugProvider);
+    final sliderHeight = isLandscape
+        ? _articlesSliderHeightLandscape
+        : compactPortrait
+        ? _articlesSliderHeightCompactPortrait
+        : _articlesSliderHeightPortrait;
 
-    return Align(
-      alignment: isLandscape ? Alignment.centerRight : Alignment.centerLeft,
-      child: Column(
-        crossAxisAlignment: isLandscape
-            ? CrossAxisAlignment.end
-            : CrossAxisAlignment.start,
-        children: [
-          Text(
-            'ARTICLES',
-            textAlign: isLandscape ? TextAlign.right : TextAlign.left,
-            style: const TextStyle(
-              fontFamily: 'Teko',
-              fontSize: 12,
-              color: Color(0xFF666666),
-              letterSpacing: 1.44,
-              height: 1.66,
-            ),
-          ),
-          const SizedBox(height: 4),
-          articlesAsync.when(
-            data: (articles) {
-              if (articles.isEmpty) {
-                return const SizedBox(
-                  height: 60,
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      'No articles yet',
-                      style: TextStyle(
-                        fontFamily: 'Archivo',
-                        fontSize: 11,
-                        color: Color(0xFFAAAAAA),
-                      ),
-                    ),
-                  ),
-                );
-              }
-              return _ArticlesSlider(
-                key: ValueKey(slug),
-                isLandscape: isLandscape,
-                articles: articles,
-              );
-            },
-            loading: () => SizedBox(
-              height: isLandscape ? 96.0 : 260.0,
-              child: const Center(
-                child: SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 1.5,
-                    color: Color(0xFFBBBBBB),
-                  ),
-                ),
+    XeneResponsiveDebug.values('ArticlesDock.geometry', {
+      'isLandscape': isLandscape,
+      'alignRight': alignRight,
+      'sliderHeight': sliderHeight,
+      'bottomGap': isLandscape
+          ? _articlesBottomGapLandscape
+          : _articlesBottomGapPortrait,
+    });
+
+    // Keep this height identical for loading, error, empty, and data states.
+    final dockHeight = _articlesHeaderHeight + sliderHeight;
+
+    Widget buildContent(Widget body) {
+      return Align(
+        alignment: alignRight ? Alignment.centerRight : Alignment.centerLeft,
+        child: Column(
+          crossAxisAlignment: alignRight
+              ? CrossAxisAlignment.end
+              : CrossAxisAlignment.start,
+          children: [
+            Text(
+              'ARTICLES',
+              textAlign: alignRight ? TextAlign.right : TextAlign.left,
+              style: const TextStyle(
+                fontFamily: 'Teko',
+                fontSize: 12,
+                color: Color(0xFF666666),
+                letterSpacing: 1.44,
+                height: 1.66,
               ),
             ),
-            error: (_, __) => const SizedBox.shrink(),
-          ),
-        ],
-      ),
+            const SizedBox(height: 4),
+            body,
+          ],
+        ),
+      );
+    }
+
+    return articlesAsync.when(
+      data: (articles) {
+        final body = articles.isEmpty
+            ? SizedBox(
+                height: sliderHeight,
+                child: Align(
+                  alignment: alignRight
+                      ? Alignment.centerRight
+                      : Alignment.centerLeft,
+                  child: const Text(
+                    'No articles yet',
+                    style: TextStyle(
+                      fontFamily: 'Archivo',
+                      fontSize: 11,
+                      color: Color(0xFFAAAAAA),
+                    ),
+                  ),
+                ),
+              )
+            : _ArticlesSlider(
+                isLandscape: isLandscape,
+                alignRight: alignRight,
+                compactPortrait: compactPortrait,
+                articles: articles,
+              );
+
+        // The ARTICLES title is intentionally inside the reveal child. Do not
+        // render it separately above the provider state; that causes a visible
+        // title jump before the article body fades in.
+        return _DelayedTopFadeIn(
+          key: ValueKey('articles-reveal-$slug'),
+          height: dockHeight,
+          child: buildContent(body),
+        );
+      },
+      loading: () => SizedBox(height: dockHeight),
+      error: (_, __) => SizedBox(height: dockHeight),
     );
   }
 }
 
 class _PresetDialDock extends ConsumerWidget {
-  const _PresetDialDock({required this.isLandscape});
+  const _PresetDialDock({
+    required this.isLandscape,
+    required this.metrics,
+    required this.onOverlayChanged,
+  });
 
   final bool isLandscape;
+  final XeneLayoutMetrics? metrics;
+  final ValueChanged<bool> onOverlayChanged;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -583,49 +857,89 @@ class _PresetDialDock extends ConsumerWidget {
       alignment: Alignment.center,
       child: Padding(
         padding: const EdgeInsets.only(top: 3),
-        child: SizedBox(
-          width: 150,
-          height: 160,
-          child: dialAsync.when(
-            data: (state) {
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  const Text(
-                    'PRESETS',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontFamily: 'Teko',
-                      fontSize: 12,
-                      color: Color(0xFF666666),
-                      letterSpacing: 1.44,
-                      height: 1.66,
-                    ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final fallbackReservedWidth = metrics?.dialReservedWidth ?? 150.0;
+            final availableWidth =
+                constraints.maxWidth.isFinite && constraints.maxWidth > 0
+                ? constraints.maxWidth
+                : fallbackReservedWidth;
+            final minReservedWidth = availableWidth < 96.0
+                ? availableWidth
+                : 96.0;
+            final dialReservedWidth = fallbackReservedWidth
+                .clamp(minReservedWidth, availableWidth)
+                .toDouble();
+            final maxKnobSize = (dialReservedWidth - 40.0)
+                .clamp(48.0, 104.0)
+                .toDouble();
+            final dialKnobSize = (metrics?.dialKnobSize ?? 92.0)
+                .clamp(48.0, maxKnobSize)
+                .toDouble();
+            final dialReservedHeight =
+                (metrics?.dialReservedHeight ?? dialKnobSize + 74.0)
+                    .clamp(dialKnobSize + 56.0, dialKnobSize + 96.0)
+                    .toDouble();
+
+            XeneResponsiveDebug.constraints('PresetDialDock', constraints);
+            XeneResponsiveDebug.values('PresetDialDock.geometry', {
+              'isLandscape': isLandscape,
+              'availableWidth': availableWidth,
+              'dialKnobSize': dialKnobSize,
+              'dialReservedWidth': dialReservedWidth,
+              'dialReservedHeight': dialReservedHeight,
+            });
+
+            return SizedBox(
+              width: dialReservedWidth,
+              child: dialAsync.when(
+                skipLoadingOnRefresh: true,
+                skipLoadingOnReload: true,
+                data: (state) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      const Text(
+                        'PRESETS',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontFamily: 'Teko',
+                          fontSize: 12,
+                          color: Color(0xFF666666),
+                          letterSpacing: 1.44,
+                          height: 1.66,
+                        ),
+                      ),
+                      const SizedBox(
+                        height: 2,
+                      ), // GAP ADJUSTMENT: Reduced gap between label and dial for better balance
+                      PresetDial(
+                        slots: state.slots,
+                        activeSlug: state.activePresetSlug,
+                        knobSize: dialKnobSize,
+                        reservedWidth: dialReservedWidth,
+                        reservedHeight: dialReservedHeight,
+                        onOverlayChanged: onOverlayChanged,
+                        onChanged: (slot) {
+                          ref
+                              .read(presetDialProvider.notifier)
+                              .selectPreset(slot.slug);
+                        },
+                      ),
+                    ],
+                  );
+                },
+                loading: () => const Center(
+                  child: SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(strokeWidth: 2),
                   ),
-                  const SizedBox(
-                    height: 2,
-                  ), // GAP ADJUSTMENT: Reduced gap between label and dial for better balance
-                  PresetDial(
-                    slots: state.slots,
-                    activeSlug: state.activePresetSlug,
-                    onChanged: (slot) {
-                      ref
-                          .read(presetDialProvider.notifier)
-                          .selectPreset(slot.slug);
-                    },
-                  ),
-                ],
-              );
-            },
-            loading: () => const Center(
-              child: SizedBox(
-                width: 24,
-                height: 24,
-                child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                error: (_, __) => const SizedBox.shrink(),
               ),
-            ),
-            error: (_, __) => const SizedBox.shrink(),
-          ),
+            );
+          },
         ),
       ),
     );

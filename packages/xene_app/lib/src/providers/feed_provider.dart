@@ -49,12 +49,13 @@ final searchQueryProvider = StateProvider<String?>((ref) => null);
 
 // Cross-platform full-31d search via backend ilike.
 // Auto-disposes when search is cleared so stale results don't linger.
-final searchFeedProvider =
-    FutureProvider.autoDispose<List<FeedItem>>((ref) async {
+final searchFeedProvider = FutureProvider.autoDispose<List<FeedItem>>((
+  ref,
+) async {
   final q = ref.watch(searchQueryProvider);
   if (q == null || q.trim().length < 2) return const [];
 
-  final presetSlug = ref.read(activePresetSlugProvider);
+  final presetSlug = ref.watch(activePresetSlugProvider);
   final queryParams = <String, dynamic>{
     'q': q.trim(),
     'limit': 50,
@@ -253,55 +254,87 @@ class FeedNotifier extends AsyncNotifier<List<FeedItem>> {
 
     // Both requests fire simultaneously.
     // SC+YT returns in ~300ms (cache hits); BC may take 10s on cold start.
-    debugPrint('[feedProvider] Phase-1 firing: platforms=soundcloud,youtube zone=recent');
-    debugPrint('[feedProvider] Phase-2 firing: platforms=bandcamp zone=recent (concurrent)');
-    final bcFuture = _fetchFeed(page: 1, zone: 'recent', platforms: 'bandcamp');
+    debugPrint(
+      '[feedProvider] Phase-1 firing: platforms=soundcloud,youtube zone=recent',
+    );
+    debugPrint(
+      '[feedProvider] Phase-2 firing: platforms=bandcamp zone=recent (concurrent)',
+    );
+    final bcFuture = _fetchFeed(
+      page: 1,
+      presetSlug: currentPreset,
+      zone: 'recent',
+      platforms: 'bandcamp',
+    );
     final fastItems = await _fetchFeed(
       page: 1,
+      presetSlug: currentPreset,
       zone: 'recent',
       platforms: 'soundcloud,youtube',
     );
+
+    // Guard: if the preset changed while SC+YT was in flight, discard results.
+    // Without this check the stale HTTP response would still update state and
+    // briefly show wrong-preset cards before the correct build overwrites them.
+    if (cancelled || ref.read(activePresetSlugProvider) != currentPreset) {
+      return const <FeedItem>[];
+    }
+
     debugPrint(
       '[feedProvider] Phase-1 complete: ${fastItems.length} SC+YT items — rendering feed now',
     );
 
     // BC appends when ready without blocking the initial render.
-    bcFuture.then((bcItems) {
-      debugPrint('[feedProvider] Phase-2 BC response received: ${bcItems.length} items');
-      if (ref.read(activePresetSlugProvider) != currentPreset) {
-        debugPrint(
-          '[feedProvider] Phase-2 DISCARDED — preset changed from $currentPreset '
-          'to ${ref.read(activePresetSlugProvider)} while BC was loading',
-        );
-        return;
-      }
-      if (bcItems.isEmpty) {
-        debugPrint('[feedProvider] Phase-2 WARNING: BC returned 0 items — nothing to append');
-        return;
-      }
-      final current = state.valueOrNull ?? [];
-      final existingIds = current.map((i) => '${i.platform}_${i.id}').toSet();
-      final newBcItems = bcItems
-          .where((i) => !existingIds.contains('${i.platform}_${i.id}'))
-          .toList();
-      debugPrint(
-        '[feedProvider] Phase-2 dedup — current=${current.length} '
-        'bcItems=${bcItems.length} newBcItems=${newBcItems.length} '
-        'duplicatesSkipped=${bcItems.length - newBcItems.length}',
-      );
-      if (newBcItems.isNotEmpty) {
-        // Mark new IDs BEFORE updating state so cards read the set on first build.
-        final newIds = newBcItems.map((i) => '${i.platform}_${i.id}').toSet();
-        ref.read(newFeedItemIdsProvider.notifier).state = newIds;
-        state = AsyncData(_sortNewestFirst([...current, ...newBcItems]));
-        debugPrint(
-          '[feedProvider] Phase-2 state updated — total items now '
-          '${(state.valueOrNull ?? []).length} newAnimatingIds=${newIds.length}',
-        );
-      }
-    }).catchError((Object e) {
-      debugPrint('[feedProvider] Phase-2 ERROR (feed still showing SC+YT): $e');
-    });
+    bcFuture
+        .then((bcItems) {
+          // Discard if this build was superseded (preset changed mid-flight).
+          if (cancelled) return;
+          debugPrint(
+            '[feedProvider] Phase-2 BC response received: ${bcItems.length} items',
+          );
+          if (ref.read(activePresetSlugProvider) != currentPreset) {
+            debugPrint(
+              '[feedProvider] Phase-2 DISCARDED — preset changed from $currentPreset '
+              'to ${ref.read(activePresetSlugProvider)} while BC was loading',
+            );
+            return;
+          }
+          if (bcItems.isEmpty) {
+            debugPrint(
+              '[feedProvider] Phase-2 WARNING: BC returned 0 items — nothing to append',
+            );
+            return;
+          }
+          final current = state.valueOrNull ?? [];
+          final existingIds = current
+              .map((i) => '${i.platform}_${i.id}')
+              .toSet();
+          final newBcItems = bcItems
+              .where((i) => !existingIds.contains('${i.platform}_${i.id}'))
+              .toList();
+          debugPrint(
+            '[feedProvider] Phase-2 dedup — current=${current.length} '
+            'bcItems=${bcItems.length} newBcItems=${newBcItems.length} '
+            'duplicatesSkipped=${bcItems.length - newBcItems.length}',
+          );
+          if (newBcItems.isNotEmpty) {
+            // Mark new IDs BEFORE updating state so cards read the set on first build.
+            final newIds = newBcItems
+                .map((i) => '${i.platform}_${i.id}')
+                .toSet();
+            ref.read(newFeedItemIdsProvider.notifier).state = newIds;
+            state = AsyncData(_sortNewestFirst([...current, ...newBcItems]));
+            debugPrint(
+              '[feedProvider] Phase-2 state updated — total items now '
+              '${(state.valueOrNull ?? []).length} newAnimatingIds=${newIds.length}',
+            );
+          }
+        })
+        .catchError((Object e) {
+          debugPrint(
+            '[feedProvider] Phase-2 ERROR (feed still showing SC+YT): $e',
+          );
+        });
 
     return fastItems;
   }
@@ -323,21 +356,24 @@ class FeedNotifier extends AsyncNotifier<List<FeedItem>> {
 
   Future<void> fetchWithSeedDate(String seedDate) async {
     final parsedSeed = DateTime.tryParse(seedDate);
+    final presetSlug = ref.read(activePresetSlugProvider);
     ref.read(feedEffectiveDateProvider.notifier).state = parsedSeed;
     state = const AsyncLoading();
     // TEST mode: no zone — returns both recent + archive for full simulation.
     state = await AsyncValue.guard(
-      () => _fetchFeed(page: 1, seedDate: seedDate),
+      () => _fetchFeed(page: 1, presetSlug: presetSlug, seedDate: seedDate),
     );
   }
 
   Future<void> refresh() async {
     final effectiveDate = ref.read(feedEffectiveDateProvider);
     final seedDate = effectiveDate?.toIso8601String().substring(0, 10);
+    final presetSlug = ref.read(activePresetSlugProvider);
     state = const AsyncLoading();
     state = await AsyncValue.guard(
       () => _fetchFeed(
         page: 1,
+        presetSlug: presetSlug,
         seedDate: seedDate,
         zone: seedDate == null ? 'recent' : null,
       ),
@@ -346,6 +382,7 @@ class FeedNotifier extends AsyncNotifier<List<FeedItem>> {
 
   Future<List<FeedItem>> _fetchFeed({
     required int page,
+    required String presetSlug,
     String? seedDate,
     String? zone,
     String? platforms,
@@ -354,7 +391,6 @@ class FeedNotifier extends AsyncNotifier<List<FeedItem>> {
       'page': page,
       'limit': _kFeedWindowLimit,
     };
-    final presetSlug = ref.read(activePresetSlugProvider);
     if (presetSlug.isNotEmpty) queryParams['preset_id'] = presetSlug;
     if (seedDate != null) queryParams['seed_date'] = seedDate;
     if (zone != null) queryParams['zone'] = zone;
@@ -414,6 +450,7 @@ class ArchiveFetchNotifier extends AsyncNotifier<List<FeedItem>> {
   bool _isFetching = false;
   bool _hasMore = true;
   int _nextPage = 1;
+  int _generation = 0;
 
   @override
   Future<List<FeedItem>> build() async {
@@ -425,6 +462,7 @@ class ArchiveFetchNotifier extends AsyncNotifier<List<FeedItem>> {
     _isFetching = false;
     _hasMore = true;
     _nextPage = 1;
+    _generation++;
     return [];
   }
 
@@ -441,16 +479,37 @@ class ArchiveFetchNotifier extends AsyncNotifier<List<FeedItem>> {
 
     _fetched = true;
     _isFetching = true;
+    final requestGeneration = _generation;
+    final requestPresetSlug = ref.read(activePresetSlugProvider);
+    final requestFeedMode = ref.read(feedModeProvider);
     if (showInitialLoading && existingItems.isEmpty) {
       state = const AsyncLoading();
     }
 
     final page = _nextPage;
-    final result = await AsyncValue.guard(() => _fetchArchive(page: page));
+    final result = await AsyncValue.guard(
+      () => _fetchArchive(
+        page: page,
+        presetSlug: requestPresetSlug,
+        feedMode: requestFeedMode,
+      ),
+    );
+    final isStale =
+        requestGeneration != _generation ||
+        requestPresetSlug != ref.read(activePresetSlugProvider) ||
+        requestFeedMode != ref.read(feedModeProvider);
+    if (isStale) {
+      debugPrint(
+        '[archiveFetchProvider] STALE response discarded '
+        'page=$page preset=$requestPresetSlug mode=$requestFeedMode',
+      );
+      _isFetching = false;
+      return;
+    }
     result.when(
       data: (items) {
         final merged = page == 1 ? items : [...existingItems, ...items];
-        final pageLimit = ref.read(feedModeProvider) == FeedMode.fullFeed
+        final pageLimit = requestFeedMode == FeedMode.fullFeed
             ? _kFullArchivePageLimit
             : _kArchivePageLimit;
         _hasMore = items.length == pageLimit;
@@ -468,9 +527,12 @@ class ArchiveFetchNotifier extends AsyncNotifier<List<FeedItem>> {
     _isFetching = false;
   }
 
-  Future<List<FeedItem>> _fetchArchive({required int page}) async {
-    final presetSlug = ref.read(activePresetSlugProvider);
-    final isFullFeed = ref.read(feedModeProvider) == FeedMode.fullFeed;
+  Future<List<FeedItem>> _fetchArchive({
+    required int page,
+    required String presetSlug,
+    required FeedMode feedMode,
+  }) async {
+    final isFullFeed = feedMode == FeedMode.fullFeed;
     final pageLimit = isFullFeed ? _kFullArchivePageLimit : _kArchivePageLimit;
     final queryParams = <String, dynamic>{
       'page': page,
@@ -481,7 +543,8 @@ class ArchiveFetchNotifier extends AsyncNotifier<List<FeedItem>> {
     if (presetSlug.isNotEmpty) queryParams['preset_id'] = presetSlug;
     debugPrint(
       '[archiveFetchProvider] GET /feed/merged zone=archive '
-      'page=$page limit=$_kArchivePageLimit preset=$presetSlug',
+      'page=$page limit=$pageLimit preset=$presetSlug '
+      'full_archive=$isFullFeed',
     );
     try {
       final dio = Dio(

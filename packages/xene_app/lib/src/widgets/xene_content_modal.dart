@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:xene_app/src/layout/xene_responsive_debug.dart';
 import 'package:xene_domain/xene_domain.dart';
 
 import '../providers/player_provider.dart';
@@ -29,169 +30,214 @@ class XeneContentModal extends ConsumerWidget {
     final isCurrent = playerState.currentTrack?.id == item.id;
     final isPlaying = isCurrent && playerState.isPlaying;
     final isPlayable = canPlayInApp(item);
+    final repostAttribution = _repostAttribution(item);
+    final bodyText = _bodyWithoutAttribution(item.body, repostAttribution);
 
-    return Container(
-      decoration: const BoxDecoration(
-        color: Color(0xFF111111),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxHeight: MediaQuery.of(context).size.height * 0.85,
-        ),
-        child: Column(
-          children: [
-            _PinnedDismissPill(onDismiss: () => Navigator.pop(context)),
-            Expanded(
-              child: SingleChildScrollView(
-                physics: const BouncingScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(24, 12, 24, 32),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Center(
-                      child: Stack(
-                        alignment: Alignment.center,
-                        children: [
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(16),
-                            child: CachedNetworkImage(
-                              imageUrl: item.artworkUrl ?? '',
-                              width: 200,
-                              height: 200,
-                              fit: BoxFit.cover,
-                            ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        XeneResponsiveDebug.constraints('ContentModal', constraints);
+        XeneResponsiveDebug.values('ContentModal.item', {
+          'id': item.id,
+          'platform': item.platform,
+          'contentType': item.contentType,
+          'isPlayable': isPlayable,
+        });
+
+        return Container(
+          decoration: const BoxDecoration(
+            color: Color(0xFF111111),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.85,
+            ),
+            child: Column(
+              children: [
+                _PinnedDismissPill(onDismiss: () => Navigator.pop(context)),
+                Expanded(
+                  child: SingleChildScrollView(
+                    physics: const BouncingScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(24, 12, 24, 32),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Center(
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(16),
+                                child: CachedNetworkImage(
+                                  imageUrl: item.artworkUrl ?? '',
+                                  width: 200,
+                                  height: 200,
+                                  fit: BoxFit.cover,
+                                ),
+                              ),
+                              if (isPlayable)
+                                Material(
+                                  color: Colors.transparent,
+                                  child: InkWell(
+                                    onTap: () {
+                                      print(
+                                        '[UI] Play button tapped for item: ${item.id}',
+                                      );
+                                      ref
+                                          .read(playerProvider.notifier)
+                                          .playTrack(item);
+                                      Navigator.pop(context);
+                                    },
+                                    borderRadius: BorderRadius.circular(50),
+                                    child: Container(
+                                      padding: const EdgeInsets.all(12),
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: Colors.black.withValues(
+                                          alpha: 0.4,
+                                        ),
+                                      ),
+                                      child: Icon(
+                                        isPlaying
+                                            ? Icons.pause
+                                            : Icons.play_arrow,
+                                        color: Colors.white,
+                                        size: 48,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
                           ),
-                          if (isPlayable)
-                            Material(
-                              color: Colors.transparent,
-                              child: InkWell(
-                                onTap: () {
-                                  print(
-                                    '[UI] Play button tapped for item: ${item.id}',
-                                  );
-                                  ref
-                                      .read(playerProvider.notifier)
-                                      .playTrack(item);
-                                  Navigator.pop(context);
-                                },
-                                borderRadius: BorderRadius.circular(50),
-                                child: Container(
-                                  padding: const EdgeInsets.all(12),
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: Colors.black.withValues(alpha: 0.4),
-                                  ),
-                                  child: Icon(
-                                    isPlaying ? Icons.pause : Icons.play_arrow,
-                                    color: Colors.white,
-                                    size: 48,
-                                  ),
+                        ),
+                        const SizedBox(height: 24),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Flexible(
+                              child: Align(
+                                alignment: Alignment.centerLeft,
+                                child: _PlatformBadge(platform: item.platform),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Flexible(
+                              child: Text(
+                                item.contentType.toUpperCase(),
+                                textAlign: TextAlign.right,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                softWrap: false,
+                                style: const TextStyle(
+                                  color: Color(0xFFFF5500),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 1,
                                 ),
                               ),
                             ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        _PlatformBadge(platform: item.platform),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
                         Text(
-                          item.contentType.toUpperCase(),
+                          item.title ?? 'Untitled',
                           style: const TextStyle(
-                            color: Color(0xFFFF5500),
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 1,
+                            color: Colors.white,
+                            fontSize: 24,
+                            fontWeight: FontWeight.w900,
+                            height: 1.1,
                           ),
+                          softWrap: true,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          item.artistName,
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.6),
+                            fontSize: 18,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        if (repostAttribution != null) ...[
+                          const SizedBox(height: 10),
+                          _RepostAttribution(text: repostAttribution),
+                        ],
+                        const SizedBox(height: 24),
+                        if (bodyText != null && bodyText.isNotEmpty)
+                          Text(
+                            bodyText,
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.7),
+                              fontSize: 15,
+                              height: 1.6,
+                            ),
+                          ),
+                        const SizedBox(height: 40),
+                        Center(
+                          child: item.platform.toLowerCase() == 'bandcamp'
+                              ? Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    BandcampOpenButton(
+                                      onTap: () => _launchUrl(item.externalUrl),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      'OPEN IN BANDCAMP',
+                                      style: GoogleFonts.teko(
+                                        color: Colors.white38,
+                                        fontSize: 12,
+                                        letterSpacing: 1.0,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      softWrap: false,
+                                    ),
+                                  ],
+                                )
+                              : Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    GestureDetector(
+                                      onTap: () => _launchUrl(item.externalUrl),
+                                      child: Container(
+                                        width: 32,
+                                        height: 32,
+                                        decoration: BoxDecoration(
+                                          color: Colors.transparent,
+                                          borderRadius: BorderRadius.circular(
+                                            4,
+                                          ),
+                                        ),
+                                        child: _getPlatformIcon(item.platform),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      'TAP TO OPEN',
+                                      style: GoogleFonts.teko(
+                                        color: Colors.white38,
+                                        fontSize: 12,
+                                        letterSpacing: 1.0,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      softWrap: false,
+                                    ),
+                                  ],
+                                ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 12),
-                    Text(
-                      item.title ?? 'Untitled',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 24,
-                        fontWeight: FontWeight.w900,
-                        height: 1.1,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      item.artistName,
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.6),
-                        fontSize: 18,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    if (item.body != null && item.body!.isNotEmpty)
-                      Text(
-                        item.body!,
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.7),
-                          fontSize: 15,
-                          height: 1.6,
-                        ),
-                      ),
-                    const SizedBox(height: 40),
-                    Center(
-                      child: item.platform.toLowerCase() == 'bandcamp'
-                          ? Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                BandcampOpenButton(
-                                  onTap: () => _launchUrl(item.externalUrl),
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  'OPEN IN BANDCAMP',
-                                  style: GoogleFonts.teko(
-                                    color: Colors.white38,
-                                    fontSize: 12,
-                                    letterSpacing: 1.0,
-                                  ),
-                                ),
-                              ],
-                            )
-                          : Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                GestureDetector(
-                                  onTap: () => _launchUrl(item.externalUrl),
-                                  child: Container(
-                                    width: 32,
-                                    height: 32,
-                                    decoration: BoxDecoration(
-                                      color: Colors.transparent,
-                                      borderRadius: BorderRadius.circular(4),
-                                    ),
-                                    child: _getPlatformIcon(item.platform),
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  'TAP TO OPEN',
-                                  style: GoogleFonts.teko(
-                                    color: Colors.white38,
-                                    fontSize: 12,
-                                    letterSpacing: 1.0,
-                                  ),
-                                ),
-                              ],
-                            ),
-                    ),
-                  ],
+                  ),
                 ),
-              ),
+              ],
             ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 
@@ -222,6 +268,75 @@ class XeneContentModal extends ConsumerWidget {
         return const Icon(Icons.launch, color: Colors.white24, size: 24);
     }
   }
+}
+
+class _RepostAttribution extends StatelessWidget {
+  const _RepostAttribution({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFF5500).withValues(alpha: 0.14),
+          border: Border.all(
+            color: const Color(0xFFFF5500).withValues(alpha: 0.38),
+          ),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Text(
+          text,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: GoogleFonts.dmMono(
+            color: const Color(0xFFFFA06A),
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+String? _repostAttribution(FeedItem item) {
+  final body = item.body?.trim();
+  if (body != null && body.startsWith('\u21bb by ')) {
+    return body.split('\n').first;
+  }
+
+  if (item.platform.toLowerCase() != 'soundcloud') return null;
+
+  final title = item.title?.trim();
+  if (title == null || title.isEmpty) return null;
+  final separator = title.indexOf(' - ');
+  if (separator <= 0) return null;
+
+  final producer = title.substring(0, separator).trim();
+  if (producer.isEmpty) return null;
+  if (_normaliseName(producer) == _normaliseName(item.artistName)) {
+    return null;
+  }
+
+  return '\u21bb by ${item.artistName}';
+}
+
+String? _bodyWithoutAttribution(String? body, String? attribution) {
+  final clean = body?.trim();
+  if (clean == null || clean.isEmpty) return null;
+  if (attribution != null && clean.startsWith(attribution)) {
+    final rest = clean.substring(attribution.length).trim();
+    return rest.isEmpty ? null : rest;
+  }
+  return clean;
+}
+
+String _normaliseName(String value) {
+  return value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
 }
 
 class _PinnedDismissPill extends StatelessWidget {
@@ -283,6 +398,9 @@ class _PlatformBadge extends StatelessWidget {
       ),
       child: Text(
         platform.toUpperCase(),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        softWrap: false,
         style: const TextStyle(
           color: Colors.white,
           fontSize: 10,
