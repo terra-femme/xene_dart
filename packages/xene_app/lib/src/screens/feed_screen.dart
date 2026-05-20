@@ -5,15 +5,20 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:lottie/lottie.dart';
+import 'package:xene_app/src/layout/xene_layout_metrics.dart';
+import 'package:xene_app/src/layout/xene_responsive_debug.dart';
 import 'package:xene_domain/xene_domain.dart';
 
+import '../providers/app_state_provider.dart';
 import '../providers/feed_provider.dart';
 import '../providers/preset_provider.dart';
 import '../widgets/xene_feed_card.dart';
 import '../widgets/xene_content_modal.dart';
 
 class FeedScreen extends ConsumerStatefulWidget {
-  const FeedScreen({super.key});
+  const FeedScreen({super.key, this.metrics});
+
+  final XeneLayoutMetrics? metrics;
 
   @override
   ConsumerState<FeedScreen> createState() => _FeedScreenState();
@@ -29,6 +34,9 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
   int _crawlCopyCount = 2;
   double _feedOpacity = 1.0;
   bool _isPresetTransition = false;
+  Stopwatch? _presetTransitionWatch;
+  int _presetTransitionSeq = 0;
+  int _lastFeedRenderLoggedSeq = -1;
 
   final _searchController = TextEditingController();
   Timer? _searchDebounce;
@@ -36,10 +44,36 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
   Timer? _transitionTimeoutTimer;
   bool _transitionRetried = false;
 
+  // Memoized section/loop data — recomputed only when the items list reference changes.
+  List<FeedItem>? _cachedItems;
+  List<_FeedDateSection>? _cachedSections;
+  _FeedCrawlLoop? _cachedLoop;
+  double? _cachedLoopHeight;
+
+  String _transitionElapsedLabel() {
+    final elapsed = _presetTransitionWatch?.elapsedMilliseconds;
+    return elapsed == null ? 'n/a' : '${elapsed}ms';
+  }
+
   @override
   void initState() {
     super.initState();
     _scrollController = ScrollController();
+    // Feed data may already be cached (hot reload, back-nav, provider retained).
+    // ref.listen only fires on changes, so we must manually check on mount.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (!ref.read(revealCompleteProvider)) return;
+      final feed = ref.read(filteredFeedProvider);
+      if (feed.hasValue &&
+          (feed.value?.isNotEmpty ?? false) &&
+          _crawlTicker == null) {
+        debugPrint(
+          '[FeedScreen] initState: feed already cached — starting crawl',
+        );
+        _startCrawl();
+      }
+    });
   }
 
   void _onSearchChanged(String value) {
@@ -61,7 +95,37 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
     _searchDebounce?.cancel();
     ref.read(searchQueryProvider.notifier).state = null;
     setState(() => _searchActive = false);
-    // Crawl will restart when filteredFeedProvider next emits via ref.listen.
+    // Clearing search switches the UI back to filteredFeedProvider, but that
+    // provider may already be warm and therefore may not emit again. Restart
+    // crawl explicitly so the feed cannot stay frozen after search closes.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _searchActive || _crawlTicker != null) return;
+      final feed = ref.read(filteredFeedProvider);
+      if (feed.hasValue && (feed.value?.isNotEmpty ?? false)) {
+        debugPrint('[FeedScreen] clearSearch -> restarting crawl');
+        _startCrawl();
+      }
+    });
+  }
+
+  void _revealFeedAfterData(String reason) {
+    if (!_isPresetTransition && _feedOpacity >= 1.0) return;
+
+    _transitionTimeoutTimer?.cancel();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      debugPrint(
+        '[FeedScreen][UX seq=$_presetTransitionSeq +${_transitionElapsedLabel()}] '
+        'Lottie hidden -> feed revealed after data render: $reason',
+      );
+      // Fade the feed in first, then remove the Lottie from the tree after the
+      // AnimatedOpacity completes. Removing Lottie in the same setState that
+      // starts the fade causes it to vanish abruptly instead of crossfading.
+      setState(() => _feedOpacity = 1.0);
+      Future.delayed(const Duration(milliseconds: 360), () {
+        if (mounted) setState(() => _isPresetTransition = false);
+      });
+    });
   }
 
   // ------------------------------------------------------------
@@ -92,16 +156,27 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
         'singleExtent=${singleExtent.toStringAsFixed(1)} copyCount=$_crawlCopyCount',
       );
 
-      if (maxScroll <= 0) return;
+      if (maxScroll <= 0) {
+        debugPrint(
+          '[FeedScreen] startCrawl ABORTED — maxScroll=0, retrying in 1s',
+        );
+        Future.delayed(const Duration(seconds: 1), () {
+          if (mounted && _crawlTicker == null && !_searchActive) _startCrawl();
+        });
+        return;
+      }
 
       // singleExtent must be >= viewport for the wrap to be seamless.
-      // If not (too few items in this phase), abort and let BC items arrive —
-      // the ref.listen on filteredFeedProvider will retry with more content.
+      // Schedule a retry so we recover if more content arrives without a
+      // filteredFeedProvider change (e.g. background BC fetch completes silently).
       if (singleExtent < viewport) {
         debugPrint(
           '[FeedScreen] startCrawl ABORTED — singleExtent=${singleExtent.toStringAsFixed(1)} '
-          '< viewport=$viewport (not enough content for seamless loop, waiting for more items)',
+          '< viewport=$viewport — retrying in 2s',
         );
+        Future.delayed(const Duration(seconds: 2), () {
+          if (mounted && _crawlTicker == null && !_searchActive) _startCrawl();
+        });
         return;
       }
 
@@ -290,9 +365,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
                 final compositeId = '${item.platform}_${item.id}';
                 final animIndex = animIndexMap[compositeId] ?? -1;
                 return _AnimatingFeedCard(
-                  key: ValueKey(
-                    'feed_card_${sectionIndex}_${itemIndex}_${item.id}',
-                  ),
+                  key: ValueKey('feed_card_${item.platform}_${item.id}'),
                   item: item,
                   onTap: () => showXeneContent(context, item),
                   animIndex: animIndex,
@@ -310,6 +383,16 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
 
   @override
   Widget build(BuildContext context) {
+    final layoutMetrics = widget.metrics ?? XeneLayoutScope.maybeOf(context);
+    if (layoutMetrics != null) {
+      XeneResponsiveDebug.values('FeedScreen.receivedMetrics', {
+        'feedHeaderHeight': layoutMetrics.feedHeaderHeight,
+        'feedControlHeight': layoutMetrics.feedControlHeight,
+        'cardMinHeight': layoutMetrics.cardMinHeight,
+        'cardThumbnailSize': layoutMetrics.cardThumbnailSize,
+      });
+    }
+
     final searchQuery = ref.watch(searchQueryProvider);
     final isSearching = searchQuery != null;
     final feedAsync = isSearching
@@ -326,16 +409,30 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
         _crawlTicker?.dispose();
         _crawlTicker = null;
         _transitionRetried = false;
+        _presetTransitionSeq++;
+        // Clear stale animation IDs from the previous preset. Without this,
+        // cards in the new preset inherit old Phase-2 BC IDs and animate from
+        // 0 height/opacity, making them appear blank until the transition ends.
+        ref.read(newFeedItemIdsProvider.notifier).state = const {};
+        _lastFeedRenderLoggedSeq = -1;
+        _presetTransitionWatch = Stopwatch()..start();
+        debugPrint(
+          '[FeedScreen][UX seq=$_presetTransitionSeq +0ms] '
+          'Preset transition start prev=$prev next=$next -> Lottie shown',
+        );
         // Cancel any previous fallback timer from the last transition.
         _transitionTimeoutTimer?.cancel();
         // Fallback: always end the transition after 6 seconds even if feed
         // never returns non-empty data (e.g. preset genuinely has no content).
         _transitionTimeoutTimer = Timer(const Duration(seconds: 6), () {
           if (mounted && _isPresetTransition) {
-            debugPrint('[FeedScreen] Transition timeout — revealing feed (may be empty)');
-            setState(() {
-              _feedOpacity = 1.0;
-              _isPresetTransition = false;
+            debugPrint(
+              '[FeedScreen][UX seq=$_presetTransitionSeq +${_transitionElapsedLabel()}] '
+              'Transition timeout -> Lottie hidden, revealing feed (may be empty)',
+            );
+            setState(() => _feedOpacity = 1.0);
+            Future.delayed(const Duration(milliseconds: 360), () {
+              if (mounted) setState(() => _isPresetTransition = false);
             });
           }
         });
@@ -354,32 +451,51 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
           // Real items arrived — end the transition cleanly.
           _transitionTimeoutTimer?.cancel();
           Future.delayed(const Duration(milliseconds: 200), () {
-            if (mounted)
-              setState(() {
-                _feedOpacity = 1.0;
-                _isPresetTransition = false;
-              });
+            if (mounted) setState(() => _feedOpacity = 1.0);
+            Future.delayed(const Duration(milliseconds: 360), () {
+              if (mounted) setState(() => _isPresetTransition = false);
+            });
           });
         } else if (!_transitionRetried) {
           // Empty response during transition — could be a stale/race response.
           // Fire one automatic retry so the backend has a second chance to serve
           // real cached data before we give up and show "Empty feed".
           _transitionRetried = true;
-          debugPrint('[FeedScreen] Empty feed during preset transition — scheduling retry');
+          debugPrint(
+            '[FeedScreen] Empty feed during preset transition — scheduling retry',
+          );
           Future.delayed(const Duration(milliseconds: 600), () {
             if (mounted && _isPresetTransition) {
-              debugPrint('[FeedScreen] Retrying feed fetch after empty transition response');
+              debugPrint(
+                '[FeedScreen] Retrying feed fetch after empty transition response',
+              );
               ref.read(feedProvider.notifier).refresh();
             }
           });
         }
       }
-      // Start crawl on initial data arrival and after preset changes settle.
-      // Check _crawlTicker inside the callback (not here) to get the freshest state.
+      // Start crawl on data arrival only if the overlay has already been removed.
+      // If not revealed yet, revealCompleteProvider listener below handles it.
       if (next.hasValue && (next.value?.isNotEmpty ?? false)) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted && _crawlTicker == null) _startCrawl();
+          if (mounted &&
+              _crawlTicker == null &&
+              ref.read(revealCompleteProvider)) {
+            _startCrawl();
+          }
         });
+      }
+    });
+
+    // Start crawl the moment the overlay finishes fading — handles the case
+    // where feed data arrived during the Lottie hold period.
+    ref.listen(revealCompleteProvider, (_, revealed) {
+      if (revealed && _crawlTicker == null && !_searchActive) {
+        final feed = ref.read(filteredFeedProvider);
+        if (feed.hasValue && (feed.value?.isNotEmpty ?? false)) {
+          debugPrint('[FeedScreen] revealComplete -> starting crawl');
+          _startCrawl();
+        }
       }
     });
 
@@ -394,25 +510,48 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
         // ------------------------------------------------------------
         // HEADER
         // ------------------------------------------------------------
-        SizedBox(
-          height: isLandscape ? 100 : 60,
-          width: double.infinity,
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              Positioned(
-                top: isLandscape ? -10 : -20,
-                left: 0,
-                right: 16,
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final fontSize = (constraints.maxWidth * 0.16).clamp(
-                      24.0,
-                      52.0,
-                    );
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final titleFontSize = (constraints.maxWidth * 0.16).clamp(
+              24.0,
+              52.0,
+            );
+            // Authored feed masthead alignment: this band intentionally mirrors
+            // the pre-refactor placement so JUST DROPPED starts at the same
+            // visual top as the XENE logo lockup. Do not replace this with a
+            // large computed visual-height header; that creates a dead gap
+            // above the controls and pushes the feed down. The height below
+            // only reserves the transformed title's painted bottom edge.
+            const titleYScale = 2.0;
+            final headerTop = isLandscape ? -10.0 : -20.0;
+            final paintedTitleHeight = titleFontSize * titleYScale * 1.18;
+            final headerHeight = (headerTop + paintedTitleHeight + 8.0).clamp(
+              isLandscape ? 100.0 : 60.0,
+              isLandscape ? 118.0 : 108.0,
+            );
 
-                    return Transform(
-                      transform: Matrix4.diagonal3Values(1.0, 2.0, 1.0),
+            XeneResponsiveDebug.values('FeedHeader.geometry', {
+              'maxWidth': constraints.maxWidth,
+              'titleFontSize': titleFontSize,
+              'titleYScale': titleYScale,
+              'paintedTitleHeight': paintedTitleHeight,
+              'headerHeight': headerHeight,
+              'headerTop': headerTop,
+              'isLandscape': isLandscape,
+            });
+
+            return SizedBox(
+              height: headerHeight,
+              width: double.infinity,
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Positioned(
+                    top: headerTop,
+                    left: 0,
+                    right: 16,
+                    child: Transform(
+                      transform: Matrix4.diagonal3Values(1.0, titleYScale, 1.0),
                       alignment: Alignment.topRight,
                       child: Text(
                         'JUST DROPPED',
@@ -420,180 +559,217 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
                         maxLines: 1,
                         overflow: TextOverflow.visible,
                         style: GoogleFonts.teko(
-                          fontSize: fontSize,
+                          fontSize: titleFontSize,
                           fontWeight: FontWeight.w700,
                           color: Colors.black,
                         ),
                       ),
-                    );
-                  },
-                ),
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ),
+            );
+          },
         ),
 
         // ------------------------------------------------------------
         // CONTROL BAR
         // ------------------------------------------------------------
-        Container(
-          height: 32,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Flexible(
-                flex: 1,
-                child: Text(
-                  isSearching ? 'SEARCH' : '\u2264 7 DAYS',
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.teko(
-                    fontSize: 18,
-                    color: isSearching
-                        ? const Color(0xFFFF5500)
-                        : const Color(0xFF888888),
-                  ),
-                ),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final compactControls = constraints.maxWidth < 280.0;
+
+            XeneResponsiveDebug.values('FeedControls.geometry', {
+              'maxWidth': constraints.maxWidth,
+              'compactControls': compactControls,
+              'searchActive': _searchActive,
+            });
+
+            return Container(
+              height: 32,
+              padding: EdgeInsets.symmetric(
+                horizontal: compactControls ? 8 : 16,
               ),
-              Flexible(
-                flex: 2,
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 200),
-                  child: _searchActive
-                      ? Row(
-                          key: const ValueKey('search'),
-                          children: [
-                            Expanded(
-                              child: TextField(
-                                controller: _searchController,
-                                autofocus: true,
-                                onChanged: _onSearchChanged,
-                                style: GoogleFonts.teko(
-                                  fontSize: 16,
-                                  color: Colors.black,
-                                ),
-                                decoration: InputDecoration(
-                                  hintText: 'SEARCH...',
-                                  hintStyle: GoogleFonts.teko(
-                                    fontSize: 16,
-                                    color: const Color(0xFF555555),
-                                  ),
-                                  isDense: true,
-                                  contentPadding: EdgeInsets.zero,
-                                  border: InputBorder.none,
-                                ),
-                              ),
-                            ),
-                            GestureDetector(
-                              onTap: _clearSearch,
-                              child: const Icon(
-                                Icons.close,
-                                size: 16,
-                                color: Color(0xFF888888),
-                              ),
-                            ),
-                          ],
-                        )
-                      : Row(
-                          key: const ValueKey('filters'),
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            PopupMenuButton<String>(
-                              onSelected: (value) {
-                                if (value.startsWith('p:')) {
-                                  final platform = value == 'p:all'
-                                      ? null
-                                      : value.substring(2);
-                                  ref
-                                      .read(platformFilterProvider.notifier)
-                                      .state = platform;
-                                } else if (value.startsWith('a:')) {
-                                  final artist = value == 'a:all'
-                                      ? null
-                                      : value.substring(2);
-                                  ref
-                                      .read(artistFilterProvider.notifier)
-                                      .state = artist;
-                                }
-                              },
-                              offset: const Offset(0, 30),
-                              child: Text(
-                                'FILTER BY -',
-                                style: GoogleFonts.teko(
-                                  fontSize: 18,
-                                  color: (currentPlatform != null ||
-                                          currentArtist != null)
-                                      ? const Color(0xFFFF5500)
-                                      : const Color(0xFF888888),
-                                ),
-                              ),
-                              itemBuilder: (context) => [
-                                const PopupMenuItem(
-                                  enabled: false,
-                                  child: Text(
-                                    'PLATFORM',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 12,
-                                      color: Colors.grey,
-                                    ),
-                                  ),
-                                ),
-                                const PopupMenuItem(
-                                  value: 'p:all',
-                                  child: Text('ALL PLATFORMS'),
-                                ),
-                                const PopupMenuItem(
-                                  value: 'p:soundcloud',
-                                  child: Text('SOUNDCLOUD'),
-                                ),
-                                const PopupMenuItem(
-                                  value: 'p:bandcamp',
-                                  child: Text('BANDCAMP'),
-                                ),
-                                const PopupMenuItem(
-                                  value: 'p:youtube',
-                                  child: Text('YOUTUBE'),
-                                ),
-                                const PopupMenuDivider(),
-                                const PopupMenuItem(
-                                  enabled: false,
-                                  child: Text(
-                                    'ARTIST',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 12,
-                                      color: Colors.grey,
-                                    ),
-                                  ),
-                                ),
-                                const PopupMenuItem(
-                                  value: 'a:all',
-                                  child: Text('ALL ARTISTS'),
-                                ),
-                                ...availableArtists.map(
-                                  (name) => PopupMenuItem(
-                                    value: 'a:$name',
-                                    child: Text(name.toUpperCase()),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(width: 8),
-                            GestureDetector(
-                              onTap: _activateSearch,
-                              child: const Icon(
-                                Icons.search,
-                                size: 18,
-                                color: Color(0xFF888888),
-                              ),
-                            ),
-                          ],
+              child: _searchActive
+                  ? Row(
+                      children: [
+                        Text(
+                          'SEARCH',
+                          overflow: TextOverflow.ellipsis,
+                          softWrap: false,
+                          style: GoogleFonts.teko(
+                            fontSize: 18,
+                            color: const Color(0xFFFF5500),
+                          ),
                         ),
-                ),
-              ),
-            ],
-          ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: TextField(
+                            controller: _searchController,
+                            autofocus: true,
+                            onChanged: _onSearchChanged,
+                            style: GoogleFonts.teko(
+                              fontSize: 16,
+                              color: Colors.black,
+                            ),
+                            decoration: InputDecoration(
+                              hintText: 'SEARCH...',
+                              hintStyle: GoogleFonts.teko(
+                                fontSize: 16,
+                                color: const Color(0xFF555555),
+                              ),
+                              isDense: true,
+                              contentPadding: EdgeInsets.zero,
+                              border: InputBorder.none,
+                            ),
+                          ),
+                        ),
+                        GestureDetector(
+                          onTap: _clearSearch,
+                          child: const Icon(
+                            Icons.close,
+                            size: 16,
+                            color: Color(0xFF888888),
+                          ),
+                        ),
+                      ],
+                    )
+                  : Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '\u2264 7 DAYS',
+                            overflow: TextOverflow.ellipsis,
+                            softWrap: false,
+                            style: GoogleFonts.teko(
+                              fontSize: 18,
+                              color: const Color(0xFF888888),
+                            ),
+                          ),
+                        ),
+                        Flexible(
+                          fit: FlexFit.loose,
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              PopupMenuButton<String>(
+                                padding: EdgeInsets.zero,
+                                onSelected: (value) {
+                                  if (value.startsWith('p:')) {
+                                    final platform = value == 'p:all'
+                                        ? null
+                                        : value.substring(2);
+                                    ref
+                                            .read(
+                                              platformFilterProvider.notifier,
+                                            )
+                                            .state =
+                                        platform;
+                                  } else if (value.startsWith('a:')) {
+                                    final artist = value == 'a:all'
+                                        ? null
+                                        : value.substring(2);
+                                    ref
+                                            .read(artistFilterProvider.notifier)
+                                            .state =
+                                        artist;
+                                  }
+                                },
+                                offset: const Offset(0, 30),
+                                child: compactControls
+                                    ? Icon(
+                                        Icons.filter_list,
+                                        size: 18,
+                                        color:
+                                            (currentPlatform != null ||
+                                                currentArtist != null)
+                                            ? const Color(0xFFFF5500)
+                                            : const Color(0xFF888888),
+                                      )
+                                    : Text(
+                                        'FILTER BY -',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        softWrap: false,
+                                        style: GoogleFonts.teko(
+                                          fontSize: 18,
+                                          color:
+                                              (currentPlatform != null ||
+                                                  currentArtist != null)
+                                              ? const Color(0xFFFF5500)
+                                              : const Color(0xFF888888),
+                                        ),
+                                      ),
+                                itemBuilder: (context) => [
+                                  const PopupMenuItem(
+                                    enabled: false,
+                                    child: Text(
+                                      'PLATFORM',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 12,
+                                        color: Colors.grey,
+                                      ),
+                                    ),
+                                  ),
+                                  const PopupMenuItem(
+                                    value: 'p:all',
+                                    child: Text('ALL PLATFORMS'),
+                                  ),
+                                  const PopupMenuItem(
+                                    value: 'p:soundcloud',
+                                    child: Text('SOUNDCLOUD'),
+                                  ),
+                                  const PopupMenuItem(
+                                    value: 'p:bandcamp',
+                                    child: Text('BANDCAMP'),
+                                  ),
+                                  const PopupMenuItem(
+                                    value: 'p:youtube',
+                                    child: Text('YOUTUBE'),
+                                  ),
+                                  const PopupMenuDivider(),
+                                  const PopupMenuItem(
+                                    enabled: false,
+                                    child: Text(
+                                      'ARTIST',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 12,
+                                        color: Colors.grey,
+                                      ),
+                                    ),
+                                  ),
+                                  const PopupMenuItem(
+                                    value: 'a:all',
+                                    child: Text('ALL ARTISTS'),
+                                  ),
+                                  ...availableArtists.map(
+                                    (name) => PopupMenuItem(
+                                      value: 'a:$name',
+                                      child: Text(name.toUpperCase()),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(width: 8),
+                              GestureDetector(
+                                onTap: _activateSearch,
+                                child: const Icon(
+                                  Icons.search,
+                                  size: 18,
+                                  color: Color(0xFF888888),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+            );
+          },
         ),
 
         // ------------------------------------------------------------
@@ -621,17 +797,38 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
                       );
                     }
 
+                    _revealFeedAfterData('items=${items.length}');
+
                     return LayoutBuilder(
                       builder: (context, constraints) {
-                        final sections = _buildDateSections(items);
-                        // Skip infinite-scroll duplication during search —
-                        // results are a finite flat list, not a looping crawl.
-                        final loop = isSearching
-                            ? _FeedCrawlLoop(sections: sections, copyCount: 1)
-                            : _duplicateSectionsForCrawl(
-                                sections,
-                                constraints.maxHeight,
-                              );
+                        // Recompute sections only when the items list reference changes.
+                        if (!identical(_cachedItems, items)) {
+                          _cachedItems = items;
+                          _cachedSections = _buildDateSections(items);
+                          _cachedLoop = null;
+                          _cachedLoopHeight = null;
+                        }
+                        final sections = _cachedSections!;
+
+                        // Recompute loop only when sections or viewport height changes.
+                        final viewportHeight = constraints.maxHeight;
+                        _FeedCrawlLoop loop;
+                        if (isSearching) {
+                          loop = _FeedCrawlLoop(
+                            sections: sections,
+                            copyCount: 1,
+                          );
+                        } else if (_cachedLoop != null &&
+                            _cachedLoopHeight == viewportHeight) {
+                          loop = _cachedLoop!;
+                        } else {
+                          loop = _duplicateSectionsForCrawl(
+                            sections,
+                            viewportHeight,
+                          );
+                          _cachedLoop = loop;
+                          _cachedLoopHeight = viewportHeight;
+                        }
                         _crawlCopyCount = loop.copyCount;
                         // Compute animIndex from original sections (not duplicated)
                         // so duplicate copies of the same item share the same
@@ -640,9 +837,21 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
                             ? _buildAnimIndexMap(sections, newItemIds)
                             : const <String, int>{};
 
+                        if (_presetTransitionWatch != null &&
+                            _lastFeedRenderLoggedSeq != _presetTransitionSeq) {
+                          _lastFeedRenderLoggedSeq = _presetTransitionSeq;
+                          debugPrint(
+                            '[FeedScreen][UX seq=$_presetTransitionSeq +${_transitionElapsedLabel()}] '
+                            'Feed cards built items=${items.length} '
+                            'sections=${sections.length} copyCount=${loop.copyCount} '
+                            'newAnimatingIds=${newItemIds.length} opacity=$_feedOpacity',
+                          );
+                        }
+
                         return Listener(
                           onPointerDown: (_) => _pauseCrawl(),
                           onPointerUp: (_) => _resumeCrawl(),
+                          onPointerCancel: (_) => _resumeCrawl(),
                           child: CustomScrollView(
                             controller: _scrollController,
                             physics: const ClampingScrollPhysics(),

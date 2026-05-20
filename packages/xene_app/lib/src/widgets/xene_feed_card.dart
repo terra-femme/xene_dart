@@ -30,6 +30,8 @@ class XeneFeedCard extends StatelessWidget {
     final titleColor = dark ? Colors.white : Colors.black;
     final snippetColor = dark ? Colors.white54 : const Color(0xFF888888);
     final errorIconColor = dark ? Colors.white54 : null;
+    final repostAttribution = _repostAttribution(item);
+    final bodyText = _bodyWithoutAttribution(item.body, repostAttribution);
 
     return GestureDetector(
       onTap: onTap,
@@ -79,9 +81,15 @@ class XeneFeedCard extends StatelessWidget {
                   // Top Row: Pills & Badges
                   Row(
                     children: [
-                      _TypePill(type: item.contentType),
+                      Flexible(
+                        fit: FlexFit.loose,
+                        child: _TypePill(type: item.contentType),
+                      ),
                       const SizedBox(width: 4),
-                      _PlatformBadge(platform: item.platform),
+                      Flexible(
+                        fit: FlexFit.loose,
+                        child: _PlatformBadge(platform: item.platform),
+                      ),
                       if (item.publishedAt.isAfter(DateTime.now())) ...[
                         const SizedBox(width: 4),
                         const _PreOrderStar(),
@@ -99,6 +107,7 @@ class XeneFeedCard extends StatelessWidget {
                       fontSize: 13,
                     ),
                     softWrap: true,
+                    overflow: TextOverflow.fade,
                   ),
 
                   // Artist name
@@ -113,10 +122,22 @@ class XeneFeedCard extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
 
-                  // Snippet
-                  if (item.body != null && item.body!.isNotEmpty)
+                  if (repostAttribution != null)
                     Text(
-                      item.body!,
+                      repostAttribution,
+                      style: GoogleFonts.dmMono(
+                        color: const Color(0xFFFF5500),
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+
+                  // Snippet
+                  if (bodyText != null && bodyText.isNotEmpty)
+                    Text(
+                      bodyText,
                       style: GoogleFonts.archivo(
                         color: snippetColor,
                         fontSize: 10,
@@ -132,6 +153,42 @@ class XeneFeedCard extends StatelessWidget {
       ),
     );
   }
+}
+
+String? _repostAttribution(FeedItem item) {
+  final body = item.body?.trim();
+  if (body != null && body.startsWith('\u21bb by ')) {
+    return body.split('\n').first;
+  }
+
+  if (item.platform.toLowerCase() != 'soundcloud') return null;
+
+  final title = item.title?.trim();
+  if (title == null || title.isEmpty) return null;
+  final separator = title.indexOf(' - ');
+  if (separator <= 0) return null;
+
+  final producer = title.substring(0, separator).trim();
+  if (producer.isEmpty) return null;
+  if (_normaliseName(producer) == _normaliseName(item.artistName)) {
+    return null;
+  }
+
+  return '\u21bb by ${item.artistName}';
+}
+
+String? _bodyWithoutAttribution(String? body, String? attribution) {
+  final clean = body?.trim();
+  if (clean == null || clean.isEmpty) return null;
+  if (attribution != null && clean.startsWith(attribution)) {
+    final rest = clean.substring(attribution.length).trim();
+    return rest.isEmpty ? null : rest;
+  }
+  return clean;
+}
+
+String _normaliseName(String value) {
+  return value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
 }
 
 class _TypePill extends StatelessWidget {
@@ -155,6 +212,9 @@ class _TypePill extends StatelessWidget {
           fontWeight: FontWeight.bold,
           fontFamily: 'DM Mono',
         ),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        softWrap: false,
       ),
     );
   }
@@ -210,6 +270,9 @@ class _PlatformBadge extends StatelessWidget {
             fontSize: 8,
             fontWeight: FontWeight.w500,
           ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          softWrap: false,
         ),
       ),
     );
