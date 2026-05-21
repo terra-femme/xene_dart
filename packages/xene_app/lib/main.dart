@@ -15,6 +15,7 @@ import 'package:xene_app/src/screens/artists_screen.dart';
 import 'package:xene_app/src/screens/network_screen.dart';
 import 'package:xene_app/src/screens/preset_playground_screen.dart';
 import 'package:xene_app/src/screens/monitor_screen.dart';
+import 'package:xene_app/src/screens/profile_screen.dart';
 import 'package:xene_app/src/widgets/xene_header.dart';
 import 'package:xene_app/src/widgets/xene_sidebar.dart';
 import 'package:xene_app/src/widgets/xene_draggable_sheet.dart';
@@ -242,6 +243,11 @@ final _router = GoRouter(
       path: '/network',
       builder: (context, state) =>
           const _InnerPageLayout(title: 'NETWORK', child: NetworkScreen()),
+    ),
+    GoRoute(
+      path: '/profile',
+      builder: (context, state) =>
+          const _InnerPageLayout(title: 'PROFILE', child: ProfileScreen()),
     ),
     GoRoute(
       path: '/dev/presets',

@@ -69,12 +69,10 @@ class _XeneHeaderState extends ConsumerState<XeneHeader> {
         path: path,
         isActive: isActive,
         onTap: () {
-          if (isAnon && (path == '/following' || path == '/profile')) {
+          if (isAnon && path == '/following') {
             showAuthGate(
               context,
-              featureHint: path == '/following'
-                  ? 'to track new releases from artists you follow'
-                  : 'to manage your account',
+              featureHint: 'to track new releases from artists you follow',
             );
             return;
           }
