@@ -6,7 +6,7 @@ final _logger = Logger('discovery.graph');
 
 /// GET /discovery/graph
 /// Returns the identity graph for a user's saved artists.
-/// Header: X-User-Id (defaults to local_user)
+/// Auth: JWT (userId injected via middleware)
 /// Returns: {nodes: [...], links: [...]}
 ///
 /// Node types:
@@ -21,7 +21,7 @@ Future<Response> onRequest(RequestContext context) async {
     return Response(statusCode: 405);
   }
 
-  final userId = context.request.headers['x-user-id'] ?? 'local_user';
+  final userId = context.read<String>();
   _logger.info('[graph] userId=$userId');
 
   final db = context.read<DatabaseService>();

@@ -33,19 +33,23 @@ Future<Response> onRequest(RequestContext context) async {
   // Pack user_id + verifier into state so the callback can retrieve both
   final state = '$userId:$codeVerifier';
 
-  final authParams = Uri(queryParameters: {
-    'client_id': clientId,
-    'redirect_uri': redirectUri,
-    'response_type': 'code',
-    'scope': 'non-expiring offline_access',
-    'state': state,
-    'code_challenge': codeChallenge,
-    'code_challenge_method': 'S256',
-  }).query;
+  final authParams = Uri(
+    queryParameters: {
+      'client_id': clientId,
+      'redirect_uri': redirectUri,
+      'response_type': 'code',
+      'scope': 'non-expiring offline_access',
+      'state': state,
+      'code_challenge': codeChallenge,
+      'code_challenge_method': 'S256',
+    },
+  ).query;
 
   return Response(
     statusCode: 302,
-    headers: {'Location': 'https://secure.soundcloud.com/authorize?$authParams'},
+    headers: {
+      'Location': 'https://secure.soundcloud.com/authorize?$authParams',
+    },
   );
 }
 

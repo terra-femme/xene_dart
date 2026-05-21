@@ -1,4 +1,5 @@
 import 'package:dart_frog/dart_frog.dart';
+import 'package:xene_backend/src/services/api_analytics_service.dart';
 import 'package:xene_backend/src/services/gemini_key_rotator.dart';
 
 /// GET /monitor
@@ -9,5 +10,6 @@ Future<Response> onRequest(RequestContext context) async {
     return Response(statusCode: 405);
   }
   final rotator = context.read<GeminiKeyRotator>();
-  return Response.json(body: rotator.stats);
+  final apiAnalytics = context.read<ApiAnalyticsService>();
+  return Response.json(body: {...rotator.stats, 'api': apiAnalytics.stats});
 }

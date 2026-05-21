@@ -1,13 +1,7 @@
-import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:xene_app/src/providers/dio_provider.dart';
 import 'package:xene_app/src/providers/preset_provider.dart';
-
-const _kUserId = 'local_user';
-const _kBackendUrl = String.fromEnvironment(
-  'BACKEND_URL',
-  defaultValue: 'http://localhost:8080',
-);
 
 @immutable
 class ArticleItem {
@@ -42,22 +36,13 @@ class ArticleItem {
 
 /// Fetches press articles for the currently active preset.
 /// Auto-refetches whenever [activePresetSlugProvider] changes.
-final presetArticlesProvider =
-    FutureProvider.autoDispose<List<ArticleItem>>((ref) async {
+final presetArticlesProvider = FutureProvider.autoDispose<List<ArticleItem>>((
+  ref,
+) async {
   final slug = ref.watch(activePresetSlugProvider);
   debugPrint('[presetArticlesProvider] Fetching articles for preset=$slug');
 
-  final dio = Dio(
-    BaseOptions(
-      baseUrl: _kBackendUrl,
-      connectTimeout: const Duration(seconds: 10),
-      receiveTimeout: const Duration(seconds: 10),
-      headers: {
-        'Accept': 'application/json',
-        'X-User-Id': _kUserId,
-      },
-    ),
-  );
+  final dio = ref.watch(authenticatedDioProvider);
 
   try {
     final response = await dio.get<List<dynamic>>(
@@ -78,7 +63,9 @@ final presetArticlesProvider =
     );
     return items;
   } catch (e) {
-    debugPrint('[presetArticlesProvider] Error fetching articles for $slug: $e');
+    debugPrint(
+      '[presetArticlesProvider] Error fetching articles for $slug: $e',
+    );
     return const [];
   }
 });

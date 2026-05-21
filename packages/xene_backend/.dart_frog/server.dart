@@ -38,6 +38,7 @@ import '../routes/artists/index.dart' as artists_index;
 import '../routes/artists/articles.dart' as artists_articles;
 import '../routes/artists/[id]/index.dart' as artists_$id_index;
 import '../routes/artists/[id]/articles.dart' as artists_$id_articles;
+import '../routes/admin/poll.dart' as admin_poll;
 
 import '../routes/_middleware.dart' as middleware;
 
@@ -72,7 +73,8 @@ Handler buildRootHandler() {
     ..mount('/connections/soundcloud', (context) => buildConnectionsSoundcloudHandler()(context))
     ..mount('/auth/soundcloud', (context) => buildAuthSoundcloudHandler()(context))
     ..mount('/artists', (context) => buildArtistsHandler()(context))
-    ..mount('/artists/<id>', (context,id,) => buildArtists$idHandler(id,)(context));
+    ..mount('/artists/<id>', (context,id,) => buildArtists$idHandler(id,)(context))
+    ..mount('/admin', (context) => buildAdminHandler()(context));
   return pipeline.addHandler(router);
 }
 
@@ -199,6 +201,13 @@ Handler buildArtists$idHandler(String id,) {
   final pipeline = const Pipeline();
   final router = Router()
     ..all('/articles', (context) => artists_$id_articles.onRequest(context,id,))..all('/', (context) => artists_$id_index.onRequest(context,id,));
+  return pipeline.addHandler(router);
+}
+
+Handler buildAdminHandler() {
+  final pipeline = const Pipeline();
+  final router = Router()
+    ..all('/poll', (context) => admin_poll.onRequest(context,));
   return pipeline.addHandler(router);
 }
 

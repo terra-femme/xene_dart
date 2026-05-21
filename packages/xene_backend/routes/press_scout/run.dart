@@ -18,32 +18,50 @@ Future<Response> onRequest(RequestContext context) async {
 
   // Fire and forget — scout can take several minutes for 10 artists.
   if (presetId != null && presetId.isNotEmpty) {
-    _logger.info('[press_scout/run] Manual preset scout triggered for "$presetId"');
-    unawaited(scout.scoutArticlesForPreset(presetId).then((_) {
-      _logger.info('[press_scout/run] Preset scout completed for "$presetId"');
-    }).catchError((Object e) {
-      _logger.severe('[press_scout/run] Preset scout failed for "$presetId": $e');
-    }));
+    _logger.info(
+      '[press_scout/run] Manual preset scout triggered for "$presetId"',
+    );
+    unawaited(
+      scout
+          .scoutArticlesForPreset(presetId)
+          .then((_) {
+            _logger.info(
+              '[press_scout/run] Preset scout completed for "$presetId"',
+            );
+          })
+          .catchError((Object e) {
+            _logger.severe(
+              '[press_scout/run] Preset scout failed for "$presetId": $e',
+            );
+          }),
+    );
     return Response.json(
       body: {
         'status': 'started',
         'preset': presetId,
-        'message': 'Press scout running for preset "$presetId" — check server logs',
+        'message':
+            'Press scout running for preset "$presetId" — check server logs',
       },
     );
   }
 
   _logger.info('[press_scout/run] Manual full scout triggered');
-  unawaited(scout.scoutArticlesForActiveArtists().then((_) {
-    _logger.info('[press_scout/run] Manual scout completed');
-  }).catchError((Object e) {
-    _logger.severe('[press_scout/run] Manual scout failed: $e');
-  }));
+  unawaited(
+    scout
+        .scoutArticlesForActiveArtists()
+        .then((_) {
+          _logger.info('[press_scout/run] Manual scout completed');
+        })
+        .catchError((Object e) {
+          _logger.severe('[press_scout/run] Manual scout failed: $e');
+        }),
+  );
 
   return Response.json(
     body: {
       'status': 'started',
-      'message': 'Press scout running in background — check server logs for progress',
+      'message':
+          'Press scout running in background — check server logs for progress',
     },
   );
 }

@@ -25,7 +25,7 @@ Future<Response> onRequest(RequestContext context) async {
 }
 
 Future<Response> _getDial(RequestContext context) async {
-  final userId = context.request.headers['x-user-id'] ?? 'local_user';
+  final userId = context.read<String>();
   final db = context.read<DatabaseService>();
 
   final templates = await db.getPresetTemplates();
@@ -50,13 +50,7 @@ Future<Response> _getDial(RequestContext context) async {
 }
 
 Future<Response> _saveSelection(RequestContext context) async {
-  final userId = context.request.headers['x-user-id'];
-  if (userId == null) {
-    return Response.json(
-      statusCode: 401,
-      body: {'error': 'X-User-Id header required'},
-    );
-  }
+  final userId = context.read<String>();
 
   Map<String, dynamic> body;
   try {

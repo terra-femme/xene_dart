@@ -2,13 +2,8 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'dio_provider.dart';
 import 'preset_provider.dart';
-
-const _kUserId = 'local_user';
-const _kBackendUrl = String.fromEnvironment(
-  'BACKEND_URL',
-  defaultValue: 'http://localhost:8080',
-);
 
 @immutable
 class PresetTemplate {
@@ -54,29 +49,19 @@ final presetTemplatesProvider =
 class PresetTemplatesNotifier extends AsyncNotifier<List<PresetTemplate>> {
   Dio? _dio;
 
+  Dio _getDio() {
+    _dio ??= ref.read(authenticatedDioProvider);
+    return _dio!;
+  }
+
   @override
   Future<List<PresetTemplate>> build() async {
-    _dio = _createDio();
+    _dio = ref.watch(authenticatedDioProvider);
     return _fetch();
   }
 
-  Dio _createDio() {
-    return Dio(
-      BaseOptions(
-        baseUrl: _kBackendUrl,
-        connectTimeout: const Duration(seconds: 10),
-        receiveTimeout: const Duration(seconds: 10),
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-          'X-User-Id': _kUserId,
-        },
-      ),
-    );
-  }
-
   Future<List<PresetTemplate>> _fetch() async {
-    final dio = _dio ??= _createDio();
+    final dio = _getDio();
     final response = await dio.get<List<dynamic>>('/presets/templates');
     final rows = response.data ?? [];
     return rows
@@ -91,7 +76,7 @@ class PresetTemplatesNotifier extends AsyncNotifier<List<PresetTemplate>> {
   }
 
   Future<void> create(Map<String, dynamic> data) async {
-    final dio = _dio ??= _createDio();
+    final dio = _getDio();
     await dio.post<Map<String, dynamic>>('/presets/templates', data: data);
     ref.invalidate(presetDialProvider);
     await refresh();
@@ -101,7 +86,7 @@ class PresetTemplatesNotifier extends AsyncNotifier<List<PresetTemplate>> {
     String originalSlug,
     Map<String, dynamic> data,
   ) async {
-    final dio = _dio ??= _createDio();
+    final dio = _getDio();
     await dio.patch<Map<String, dynamic>>(
       '/presets/templates/$originalSlug',
       data: data,

@@ -1,9 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-
-const _kBackendUrl = 'http://localhost:8080';
-const _kUserId = 'local_user';
+import 'dio_provider.dart';
 
 enum DiscoveryStatus { idle, loading, result, saving, saved, error }
 
@@ -37,8 +35,8 @@ class DiscoveryState {
 
 final discoveryProvider =
     StateNotifierProvider<DiscoveryNotifier, DiscoveryState>(
-  DiscoveryNotifier.new,
-);
+      DiscoveryNotifier.new,
+    );
 
 class DiscoveryNotifier extends StateNotifier<DiscoveryState> {
   DiscoveryNotifier(this.ref) : super(const DiscoveryState());
@@ -47,11 +45,17 @@ class DiscoveryNotifier extends StateNotifier<DiscoveryState> {
 
   /// Run the LLM identity walk for an artist.
   Future<void> autoDiscover(String name, {String? scProfileUrl}) async {
-    debugPrint('[discoveryProvider.autoDiscover] ▶ CALLED name="$name" scProfileUrl="$scProfileUrl"');
-    debugPrint('[discoveryProvider.autoDiscover] current state before call = ${state.status}');
+    debugPrint(
+      '[discoveryProvider.autoDiscover] ▶ CALLED name="$name" scProfileUrl="$scProfileUrl"',
+    );
+    debugPrint(
+      '[discoveryProvider.autoDiscover] current state before call = ${state.status}',
+    );
 
     if (state.status == DiscoveryStatus.loading) {
-      debugPrint('[discoveryProvider.autoDiscover] ✗ SKIPPED — already loading');
+      debugPrint(
+        '[discoveryProvider.autoDiscover] ✗ SKIPPED — already loading',
+      );
       return;
     }
 
@@ -59,28 +63,37 @@ class DiscoveryNotifier extends StateNotifier<DiscoveryState> {
     debugPrint('[discoveryProvider.autoDiscover] state → loading');
 
     try {
-      final dio = Dio();
+      final dio = ref.read(authenticatedDioProvider);
       final queryParams = <String, String>{'name': name};
       if (scProfileUrl != null && scProfileUrl.isNotEmpty) {
         queryParams['sc_profile_url'] = scProfileUrl;
       }
 
-      final url = '$_kBackendUrl/discovery/auto_discover';
-      debugPrint('[discoveryProvider.autoDiscover] → GET $url params=$queryParams');
+      debugPrint(
+        '[discoveryProvider.autoDiscover] → GET /discovery/auto_discover params=$queryParams',
+      );
 
       final resp = await dio.get<Map<String, dynamic>>(
-        url,
+        '/discovery/auto_discover',
         queryParameters: queryParams,
       );
 
       debugPrint('[discoveryProvider.autoDiscover] ← HTTP ${resp.statusCode}');
-      debugPrint('[discoveryProvider.autoDiscover] response keys = ${resp.data?.keys.toList()}');
-      debugPrint('[discoveryProvider.autoDiscover] name=${resp.data?['name']} soundcloud_url=${resp.data?['soundcloud_url']} soundcloud_username=${resp.data?['soundcloud_username']}');
-      debugPrint('[discoveryProvider.autoDiscover] identity_confidence=${resp.data?['identity_confidence']} coverage_level=${resp.data?['coverage_level']}');
+      debugPrint(
+        '[discoveryProvider.autoDiscover] response keys = ${resp.data?.keys.toList()}',
+      );
+      debugPrint(
+        '[discoveryProvider.autoDiscover] name=${resp.data?['name']} soundcloud_url=${resp.data?['soundcloud_url']} soundcloud_username=${resp.data?['soundcloud_username']}',
+      );
+      debugPrint(
+        '[discoveryProvider.autoDiscover] identity_confidence=${resp.data?['identity_confidence']} coverage_level=${resp.data?['coverage_level']}',
+      );
 
       final result = resp.data ?? {};
       if (result.isEmpty) {
-        debugPrint('[discoveryProvider.autoDiscover] ⚠ WARNING — response data is empty map');
+        debugPrint(
+          '[discoveryProvider.autoDiscover] ⚠ WARNING — response data is empty map',
+        );
       }
 
       state = state.copyWith(status: DiscoveryStatus.result, result: result);
@@ -94,18 +107,29 @@ class DiscoveryNotifier extends StateNotifier<DiscoveryState> {
     } catch (e, st) {
       debugPrint('[discoveryProvider.autoDiscover] ✗ Unexpected error: $e');
       debugPrint('[discoveryProvider.autoDiscover] stacktrace: $st');
-      state = state.copyWith(status: DiscoveryStatus.error, error: e.toString());
+      state = state.copyWith(
+        status: DiscoveryStatus.error,
+        error: e.toString(),
+      );
     }
   }
 
   /// Save the confirmed discovery result to the artists table.
   Future<void> saveDiscovery(Map<String, dynamic> result) async {
-    debugPrint('[discoveryProvider.saveDiscovery] ▶ CALLED name=${result['name']}');
-    debugPrint('[discoveryProvider.saveDiscovery] current state = ${state.status}');
-    debugPrint('[discoveryProvider.saveDiscovery] posting keys = ${result.keys.toList()}');
+    debugPrint(
+      '[discoveryProvider.saveDiscovery] ▶ CALLED name=${result['name']}',
+    );
+    debugPrint(
+      '[discoveryProvider.saveDiscovery] current state = ${state.status}',
+    );
+    debugPrint(
+      '[discoveryProvider.saveDiscovery] posting keys = ${result.keys.toList()}',
+    );
 
     if (state.status == DiscoveryStatus.saving) {
-      debugPrint('[discoveryProvider.saveDiscovery] ✗ SKIPPED — already saving');
+      debugPrint(
+        '[discoveryProvider.saveDiscovery] ✗ SKIPPED — already saving',
+      );
       return;
     }
 
@@ -113,24 +137,23 @@ class DiscoveryNotifier extends StateNotifier<DiscoveryState> {
     debugPrint('[discoveryProvider.saveDiscovery] state → saving');
 
     try {
-      final dio = Dio();
-      final url = '$_kBackendUrl/discovery/save_discovery';
-      debugPrint('[discoveryProvider.saveDiscovery] → POST $url');
+      final dio = ref.read(authenticatedDioProvider);
+      debugPrint(
+        '[discoveryProvider.saveDiscovery] → POST /discovery/save_discovery',
+      );
 
       final resp = await dio.post<Map<String, dynamic>>(
-        url,
+        '/discovery/save_discovery',
         data: result,
-        options: Options(
-          headers: {
-            'X-User-Id': _kUserId,
-            'Content-Type': 'application/json',
-          },
-        ),
       );
 
       debugPrint('[discoveryProvider.saveDiscovery] ← HTTP ${resp.statusCode}');
-      debugPrint('[discoveryProvider.saveDiscovery] saved keys = ${resp.data?.keys.toList()}');
-      debugPrint('[discoveryProvider.saveDiscovery] saved id=${resp.data?['id']} name=${resp.data?['name']}');
+      debugPrint(
+        '[discoveryProvider.saveDiscovery] saved keys = ${resp.data?.keys.toList()}',
+      );
+      debugPrint(
+        '[discoveryProvider.saveDiscovery] saved id=${resp.data?['id']} name=${resp.data?['name']}',
+      );
 
       final saved = resp.data ?? {};
       state = state.copyWith(status: DiscoveryStatus.saved, savedArtist: saved);
@@ -144,7 +167,10 @@ class DiscoveryNotifier extends StateNotifier<DiscoveryState> {
     } catch (e, st) {
       debugPrint('[discoveryProvider.saveDiscovery] ✗ Unexpected error: $e');
       debugPrint('[discoveryProvider.saveDiscovery] stacktrace: $st');
-      state = state.copyWith(status: DiscoveryStatus.error, error: e.toString());
+      state = state.copyWith(
+        status: DiscoveryStatus.error,
+        error: e.toString(),
+      );
     }
   }
 

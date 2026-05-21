@@ -4,6 +4,9 @@ import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:device_preview_plus/device_preview_plus.dart';
 import 'package:flutter/foundation.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:app_links/app_links.dart';
+import 'package:xene_app/src/screens/auth_screen.dart';
 
 import 'package:xene_app/src/layout/xene_layout_metrics.dart';
 import 'package:xene_app/src/layout/xene_responsive_debug.dart';
@@ -22,10 +25,29 @@ import 'package:xene_app/src/widgets/loading_overlay.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  await Supabase.initialize(
+    url: const String.fromEnvironment('SUPABASE_URL'),
+    anonKey: const String.fromEnvironment('SUPABASE_ANON_KEY'),
+  );
+
+  // app_links is mobile-only — web handles the magic link redirect automatically
+  // via Supabase's built-in URL fragment detection, no listener needed.
+  if (!kIsWeb) {
+    final appLinks = AppLinks();
+    appLinks.uriLinkStream.listen((uri) {
+      Supabase.instance.client.auth.getSessionFromUrl(uri);
+    });
+  }
+
   // Await font loading so the first frame always renders in the correct fonts.
   if (kIsWeb) {
     await GoogleFonts.pendingFonts([GoogleFonts.archivo(), GoogleFonts.teko()]);
   }
+
+  // Refresh router whenever auth state changes (login, logout, token refresh).
+  Supabase.instance.client.auth.onAuthStateChange.listen((_) {
+    _router.refresh();
+  });
 
   runApp(
     DevicePreview(
@@ -184,7 +206,19 @@ class PageLayout extends StatelessWidget {
 
 final _router = GoRouter(
   initialLocation: '/',
+  redirect: (context, state) {
+    final session = Supabase.instance.client.auth.currentSession;
+    final isOnAuth = state.matchedLocation == '/auth';
+    if (session == null && !isOnAuth) return '/auth';
+    if (session != null && isOnAuth) return '/';
+    return null;
+  },
   routes: [
+    // /auth is a top-level route — intentionally outside ShellRoute/PageLayout.
+    // PageLayout contains XeneSidebar and XeneHeader which watch authenticated
+    // providers. Nesting /auth inside the shell would trigger those providers
+    // before any session exists.
+    GoRoute(path: '/auth', builder: (context, state) => const AuthScreen()),
     ShellRoute(
       builder: (context, state, child) => PageLayout(child: child),
       routes: [

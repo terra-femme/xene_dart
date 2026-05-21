@@ -4,9 +4,9 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'auth_provider.dart';
+import 'dio_provider.dart';
 
-const _kBackendUrl = 'http://localhost:8080';
-const _kUserId = 'local_user';
 const _kPollInterval = Duration(seconds: 3);
 const _kPollTimeout = Duration(minutes: 5);
 
@@ -33,8 +33,8 @@ class ScConnectionState {
 
 final soundcloudConnectionProvider =
     StateNotifierProvider<ScConnectionNotifier, ScConnectionState>(
-  ScConnectionNotifier.new,
-);
+      ScConnectionNotifier.new,
+    );
 
 class ScConnectionNotifier extends StateNotifier<ScConnectionState> {
   ScConnectionNotifier(this.ref) : super(const ScConnectionState()) {
@@ -47,10 +47,10 @@ class ScConnectionNotifier extends StateNotifier<ScConnectionState> {
 
   Future<void> checkStatus() async {
     try {
-      final dio = Dio();
+      final dio = ref.read(authenticatedDioProvider);
       final resp = await dio.get<String>(
-        '$_kBackendUrl/connections/status',
-        queryParameters: {'platform': 'soundcloud', 'user_id': _kUserId},
+        '/connections/status',
+        queryParameters: {'platform': 'soundcloud'},
         options: Options(responseType: ResponseType.plain),
       );
       final body = jsonDecode(resp.data ?? '{}') as Map<String, dynamic>;
@@ -71,7 +71,8 @@ class ScConnectionNotifier extends StateNotifier<ScConnectionState> {
   }
 
   Future<void> connect() async {
-    final uri = Uri.parse('$_kBackendUrl/auth/soundcloud');
+    final userId = ref.read(currentUserIdProvider);
+    final uri = Uri.parse('$kBackendUrl/auth/soundcloud?user_id=$userId');
     if (!await canLaunchUrl(uri)) return;
     await launchUrl(uri, mode: LaunchMode.externalApplication);
     if (state.isPolling) return;
@@ -85,16 +86,14 @@ class ScConnectionNotifier extends StateNotifier<ScConnectionState> {
 
   Future<void> disconnect() async {
     try {
-      final dio = Dio();
-      await dio.delete(
-        '$_kBackendUrl/connections/soundcloud/disconnect',
-        options: Options(headers: {'X-User-Id': _kUserId}),
-      );
+      final dio = ref.read(authenticatedDioProvider);
+      await dio.delete('/connections/soundcloud/disconnect');
       debugPrint('[scConnection] Disconnected from SoundCloud');
     } catch (e) {
       debugPrint('[scConnection] disconnect error: $e');
     }
-    if (mounted) state = state.copyWith(status: ScConnectionStatus.disconnected);
+    if (mounted)
+      state = state.copyWith(status: ScConnectionStatus.disconnected);
   }
 
   void _stopPolling() {

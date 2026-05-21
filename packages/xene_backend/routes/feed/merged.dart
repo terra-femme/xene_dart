@@ -31,7 +31,7 @@ Future<Response> onRequest(RequestContext context) async {
     return Response(statusCode: 405);
   }
 
-  final userId = context.request.headers['x-user-id'] ?? 'local_user';
+  final userId = context.read<String>();
   final params = context.request.uri.queryParameters;
   final page = int.tryParse(params['page'] ?? '1') ?? 1;
   final limit = int.tryParse(params['limit'] ?? '30') ?? 30;

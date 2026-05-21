@@ -4,6 +4,7 @@ import 'package:logging/logging.dart';
 import 'package:xml/xml.dart';
 import 'package:xene_domain/xene_domain.dart';
 import '../database.dart';
+import 'api_analytics_service.dart';
 
 final _logger = Logger('BandcampService');
 
@@ -77,7 +78,8 @@ class BcDebugReport {
 }
 
 class BandcampService {
-  BandcampService(this._db);
+  BandcampService(this._db, {ApiAnalyticsService? analytics})
+    : _dio = analytics?.trackDio(_createDio(), 'bandcamp') ?? _createDio();
 
   final DatabaseService _db;
 
@@ -118,7 +120,9 @@ class BandcampService {
   // Genre tag extraction — matches <a class="tag">drum and bass</a>
   static final _bcTagRe = RegExp(r'<a[^>]+class="tag"[^>]*>([^<]+)<\/a>');
 
-  final _dio = Dio(
+  final Dio _dio;
+
+  static Dio _createDio() => Dio(
     BaseOptions(
       connectTimeout: const Duration(seconds: 15),
       receiveTimeout: const Duration(seconds: 20),
@@ -193,7 +197,12 @@ class BandcampService {
     await Future.wait([
       () async {
         try {
-          scraperItems = await _scrapeMusicPage(base, artistName, auditSink: auditSink, genreTagSink: genreTagSink);
+          scraperItems = await _scrapeMusicPage(
+            base,
+            artistName,
+            auditSink: auditSink,
+            genreTagSink: genreTagSink,
+          );
         } catch (e) {
           if (_isTransientBandcampError(e)) transientFailure ??= e;
           _logger.warning(
@@ -252,13 +261,12 @@ class BandcampService {
       if (genreTagSink.isNotEmpty) {
         _logger.info('[bandcamp] Genre tags for $artistName: $genreTagSink');
         await _db
-            .updateArtistGenreTags(
-              genreTagSink.toList(),
-              bandcampUrl: base,
-            )
+            .updateArtistGenreTags(genreTagSink.toList(), bandcampUrl: base)
             .catchError((Object e) {
-          _logger.warning('[bandcamp] Genre tags update skipped for $artistName: $e');
-        });
+              _logger.warning(
+                '[bandcamp] Genre tags update skipped for $artistName: $e',
+              );
+            });
       }
 
       _feedCache[base] = _BcCacheEntry(items, DateTime.now().toUtc());
@@ -309,13 +317,24 @@ class BandcampService {
     final html = resp.data!;
 
     // Path 1: JSON (data-client-items) — firstMatch + 40-item cap, mirrors Python .search()
-    final jsonItems = await _parseDataClientItems(html, base, artistName, auditSink: auditSink);
+    final jsonItems = await _parseDataClientItems(
+      html,
+      base,
+      artistName,
+      auditSink: auditSink,
+    );
 
     // Path 2: HTML grid — fetches individual release pages; catches Featured items
     // that aren't yet surfaced in data-client-items (CDN lag / brand-new releases).
     List<FeedItem> gridItems = [];
     try {
-      gridItems = await _scrapeGridHtml(html, base, artistName, auditSink: auditSink, genreTagSink: genreTagSink);
+      gridItems = await _scrapeGridHtml(
+        html,
+        base,
+        artistName,
+        auditSink: auditSink,
+        genreTagSink: genreTagSink,
+      );
     } catch (e) {
       if (jsonItems.isEmpty || !_isTransientBandcampError(e)) rethrow;
       _logger.warning(
@@ -404,8 +423,9 @@ class BandcampService {
     );
 
     // Skip URLs already covered by the tralbum-API path.
-    final alreadyUrls =
-        alreadyProcessed.map((i) => _normaliseUrl(i.externalUrl)).toSet();
+    final alreadyUrls = alreadyProcessed
+        .map((i) => _normaliseUrl(i.externalUrl))
+        .toSet();
 
     final hrefs = <String>[];
     for (final r in overflow) {
@@ -425,7 +445,15 @@ class BandcampService {
     for (var i = 0; i < hrefs.length; i += 2) {
       final batch = hrefs.sublist(i, (i + 2).clamp(0, hrefs.length));
       final results = await Future.wait(
-        batch.map((url) => _fetchReleasePageDetail(url, artistName, path: 'overflow', auditSink: auditSink, genreTagSink: genreTagSink)),
+        batch.map(
+          (url) => _fetchReleasePageDetail(
+            url,
+            artistName,
+            path: 'overflow',
+            auditSink: auditSink,
+            genreTagSink: genreTagSink,
+          ),
+        ),
         eagerError: false,
       );
       for (final item in results) {
@@ -500,7 +528,13 @@ class BandcampService {
         eagerError: false,
       );
       for (var j = 0; j < batch.length; j++) {
-        final item = _buildFeedItem(batch[j], details[j], base, artistName, auditSink: auditSink);
+        final item = _buildFeedItem(
+          batch[j],
+          details[j],
+          base,
+          artistName,
+          auditSink: auditSink,
+        );
         if (item != null) items.add(item);
       }
     }
@@ -544,7 +578,13 @@ class BandcampService {
       final results = await Future.wait(
         batch.map((href) {
           final url = href.startsWith('http') ? href : '$base$href';
-          return _fetchReleasePageDetail(url, artistName, path: 'grid', auditSink: auditSink, genreTagSink: genreTagSink);
+          return _fetchReleasePageDetail(
+            url,
+            artistName,
+            path: 'grid',
+            auditSink: auditSink,
+            genreTagSink: genreTagSink,
+          );
         }),
         eagerError: false,
       );
@@ -706,7 +746,9 @@ class BandcampService {
             ts * 1000,
             isUtc: true,
           );
-          detailUsedField = releaseTs != null ? 'release_date_ts' : 'publish_date_ts';
+          detailUsedField = releaseTs != null
+              ? 'release_date_ts'
+              : 'publish_date_ts';
           _logger.info(
             '[bandcamp] Grid fallback timestamp → $publishedAt for $url',
           );
@@ -801,14 +843,16 @@ class BandcampService {
       final mo = _monthNum(dmy.group(2)!);
       final d = int.tryParse(dmy.group(1)!);
       final y = int.tryParse(dmy.group(3)!);
-      if (mo != null && d != null && y != null) return DateTime.utc(y, mo, d, 12);
+      if (mo != null && d != null && y != null)
+        return DateTime.utc(y, mo, d, 12);
     }
     final mdy = RegExp(r'^([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})').firstMatch(t);
     if (mdy != null) {
       final mo = _monthNum(mdy.group(1)!);
       final d = int.tryParse(mdy.group(2)!);
       final y = int.tryParse(mdy.group(3)!);
-      if (mo != null && d != null && y != null) return DateTime.utc(y, mo, d, 12);
+      if (mo != null && d != null && y != null)
+        return DateTime.utc(y, mo, d, 12);
     }
     return null;
   }
@@ -1192,7 +1236,9 @@ class BandcampService {
               'for $artistName',
             );
           } catch (e) {
-            _logger.warning('[bandcamp] Debug blob parse error for $artistName: $e');
+            _logger.warning(
+              '[bandcamp] Debug blob parse error for $artistName: $e',
+            );
           }
         } else {
           _logger.warning(

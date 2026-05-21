@@ -28,22 +28,28 @@ Future<Response> onRequest(RequestContext context) async {
 
   // Map to the same candidate shape used by the following endpoint
   final candidates = results
-      .map((u) => {
-            'name': (u['username'] as String?) ?? 'Unknown',
-            'soundcloud_username': u['permalink'] as String?,
-            'soundcloud_url': u['permalink_url'] as String?,
-            'avatar_url': u['avatar_url'] as String?,
-            'followers_count': u['followers_count'] as int? ?? 0,
-            'description': u['description'] as String?,
-          })
+      .map(
+        (u) => {
+          'name': (u['username'] as String?) ?? 'Unknown',
+          'soundcloud_username': u['permalink'] as String?,
+          'soundcloud_url': u['permalink_url'] as String?,
+          'avatar_url': u['avatar_url'] as String?,
+          'followers_count': u['followers_count'] as int? ?? 0,
+          'description': u['description'] as String?,
+        },
+      )
       .where((c) => c['soundcloud_username'] != null)
       .toList();
 
-  _logger.info('[sc_search] Returning ${candidates.length} candidates for "$query"');
+  _logger.info(
+    '[sc_search] Returning ${candidates.length} candidates for "$query"',
+  );
 
-  return Response.json(body: {
-    'collection': candidates,
-    'query': query,
-    'total_count': candidates.length,
-  });
+  return Response.json(
+    body: {
+      'collection': candidates,
+      'query': query,
+      'total_count': candidates.length,
+    },
+  );
 }

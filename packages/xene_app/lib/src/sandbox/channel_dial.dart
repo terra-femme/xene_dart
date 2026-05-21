@@ -13,10 +13,11 @@ class ChannelDial extends ConsumerStatefulWidget {
   ConsumerState<ChannelDial> createState() => _ChannelDialState();
 }
 
-class _ChannelDialState extends ConsumerState<ChannelDial> with SingleTickerProviderStateMixin {
+class _ChannelDialState extends ConsumerState<ChannelDial>
+    with SingleTickerProviderStateMixin {
   // The current rotation angle in RADIANS
   double _currentAngle = 0.0;
-  
+
   // Track the last "tick" index to trigger haptics
   int _lastTickIndex = 0;
 
@@ -85,7 +86,8 @@ class _ChannelDialState extends ConsumerState<ChannelDial> with SingleTickerProv
 
     if (tickIndex != _lastTickIndex) {
       HapticFeedback.mediumImpact();
-      ref.read(activeChannelProvider.notifier).state = availableChannels[tickIndex];
+      ref.read(activeChannelProvider.notifier).state =
+          availableChannels[tickIndex];
       _lastTickIndex = tickIndex;
     }
   }
@@ -122,7 +124,8 @@ class _ChannelDialState extends ConsumerState<ChannelDial> with SingleTickerProv
         GestureDetector(
           onTap: _handleTap,
           // Standard Pan (Circular Gesture)
-          onPanUpdate: (details) => _handleRotationUpdate(details.localPosition),
+          onPanUpdate: (details) =>
+              _handleRotationUpdate(details.localPosition),
           onPanEnd: (_) => _handleRotationEnd(),
           // Long Press (Pop-out Tuning)
           onLongPressStart: (details) {
@@ -130,7 +133,8 @@ class _ChannelDialState extends ConsumerState<ChannelDial> with SingleTickerProv
             _scaleController.forward();
             HapticFeedback.heavyImpact();
           },
-          onLongPressMoveUpdate: (details) => _handleRotationUpdate(details.localPosition),
+          onLongPressMoveUpdate: (details) =>
+              _handleRotationUpdate(details.localPosition),
           onLongPressEnd: (_) => _handleRotationEnd(),
           child: ScaleTransition(
             scale: _scaleAnimation,
@@ -239,7 +243,7 @@ class DialTicksPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
     final radius = size.width / 2;
-    
+
     final majorPaint = Paint()
       ..color = Colors.black
       ..strokeWidth = 2.5
@@ -253,10 +257,10 @@ class DialTicksPainter extends CustomPainter {
     for (int i = 0; i < 60; i++) {
       final angle = (i * 6) * math.pi / 180;
       final isMajor = i % 5 == 0;
-      
+
       final tickLength = isMajor ? 12.0 : 6.0;
       final paint = isMajor ? majorPaint : minorPaint;
-      
+
       final innerRadius = radius - 10;
       final outerRadius = innerRadius - tickLength;
 

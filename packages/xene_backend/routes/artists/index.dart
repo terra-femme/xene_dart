@@ -19,13 +19,7 @@ Future<Response> onRequest(RequestContext context) async {
 }
 
 Future<Response> _listArtists(RequestContext context) async {
-  final userId = context.request.headers['x-user-id'];
-  if (userId == null) {
-    return Response.json(
-      statusCode: 401,
-      body: {'error': 'X-User-Id header required'},
-    );
-  }
+  final userId = context.read<String>();
 
   final db = context.read<DatabaseService>();
   final rows = await db.getArtists(userId);
@@ -42,13 +36,7 @@ Future<Response> _listArtists(RequestContext context) async {
 }
 
 Future<Response> _createArtist(RequestContext context) async {
-  final userId = context.request.headers['x-user-id'];
-  if (userId == null) {
-    return Response.json(
-      statusCode: 401,
-      body: {'error': 'X-User-Id header required'},
-    );
-  }
+  final userId = context.read<String>();
 
   final db = context.read<DatabaseService>();
   final pressScout = context.read<PressScoutService>();

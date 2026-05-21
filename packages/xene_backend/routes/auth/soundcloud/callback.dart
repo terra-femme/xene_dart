@@ -74,7 +74,10 @@ Future<Response> onRequest(RequestContext context) async {
     String? expiresAt;
     if (expiresIn != null) {
       final seconds = (expiresIn as num).toInt();
-      expiresAt = DateTime.now().toUtc().add(Duration(seconds: seconds)).toIso8601String();
+      expiresAt = DateTime.now()
+          .toUtc()
+          .add(Duration(seconds: seconds))
+          .toIso8601String();
     }
 
     final tokenStore = context.read<TokenStore>();

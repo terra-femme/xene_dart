@@ -19,9 +19,9 @@ class ChannelFeedWrapper extends ConsumerWidget {
 
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 600),
-      
+
       /// GPU EDUCATION: TRANSITION BUILDER
-      /// To optimize performance (especially during auto-scroll), 
+      /// To optimize performance (especially during auto-scroll),
       /// we use the "Sweep" style:
       /// 1. Incoming child slides in from the right.
       /// 2. Outgoing child fades out stationary to reduce GPU load.
@@ -34,26 +34,26 @@ class ChannelFeedWrapper extends ConsumerWidget {
           return FadeTransition(
             opacity: animation,
             child: SlideTransition(
-              position: Tween<Offset>(
-                begin: const Offset(1.0, 0.0),
-                end: Offset.zero,
-              ).animate(CurvedAnimation(
-                parent: animation,
-                curve: Curves.easeOutCubic,
-              )),
+              position:
+                  Tween<Offset>(
+                    begin: const Offset(1.0, 0.0),
+                    end: Offset.zero,
+                  ).animate(
+                    CurvedAnimation(
+                      parent: animation,
+                      curve: Curves.easeOutCubic,
+                    ),
+                  ),
               child: child,
             ),
           );
         } else {
           // Just Fade for the OLD content (Stay stationary horizontally)
-          return FadeTransition(
-            opacity: animation,
-            child: child,
-          );
+          return FadeTransition(opacity: animation, child: child);
         }
       },
-      
-      /// IMPORTANT: The KeyedSubtree tells AnimatedSwitcher that 
+
+      /// IMPORTANT: The KeyedSubtree tells AnimatedSwitcher that
       /// the content has changed and it's time to animate.
       child: KeyedSubtree(
         key: ValueKey(activeChannel.id),

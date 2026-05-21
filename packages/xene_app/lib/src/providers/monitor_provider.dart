@@ -8,8 +8,16 @@ const _kBackendUrl = String.fromEnvironment(
 
 /// Polls GET /monitor every 15 seconds and yields the latest stats map.
 /// Auto-disposes when the monitor screen is not visible.
-final monitorProvider = StreamProvider.autoDispose<Map<String, dynamic>>((ref) async* {
-  final dio = Dio(BaseOptions(baseUrl: _kBackendUrl));
+final monitorProvider = StreamProvider.autoDispose<Map<String, dynamic>>((
+  ref,
+) async* {
+  final dio = Dio(
+    BaseOptions(
+      baseUrl: _kBackendUrl,
+      connectTimeout: const Duration(seconds: 5),
+      receiveTimeout: const Duration(seconds: 8),
+    ),
+  );
   while (true) {
     try {
       final res = await dio.get<Map<String, dynamic>>('/monitor');

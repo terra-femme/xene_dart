@@ -62,7 +62,9 @@ class ScSearchNotifier extends StateNotifier<ScSearchState> {
       final collection = (resp.data?['collection'] as List? ?? [])
           .cast<Map<String, dynamic>>();
 
-      debugPrint('[scSearchProvider] Got ${collection.length} results for "$q"');
+      debugPrint(
+        '[scSearchProvider] Got ${collection.length} results for "$q"',
+      );
       state = state.copyWith(
         status: ScSearchStatus.results,
         results: collection,

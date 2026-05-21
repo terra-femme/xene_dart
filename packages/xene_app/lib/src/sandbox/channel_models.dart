@@ -97,4 +97,6 @@ final List<Channel> availableChannels = [
 
 /// STATE MANAGEMENT EDUCATION:
 /// We use a [StateProvider] to sync the Dial (Input) and the Feed (Output).
-final activeChannelProvider = StateProvider<Channel>((ref) => availableChannels[0]);
+final activeChannelProvider = StateProvider<Channel>(
+  (ref) => availableChannels[0],
+);

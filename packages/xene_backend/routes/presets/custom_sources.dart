@@ -14,13 +14,7 @@ Future<Response> onRequest(RequestContext context) async {
 }
 
 Future<Response> _listCustomSources(RequestContext context) async {
-  final userId = context.request.headers['x-user-id'];
-  if (userId == null) {
-    return Response.json(
-      statusCode: 401,
-      body: {'error': 'X-User-Id header required'},
-    );
-  }
+  final userId = context.read<String>();
 
   final sources = await context.read<DatabaseService>().getCustomPresetSources(
     userId,
@@ -29,13 +23,7 @@ Future<Response> _listCustomSources(RequestContext context) async {
 }
 
 Future<Response> _replaceCustomSources(RequestContext context) async {
-  final userId = context.request.headers['x-user-id'];
-  if (userId == null) {
-    return Response.json(
-      statusCode: 401,
-      body: {'error': 'X-User-Id header required'},
-    );
-  }
+  final userId = context.read<String>();
 
   Map<String, dynamic> body;
   try {

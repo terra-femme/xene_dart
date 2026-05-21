@@ -4,13 +4,7 @@ import 'package:xene_backend/src/database.dart';
 /// PATCH /artists/:id  — partial field update
 /// DELETE /artists/:id — remove artist from follow list
 Future<Response> onRequest(RequestContext context, String id) async {
-  final userId = context.request.headers['x-user-id'];
-  if (userId == null) {
-    return Response.json(
-      statusCode: 401,
-      body: {'error': 'X-User-Id header required'},
-    );
-  }
+  final userId = context.read<String>();
 
   final db = context.read<DatabaseService>();
 
@@ -25,12 +19,22 @@ Future<Response> onRequest(RequestContext context, String id) async {
 }
 
 const _kReadOnlyFields = {
-  'id', 'user_id', 'created_at', 'is_label',
-  'confidence', 'identity_confidence', 'coverage_level',
+  'id',
+  'user_id',
+  'created_at',
+  'is_label',
+  'confidence',
+  'identity_confidence',
+  'coverage_level',
 };
 
 const _kValidEntityTypes = {
-  'artist', 'band', 'label', 'organization', 'venue', 'brand',
+  'artist',
+  'band',
+  'label',
+  'organization',
+  'venue',
+  'brand',
 };
 
 Future<Response> _patchArtist(
@@ -70,10 +74,9 @@ Future<Response> _patchArtist(
   }
 
   final et = updated['entity_type'] as String?;
-  return Response.json(body: {
-    ...updated,
-    'is_label': et == 'label' || et == 'organization',
-  });
+  return Response.json(
+    body: {...updated, 'is_label': et == 'label' || et == 'organization'},
+  );
 }
 
 Future<Response> _deleteArtist(

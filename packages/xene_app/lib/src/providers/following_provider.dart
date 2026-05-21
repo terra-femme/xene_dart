@@ -1,9 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-
-const _kBackendUrl = 'http://127.0.0.1:8080';
-const _kUserId = 'local_user';
+import 'dio_provider.dart';
 
 enum FollowingStatus { initial, loading, loaded, error }
 
@@ -41,8 +39,8 @@ class FollowingState {
 
 final followingProvider =
     StateNotifierProvider<FollowingNotifier, FollowingState>(
-  FollowingNotifier.new,
-);
+      FollowingNotifier.new,
+    );
 
 class FollowingNotifier extends StateNotifier<FollowingState> {
   FollowingNotifier(this.ref) : super(const FollowingState());
@@ -52,15 +50,16 @@ class FollowingNotifier extends StateNotifier<FollowingState> {
   Future<void> fetch({bool force = false}) async {
     if (state.status == FollowingStatus.loading) return;
 
-    debugPrint('[followingProvider] Fetching SC following candidates${force ? ' (force)' : ''}');
+    debugPrint(
+      '[followingProvider] Fetching SC following candidates${force ? ' (force)' : ''}',
+    );
     state = state.copyWith(status: FollowingStatus.loading);
 
     try {
-      final dio = Dio();
-      final url = '$_kBackendUrl/connections/soundcloud/following${force ? '?force=true' : ''}';
+      final dio = ref.read(authenticatedDioProvider);
       final resp = await dio.get<Map<String, dynamic>>(
-        url,
-        options: Options(headers: {'X-User-Id': _kUserId}),
+        '/connections/soundcloud/following',
+        queryParameters: force ? {'force': 'true'} : null,
       );
       final data = resp.data ?? {};
       final collection = (data['collection'] as List? ?? [])
@@ -80,7 +79,10 @@ class FollowingNotifier extends StateNotifier<FollowingState> {
       state = state.copyWith(status: FollowingStatus.error, error: msg);
     } catch (e) {
       debugPrint('[followingProvider] Unexpected error: $e');
-      state = state.copyWith(status: FollowingStatus.error, error: e.toString());
+      state = state.copyWith(
+        status: FollowingStatus.error,
+        error: e.toString(),
+      );
     }
   }
 

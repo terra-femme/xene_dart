@@ -6,13 +6,13 @@ final _logger = Logger('connections.soundcloud.disconnect');
 
 /// DELETE /connections/soundcloud/disconnect
 /// Removes the stored SC OAuth token row, effectively disconnecting the user.
-/// Header: X-User-Id (defaults to local_user)
+/// Auth: JWT (userId injected via middleware)
 Future<Response> onRequest(RequestContext context) async {
   if (context.request.method != HttpMethod.delete) {
     return Response(statusCode: 405);
   }
 
-  final userId = context.request.headers['x-user-id'] ?? 'local_user';
+  final userId = context.read<String>();
   _logger.info('[disconnect] Disconnecting SC for userId=$userId');
 
   final db = context.read<DatabaseService>();

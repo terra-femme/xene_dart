@@ -55,8 +55,10 @@ Future<Response> onRequest(RequestContext context) async {
     _logger.info('[proxy.image] Fetching from $encodedUrl');
     final dio = Dio();
     final response = await dio
-        .get<List<int>>(encodedUrl,
-            options: Options(responseType: ResponseType.bytes))
+        .get<List<int>>(
+          encodedUrl,
+          options: Options(responseType: ResponseType.bytes),
+        )
         .timeout(const Duration(seconds: 10));
 
     if (response.statusCode != 200) {

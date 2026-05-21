@@ -2,13 +2,8 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:xene_domain/xene_domain.dart';
+import 'dio_provider.dart';
 import 'feed_provider.dart';
-
-const _kUserId = 'local_user';
-const _kBackendUrl = String.fromEnvironment(
-  'BACKEND_URL',
-  defaultValue: 'http://localhost:8080',
-);
 
 @immutable
 class PresetSource {
@@ -111,19 +106,9 @@ class PresetSourcesNotifier extends StateNotifier<PresetSourcesState> {
   final Ref ref;
   Dio? _dio;
 
-  Dio _createDio() {
-    return Dio(
-      BaseOptions(
-        baseUrl: _kBackendUrl,
-        connectTimeout: const Duration(seconds: 10),
-        receiveTimeout: const Duration(seconds: 30),
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-          'X-User-Id': _kUserId,
-        },
-      ),
-    );
+  Dio _getDio() {
+    _dio ??= ref.read(authenticatedDioProvider);
+    return _dio!;
   }
 
   Future<void> load(String slug) async {
@@ -134,7 +119,7 @@ class PresetSourcesNotifier extends StateNotifier<PresetSourcesState> {
       previewItems: state.slug == slug ? state.previewItems : const [],
     );
     try {
-      final dio = _dio ??= _createDio();
+      final dio = _getDio();
       final response = await dio.get<List<dynamic>>(
         '/presets/templates/$slug/sources',
       );
@@ -156,7 +141,7 @@ class PresetSourcesNotifier extends StateNotifier<PresetSourcesState> {
     String slug,
     Map<String, dynamic> candidate,
   ) async {
-    final dio = _dio ??= _createDio();
+    final dio = _dio ??= _getDio();
     await dio.post<Map<String, dynamic>>(
       '/presets/templates/$slug/sources',
       data: candidate,
@@ -165,7 +150,7 @@ class PresetSourcesNotifier extends StateNotifier<PresetSourcesState> {
   }
 
   Future<void> removeSource(String slug, String sourceId) async {
-    final dio = _dio ??= _createDio();
+    final dio = _dio ??= _getDio();
     await dio.delete<void>(
       '/presets/templates/$slug/sources',
       queryParameters: {'source_id': sourceId},
@@ -177,7 +162,7 @@ class PresetSourcesNotifier extends StateNotifier<PresetSourcesState> {
     String slug,
     String sourceId,
   ) async {
-    final dio = _dio ??= _createDio();
+    final dio = _dio ??= _getDio();
     final response = await dio.post<Map<String, dynamic>>(
       '/presets/templates/$slug/sources/$sourceId/refresh_feed',
     );
@@ -194,7 +179,7 @@ class PresetSourcesNotifier extends StateNotifier<PresetSourcesState> {
     if (slug.isEmpty) return null;
     state = state.copyWith(loadingRefreshAll: true, error: null);
     try {
-      final dio = _dio ??= _createDio();
+      final dio = _getDio();
       debugPrint(
         '[presetSources] refreshAll POST /presets/templates/$slug/refresh_all',
       );
@@ -233,7 +218,7 @@ class PresetSourcesNotifier extends StateNotifier<PresetSourcesState> {
         'youtube_url': youtubeUrl,
     };
     if (body.isEmpty) return;
-    final dio = _dio ??= _createDio();
+    final dio = _dio ??= _getDio();
     await dio.patch<void>(
       '/presets/templates/$slug/sources/$sourceId',
       data: body,
@@ -250,7 +235,7 @@ class PresetSourcesNotifier extends StateNotifier<PresetSourcesState> {
     String? snippet,
     String? source,
   }) async {
-    final dio = _dio ??= _createDio();
+    final dio = _dio ??= _getDio();
     await dio.post<void>(
       '/presets/templates/$slug/sources/$sourceId/articles',
       data: {
@@ -265,7 +250,7 @@ class PresetSourcesNotifier extends StateNotifier<PresetSourcesState> {
   Future<void> preview(String slug) async {
     state = state.copyWith(loadingPreview: true, error: null);
     try {
-      final dio = _dio ??= _createDio();
+      final dio = _getDio();
       final response = await dio.get<List<dynamic>>(
         '/feed/merged',
         queryParameters: {'preset_id': slug, 'page': 1, 'limit': 40},
