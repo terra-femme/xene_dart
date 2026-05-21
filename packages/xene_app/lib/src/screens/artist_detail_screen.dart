@@ -5,8 +5,8 @@ import '../providers/feed_provider.dart';
 import '../widgets/xene_feed_card.dart';
 import '../widgets/platform_badge.dart';
 
-/// ELI5: The "Artist Profile." 
-/// It shows a big picture of the artist, their links, 
+/// ELI5: The "Artist Profile."
+/// It shows a big picture of the artist, their links,
 /// and a list of just their songs.
 class ArtistDetailScreen extends ConsumerWidget {
   const ArtistDetailScreen({super.key, required this.artist});
@@ -30,6 +30,10 @@ class ArtistDetailScreen extends ConsumerWidget {
               flexibleSpace: FlexibleSpaceBar(
                 title: Text(
                   artist.name,
+                  key: const ValueKey('artistDetailTitle'),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  softWrap: false,
                   style: const TextStyle(
                     color: Colors.black,
                     fontWeight: FontWeight.bold,
@@ -72,27 +76,55 @@ class ArtistDetailScreen extends ConsumerWidget {
                     ),
                     const SizedBox(height: 12),
                     Wrap(
+                      key: const ValueKey('artistDetailPlatformLinks'),
                       spacing: 8,
                       runSpacing: 6,
                       children: [
                         if (artist.soundcloudUrl != null)
-                          PlatformBadge(platform: 'soundcloud', url: artist.soundcloudUrl),
+                          PlatformBadge(
+                            platform: 'soundcloud',
+                            url: artist.soundcloudUrl,
+                          ),
                         if (artist.youtubeUrl != null)
-                          PlatformBadge(platform: 'youtube', url: artist.youtubeUrl),
+                          PlatformBadge(
+                            platform: 'youtube',
+                            url: artist.youtubeUrl,
+                          ),
                         if (artist.spotifyUrl != null)
-                          PlatformBadge(platform: 'spotify', url: artist.spotifyUrl),
+                          PlatformBadge(
+                            platform: 'spotify',
+                            url: artist.spotifyUrl,
+                          ),
                         if (artist.bandcampUrl != null)
-                          PlatformBadge(platform: 'bandcamp', url: artist.bandcampUrl),
+                          PlatformBadge(
+                            platform: 'bandcamp',
+                            url: artist.bandcampUrl,
+                          ),
                         if (artist.beatportUrl != null)
-                          PlatformBadge(platform: 'beatport', url: artist.beatportUrl),
+                          PlatformBadge(
+                            platform: 'beatport',
+                            url: artist.beatportUrl,
+                          ),
                         if (artist.instagramUrl != null)
-                          PlatformBadge(platform: 'instagram', url: artist.instagramUrl),
+                          PlatformBadge(
+                            platform: 'instagram',
+                            url: artist.instagramUrl,
+                          ),
                         if (artist.twitterUrl != null)
-                          PlatformBadge(platform: 'twitter', url: artist.twitterUrl),
+                          PlatformBadge(
+                            platform: 'twitter',
+                            url: artist.twitterUrl,
+                          ),
                         if (artist.twitchUrl != null)
-                          PlatformBadge(platform: 'twitch', url: artist.twitchUrl),
+                          PlatformBadge(
+                            platform: 'twitch',
+                            url: artist.twitchUrl,
+                          ),
                         if (artist.websiteUrl != null)
-                          PlatformBadge(platform: 'website', url: artist.websiteUrl),
+                          PlatformBadge(
+                            platform: 'website',
+                            url: artist.websiteUrl,
+                          ),
                         // Extra links stored in edges (tiktok, patreon, gumroad, etc.)
                         for (final edge in artist.edges.where(
                           (e) => e['type'] == 'SC_WEB_PROFILE',
@@ -121,11 +153,14 @@ class ArtistDetailScreen extends ConsumerWidget {
         body: feedAsync.when(
           data: (items) {
             // Filter items for this specific artist
-            final artistItems = items.where((i) => i.artistName == artist.name).toList();
+            final artistItems = items
+                .where((i) => i.artistName == artist.name)
+                .toList();
             return ListView.builder(
               padding: EdgeInsets.zero,
               itemCount: artistItems.length,
-              itemBuilder: (context, index) => XeneFeedCard(item: artistItems[index]),
+              itemBuilder: (context, index) =>
+                  XeneFeedCard(item: artistItems[index]),
             );
           },
           loading: () => const Center(child: CircularProgressIndicator()),

@@ -23,14 +23,15 @@ class SandboxPreview extends ConsumerWidget {
               Container(
                 width: 160,
                 decoration: BoxDecoration(
-                  border: Border(right: BorderSide(color: Colors.black.withOpacity(0.05))),
+                  border: Border(
+                    right: BorderSide(color: Colors.black.withOpacity(0.05)),
+                  ),
                 ),
                 child: Center(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                        const ChannelDial(),
-                      ],                  ),
+                    children: [const ChannelDial()],
+                  ),
                 ),
               ),
 
@@ -69,12 +70,18 @@ class SandboxPreview extends ConsumerWidget {
                 children: [
                   Text(
                     'MECHANICAL DIAL v2',
-                    style: GoogleFonts.dmMono(color: Colors.greenAccent, fontSize: 10),
+                    style: GoogleFonts.dmMono(
+                      color: Colors.greenAccent,
+                      fontSize: 10,
+                    ),
                   ),
                   const SizedBox(height: 4),
                   Text(
                     'PRESET: ${activeChannel.name}',
-                    style: GoogleFonts.dmMono(color: Colors.white, fontSize: 12),
+                    style: GoogleFonts.dmMono(
+                      color: Colors.white,
+                      fontSize: 12,
+                    ),
                   ),
                 ],
               ),
@@ -107,9 +114,15 @@ class _MockCard extends StatelessWidget {
             width: 80,
             decoration: BoxDecoration(
               color: const Color(0xFF222222), // Hardware Black
-              borderRadius: const BorderRadius.horizontal(left: Radius.circular(16)),
+              borderRadius: const BorderRadius.horizontal(
+                left: Radius.circular(16),
+              ),
             ),
-            child: const Icon(Icons.music_note, color: Colors.white24, size: 32),
+            child: const Icon(
+              Icons.music_note,
+              color: Colors.white24,
+              size: 32,
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(

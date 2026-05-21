@@ -8,7 +8,7 @@ Future<Response> onRequest(RequestContext context) async {
     return Response(statusCode: 405);
   }
 
-  final userId = context.request.headers['x-user-id'] ?? 'local_user';
+  final userId = context.read<String>();
   final params = context.request.uri.queryParameters;
   final presetSlug = params['preset']?.trim() ?? 'custom';
   final limit = int.tryParse(params['limit'] ?? '') ?? 8;

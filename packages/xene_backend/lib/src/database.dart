@@ -461,18 +461,159 @@ class DatabaseService {
     if (normalised.isEmpty) return {};
 
     final keys = <String>{normalised};
-    if (normalised.contains('drum') && normalised.contains('bass')) {
+
+    // Drum & Bass — "drum & bass" → "drumbass", "drum and bass" → "drumandbass",
+    // "DnB", neurofunk, darkstep, techstep, drumstep all resolve to 'dnb'.
+    if ((normalised.contains('drum') && normalised.contains('bass')) ||
+        normalised.contains('dnb') ||
+        normalised == 'neurofunk' ||
+        normalised == 'darkstep' ||
+        normalised == 'techstep' ||
+        normalised == 'drumstep') {
+      keys.add('dnb');
+      keys.add('drumandbass');
+    }
+
+    // Liquid DnB — subset of DnB; maps to both 'liquid' and 'dnb' buckets
+    if (normalised.contains('liquid')) {
+      keys.add('liquid');
+      keys.add('dnb');
+      keys.add('drumandbass');
+    }
+
+    // Jungle — ancestral to DnB, covered by overlapping publications
+    if (normalised.contains('jungle') || normalised == 'raggajungle') {
+      keys.add('jungle');
       keys.add('dnb');
     }
-    if (normalised.contains('dnb')) keys.add('dnb');
-    if (normalised.contains('liquid')) keys.add('liquid');
-    if (normalised.contains('garage') || normalised.contains('ukg')) {
-      keys.add('ukg');
+
+    // House — covers "house", "deephouse", "techhouse", "housemusic", etc.
+    if (normalised.contains('house')) {
+      keys.add('house');
+      keys.add('electronic');
     }
-    if (normalised.contains('randb') || normalised == 'rnb') {
+
+    // Techno
+    if (normalised.contains('techno')) {
+      keys.add('techno');
+      keys.add('electronic');
+    }
+
+    // Electronic (broad) — covers "electronic", "electronica", "edm"
+    if (normalised.contains('electronic') ||
+        normalised == 'edm' ||
+        normalised == 'electronica') {
+      keys.add('electronic');
+    }
+
+    // Ambient — covers "ambient", "darkambient", "drone"
+    if (normalised.contains('ambient') ||
+        normalised == 'drone' ||
+        normalised == 'darkambient') {
+      keys.add('ambient');
+      keys.add('electronic');
+    }
+
+    // Experimental / noise / avant-garde
+    if (normalised.contains('experimental') ||
+        normalised == 'noise' ||
+        normalised == 'avantgarde' ||
+        normalised == 'abstract') {
+      keys.add('experimental');
+    }
+
+    // Hip Hop — "hip hop" → "hiphop", "hip-hop" → "hiphop", "rap", "trap"
+    if (normalised.contains('hiphop') ||
+        normalised == 'rap' ||
+        normalised == 'trap') {
+      keys.add('hiphop');
+    }
+
+    // R&B / Soul — "r&b" strips to "rb"; "rnb", "r and b" → "randb".
+    // Both 'rb' and 'rnb' are added so publication "r&b" and artist "rnb" match.
+    if (normalised == 'rb' ||
+        normalised == 'rnb' ||
+        normalised.contains('randb') ||
+        normalised.contains('soul') ||
+        normalised == 'neosoul' ||
+        normalised == 'rhythmandblues') {
+      keys.add('rb');
       keys.add('rnb');
     }
-    if (normalised.contains('hiphop')) keys.add('hiphop');
+
+    // Grime — also maps to hip hop publications
+    if (normalised.contains('grime')) {
+      keys.add('grime');
+      keys.add('hiphop');
+    }
+
+    // UK Garage / 2-step
+    if (normalised.contains('garage') ||
+        normalised.contains('ukg') ||
+        normalised == '2step') {
+      keys.add('ukg');
+      keys.add('garage');
+      keys.add('electronic');
+    }
+
+    // Trance
+    if (normalised.contains('trance')) {
+      keys.add('trance');
+      keys.add('electronic');
+    }
+
+    // Dubstep / bass music
+    if (normalised.contains('dubstep') || normalised == 'brostep') {
+      keys.add('dubstep');
+      keys.add('bass');
+      keys.add('electronic');
+    }
+    if (normalised == 'bass' ||
+        normalised == 'bassmusic' ||
+        normalised == 'ukbass') {
+      keys.add('bass');
+      keys.add('electronic');
+    }
+
+    // Jazz
+    if (normalised.contains('jazz')) {
+      keys.add('jazz');
+    }
+
+    // Folk
+    if (normalised.contains('folk') || normalised == 'singersongwriter') {
+      keys.add('folk');
+    }
+
+    // Indie
+    if (normalised.contains('indie')) {
+      keys.add('indie');
+    }
+
+    // Alternative
+    if (normalised.contains('alternative') || normalised == 'altrock') {
+      keys.add('alternative');
+    }
+
+    // Pop — explicit list to avoid false-matching 'hiphop' (contains 'pop')
+    if (normalised == 'pop' ||
+        normalised == 'synthpop' ||
+        normalised == 'dreampop' ||
+        normalised == 'electropop' ||
+        normalised == 'indiepop' ||
+        normalised == 'bubblegum') {
+      keys.add('pop');
+    }
+
+    // Dance / club music
+    if (normalised == 'dance' ||
+        normalised == 'dancemusic' ||
+        normalised == 'clubmusic' ||
+        normalised == 'clubbing') {
+      keys.add('dance');
+      keys.add('electronic');
+    }
+
     return keys;
   }
 
@@ -1558,11 +1699,7 @@ class DatabaseService {
           '${now.microsecondsSinceEpoch}-${Random().nextInt(0x7fffffff)}';
       await client.from('system_cache').insert({
         'key': key,
-        'value': {
-          'owner': owner,
-          'claimed_at': nowIso,
-          ...metadata,
-        },
+        'value': {'owner': owner, 'claimed_at': nowIso, ...metadata},
         'expires_at': now.add(ttl).toIso8601String(),
         'updated_at': nowIso,
       });

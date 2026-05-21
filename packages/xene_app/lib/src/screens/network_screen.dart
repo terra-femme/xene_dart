@@ -30,22 +30,31 @@ class NetworkScreen extends ConsumerWidget {
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
           child: Row(
             children: [
-              Text(
-                'IDENTITY GRAPH',
-                style: GoogleFonts.teko(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w500,
-                  color: Colors.black,
-                  letterSpacing: 1,
+              Expanded(
+                child: Text(
+                  'IDENTITY GRAPH',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  softWrap: false,
+                  style: GoogleFonts.teko(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w500,
+                    color: Colors.black,
+                    letterSpacing: 1,
+                  ),
                 ),
               ),
-              const Spacer(),
+              const SizedBox(width: 12),
               GestureDetector(
                 onTap: () {
                   ref.invalidate(graphProvider);
                   ref.invalidate(discoveryStatusProvider);
                 },
-                child: const Icon(Icons.refresh, size: 20, color: Color(0xFF888888)),
+                child: const Icon(
+                  Icons.refresh,
+                  size: 20,
+                  color: Color(0xFF888888),
+                ),
               ),
             ],
           ),
@@ -59,17 +68,27 @@ class NetworkScreen extends ConsumerWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.error_outline, color: Color(0xFF888888), size: 28),
+                  const Icon(
+                    Icons.error_outline,
+                    color: Color(0xFF888888),
+                    size: 28,
+                  ),
                   const SizedBox(height: 8),
                   Text(
                     'FAILED TO LOAD GRAPH',
-                    style: GoogleFonts.teko(fontSize: 15, color: const Color(0xFF888888)),
+                    style: GoogleFonts.teko(
+                      fontSize: 15,
+                      color: const Color(0xFF888888),
+                    ),
                   ),
                   TextButton(
                     onPressed: () => ref.invalidate(graphProvider),
                     child: Text(
                       'RETRY',
-                      style: GoogleFonts.teko(fontSize: 13, color: Colors.black),
+                      style: GoogleFonts.teko(
+                        fontSize: 13,
+                        color: Colors.black,
+                      ),
                     ),
                   ),
                 ],
@@ -78,29 +97,34 @@ class NetworkScreen extends ConsumerWidget {
             data: (graph) {
               final nodes = (graph['nodes'] as List? ?? [])
                   .cast<Map<String, dynamic>>();
-              final hubNodes = nodes
-                  .where((n) => n['type'] == 'HUB')
-                  .toList();
+              final hubNodes = nodes.where((n) => n['type'] == 'HUB').toList();
 
               if (hubNodes.isEmpty) {
                 return Center(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.hub_outlined,
-                          size: 48, color: Color(0xFFE0E0E0)),
+                      const Icon(
+                        Icons.hub_outlined,
+                        size: 48,
+                        color: Color(0xFFE0E0E0),
+                      ),
                       const SizedBox(height: 16),
                       Text(
                         'NO ARTISTS YET',
                         style: GoogleFonts.teko(
-                            fontSize: 18, color: const Color(0xFF888888)),
+                          fontSize: 18,
+                          color: const Color(0xFF888888),
+                        ),
                       ),
                       const SizedBox(height: 6),
                       Text(
                         'Add artists via the ARTISTS tab to\nbuild the identity graph.',
                         textAlign: TextAlign.center,
                         style: GoogleFonts.archivo(
-                            fontSize: 12, color: const Color(0xFFAAAAAA)),
+                          fontSize: 12,
+                          color: const Color(0xFFAAAAAA),
+                        ),
                       ),
                     ],
                   ),
@@ -162,20 +186,20 @@ class _StatusBanner extends StatelessWidget {
     final color = loading
         ? const Color(0xFFF5F5F5)
         : hasProviders
-            ? const Color(0xFFE8F5E9)
-            : const Color(0xFFFFF8E1);
+        ? const Color(0xFFE8F5E9)
+        : const Color(0xFFFFF8E1);
 
     final dotColor = loading
         ? const Color(0xFFBDBDBD)
         : hasProviders
-            ? const Color(0xFF4CAF50)
-            : const Color(0xFFFFC107);
+        ? const Color(0xFF4CAF50)
+        : const Color(0xFFFFC107);
 
     final label = loading
         ? 'CHECKING AI PROVIDERS...'
         : hasProviders
-            ? 'AI DISCOVERY READY — ${providers.join(", ")}'
-            : 'NO AI PROVIDERS — set GEMINI_API_KEY in backend';
+        ? 'AI DISCOVERY READY — ${providers.join(", ")}'
+        : 'NO AI PROVIDERS — set GEMINI_API_KEY in backend';
 
     return Container(
       color: color,
@@ -185,15 +209,15 @@ class _StatusBanner extends StatelessWidget {
           Container(
             width: 8,
             height: 8,
-            decoration: BoxDecoration(
-              color: dotColor,
-              shape: BoxShape.circle,
-            ),
+            decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
           ),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
               label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              softWrap: false,
               style: GoogleFonts.teko(
                 fontSize: 12,
                 color: const Color(0xFF555555),
@@ -221,20 +245,25 @@ class _HubCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final data = hub['data'] as Map<String, dynamic>? ?? {};
     final name = hub['label'] as String? ?? 'Unknown';
-    final entityType = (data['entityType'] as String? ?? 'artist').toUpperCase();
+    final hubId = hub['id'] as String? ?? name;
+    final entityType = (data['entityType'] as String? ?? 'artist')
+        .toUpperCase();
     final confidence = data['identityConfidence'] as String? ?? 'LOW';
     final coverage = data['coverageLevel'] as String? ?? 'MINIMAL';
 
-    final dataPoints = children.where((c) => c['type'] == 'DATA_POINT').toList();
+    final dataPoints = children
+        .where((c) => c['type'] == 'DATA_POINT')
+        .toList();
     final analyses = children.where((c) => c['type'] == 'ANALYSIS').toList();
 
     final confidenceColor = confidence == 'HIGH'
         ? const Color(0xFF4CAF50)
         : confidence == 'MEDIUM'
-            ? const Color(0xFFFFC107)
-            : const Color(0xFF888888);
+        ? const Color(0xFFFFC107)
+        : const Color(0xFF888888);
 
     return Container(
+      key: ValueKey('networkHubCard_$hubId'),
       decoration: BoxDecoration(
         border: Border.all(color: const Color(0xFFE8E8E8)),
         borderRadius: BorderRadius.circular(6),
@@ -250,6 +279,9 @@ class _HubCard extends StatelessWidget {
             children: [
               Text(
                 name.toUpperCase(),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                softWrap: false,
                 style: GoogleFonts.teko(
                   fontSize: 20,
                   fontWeight: FontWeight.w500,
@@ -263,7 +295,11 @@ class _HubCard extends StatelessWidget {
                 children: [
                   _SmallBadge(entityType, Colors.black, Colors.white),
                   _SmallBadge(confidence, confidenceColor, Colors.white),
-                  _SmallBadge(coverage, const Color(0xFFF0F0F0), const Color(0xFF666666)),
+                  _SmallBadge(
+                    coverage,
+                    const Color(0xFFF0F0F0),
+                    const Color(0xFF666666),
+                  ),
                 ],
               ),
             ],
@@ -282,9 +318,9 @@ class _HubCard extends StatelessWidget {
                   return GestureDetector(
                     onTap: url != null
                         ? () => launchUrl(
-                              Uri.parse(url),
-                              mode: LaunchMode.externalApplication,
-                            )
+                            Uri.parse(url),
+                            mode: LaunchMode.externalApplication,
+                          )
                         : null,
                     child: _SmallBadge(
                       '↗ $label',
@@ -326,7 +362,9 @@ class _HubCard extends StatelessWidget {
               Text(
                 'No platform links or analysis yet.\nRun discovery to populate this card.',
                 style: GoogleFonts.archivo(
-                    fontSize: 11, color: const Color(0xFFAAAAAA)),
+                  fontSize: 11,
+                  color: const Color(0xFFAAAAAA),
+                ),
               ),
           ],
         ),
@@ -361,6 +399,7 @@ class _SmallBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
+      constraints: const BoxConstraints(maxWidth: 180),
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
       decoration: BoxDecoration(
         color: bg,
@@ -368,6 +407,9 @@ class _SmallBadge extends StatelessWidget {
       ),
       child: Text(
         label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        softWrap: false,
         style: GoogleFonts.teko(fontSize: 11, color: fg, letterSpacing: 0.3),
       ),
     );

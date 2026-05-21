@@ -17,7 +17,7 @@ final _logger = Logger('discovery.save_discovery');
 
 /// POST /discovery/save-discovery
 /// Saves a confirmed artist discovery result to the artists table.
-/// Header: X-User-Id (defaults to local_user)
+/// Auth: JWT (userId injected via middleware)
 /// Body: fully mapped and scored artist JSON from GET /discovery/auto-discover
 Future<Response> onRequest(RequestContext context) async {
   print('DEBUG: [save_discovery] POST request received');
@@ -26,7 +26,7 @@ Future<Response> onRequest(RequestContext context) async {
     return Response(statusCode: 405);
   }
 
-  final userId = context.request.headers['x-user-id'] ?? 'local_user';
+  final userId = context.read<String>();
   _logger.info('[save_discovery] userId=$userId');
 
   Map<String, dynamic> body;

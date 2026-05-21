@@ -5,11 +5,13 @@ import 'package:logging/logging.dart';
 
 import '../feed_cache.dart';
 import '../database.dart';
+import '../repositories/publication_repository.dart';
 import 'soundcloud_service.dart';
 import 'youtube_service.dart';
 import 'beatport_service.dart';
 import 'bandcamp_service.dart';
 import 'press_scout_service.dart';
+import 'publication_poller_service.dart';
 
 final _logger = Logger('SchedulerService');
 
@@ -24,6 +26,8 @@ class SchedulerService {
     required this.beatport,
     required this.bandcamp,
     required this.pressScout,
+    required this.publicationPoller,
+    required this.publicationRepo,
   });
 
   final DatabaseService db;
@@ -32,6 +36,8 @@ class SchedulerService {
   final BeatportService beatport;
   final BandcampService bandcamp;
   final PressScoutService pressScout;
+  final PublicationPollerService publicationPoller;
+  final PublicationRepository publicationRepo;
 
   final _cron = Cron();
 
@@ -75,6 +81,24 @@ class SchedulerService {
         _logger.info('[Scheduler] Startup press scout warmup done');
       } catch (e) {
         _logger.warning('[Scheduler] Startup press scout warmup failed: $e');
+      }
+    });
+
+    // Run publication RSS poller 60 seconds after startup so articles are
+    // available before the first user request instead of waiting up to 4 hours.
+    Future<void>.delayed(const Duration(seconds: 60), () async {
+      _logger.info('[Scheduler] Startup publication poller warmup starting');
+      try {
+        final result = await publicationPoller.pollAll();
+        _logger.info(
+          '[Scheduler] Startup publication poller warmup done: '
+          'polled=${result['publications_polled']} '
+          'articles=${result['articles_saved']}',
+        );
+      } catch (e) {
+        _logger.warning(
+          '[Scheduler] Startup publication poller warmup failed: $e',
+        );
       }
     });
 
@@ -204,13 +228,32 @@ class SchedulerService {
       await pressScout.scoutArticlesForActiveArtists();
     });
 
-    // 6. Feed cache cleanup: Once daily at 3am (delete items older than 31 days)
+    // 6. Publication RSS poller: Every 4 hours (6x/day)
+    // Serial execution per PublicationPollerService design — one feed at a time.
+    _cron.schedule(Schedule.parse('0 */4 * * *'), () async {
+      _logger.info('[Scheduler] Starting Publication RSS Poll');
+      final result = await publicationPoller.pollAll();
+      _logger.info(
+        '[Scheduler] Publication RSS Poll complete: '
+        'polled=${result['publications_polled']} '
+        'succeeded=${result['succeeded']} '
+        'failed=${result['failed']} '
+        'articles=${result['articles_saved']}',
+      );
+    });
+
+    // 7. Feed cache cleanup: Once daily at 3am (delete items older than 31 days)
+    //    Also purges expired publication articles in the same window.
     _cron.schedule(Schedule.parse('0 3 * * *'), () async {
       _logger.info('[Scheduler] Starting Feed Cache Cleanup');
       await db.deleteOldFeedItems(days: 31);
+      final deleted = await publicationRepo.deleteExpiredArticles();
+      _logger.info(
+        '[Scheduler] Expired publication articles deleted: $deleted',
+      );
     });
 
-    _logger.info('Tiered Scheduler Active (6 jobs registered).');
+    _logger.info('Tiered Scheduler Active (7 jobs registered).');
   }
 
   void stop() {

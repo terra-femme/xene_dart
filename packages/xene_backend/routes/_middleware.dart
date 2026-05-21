@@ -1,13 +1,17 @@
 import 'dart:io';
 
 import 'package:dart_frog/dart_frog.dart';
+import 'package:dio/dio.dart' hide Response;
 import 'package:logging/logging.dart';
 import 'package:xene_backend/src/database.dart';
+import 'package:xene_backend/src/repositories/publication_repository.dart';
+import 'package:xene_backend/src/services/api_analytics_service.dart';
 import 'package:xene_backend/src/services/bandcamp_service.dart';
 import 'package:xene_backend/src/services/beatport_service.dart';
 import 'package:xene_backend/src/services/discovery_service.dart';
 import 'package:xene_backend/src/services/gemini_key_rotator.dart';
 import 'package:xene_backend/src/services/press_scout_service.dart';
+import 'package:xene_backend/src/services/publication_poller_service.dart';
 import 'package:xene_backend/src/services/scheduler_service.dart';
 import 'package:xene_backend/src/services/soundcloud_service.dart';
 import 'package:xene_backend/src/services/token_store.dart';
@@ -32,24 +36,41 @@ final bool _loggingReady = () {
 
 // Global singleton instances
 final _db = DatabaseService();
-final _soundcloud = SoundCloudService(_db);
-final _youtube = YouTubeService(_db);
-final _beatport = BeatportService(_db);
-final _bandcamp = BandcampService(_db);
+final _apiAnalytics = ApiAnalyticsService();
+final _soundcloud = SoundCloudService(_db, analytics: _apiAnalytics);
+final _youtube = YouTubeService(_db, analytics: _apiAnalytics);
+final _beatport = BeatportService(_db, analytics: _apiAnalytics);
+final _bandcamp = BandcampService(_db, analytics: _apiAnalytics);
 final _tokenStore = TokenStore();
-final _twitch = TwitchService();
-final _discogs = DiscogsService();
+final _twitch = TwitchService(analytics: _apiAnalytics);
+final _discogs = DiscogsService(analytics: _apiAnalytics);
 
 // Shared Gemini key rotator — one instance for all services so key state is global.
-final _geminiRotator = GeminiKeyRotator();
+final _geminiRotator = GeminiKeyRotator(analytics: _apiAnalytics);
 
-final _pressScout = PressScoutService(_db, rotator: _geminiRotator);
+final _pressScout = PressScoutService(
+  _db,
+  rotator: _geminiRotator,
+  analytics: _apiAnalytics,
+);
+
+final _publicationRepo = PublicationRepository(_db.client);
+final _publicationPoller = PublicationPollerService(
+  _publicationRepo,
+  _apiAnalytics.trackDio(
+    Dio()
+      ..options.connectTimeout = const Duration(seconds: 15)
+      ..options.receiveTimeout = const Duration(seconds: 30),
+    'publication_rss',
+  ),
+);
 
 final _discovery = DiscoveryService(
   db: _db,
   soundcloud: _soundcloud,
   discogs: _discogs,
   rotator: _geminiRotator,
+  analytics: _apiAnalytics,
 );
 
 // Print env key status at server startup — visible before any request.
@@ -58,8 +79,12 @@ final bool _envReady = () {
   print('══════════════════════════════════════════════════════');
   print('[XENE SERVER STARTUP] Environment check:');
   print('  Gemini keys loaded: ${_geminiRotator.keyCount}');
-  print('  LLM discovery: ${_geminiRotator.hasKeys ? "ENABLED ✓ (${_geminiRotator.keyCount} key(s))" : "DISABLED ✗ — set GEMINI_API_KEY"}');
-  print('  PRESS_SCOUT_BATCH_SIZE: ${Platform.environment['PRESS_SCOUT_BATCH_SIZE'] ?? '10 (default)'}');
+  print(
+    '  LLM discovery: ${_geminiRotator.hasKeys ? "ENABLED ✓ (${_geminiRotator.keyCount} key(s))" : "DISABLED ✗ — set GEMINI_API_KEY"}',
+  );
+  print(
+    '  PRESS_SCOUT_BATCH_SIZE: ${Platform.environment['PRESS_SCOUT_BATCH_SIZE'] ?? '10 (default)'}',
+  );
   print('══════════════════════════════════════════════════════');
   print('');
   return true;
@@ -72,10 +97,13 @@ final _scheduler = SchedulerService(
   beatport: _beatport,
   bandcamp: _bandcamp,
   pressScout: _pressScout,
+  publicationPoller: _publicationPoller,
+  publicationRepo: _publicationRepo,
 )..start();
 
 final middleware = (Handler handler) {
   return handler
+      .use(_jwtMiddleware)
       .use(_corsMiddleware)
       .use(_debugMiddleware)
       .use(provider<DatabaseService>((_) => _db))
@@ -89,7 +117,10 @@ final middleware = (Handler handler) {
       .use(provider<PressScoutService>((_) => _pressScout))
       .use(provider<DiscoveryService>((_) => _discovery))
       .use(provider<DiscogsService>((_) => _discogs))
-      .use(provider<GeminiKeyRotator>((_) => _geminiRotator));
+      .use(provider<GeminiKeyRotator>((_) => _geminiRotator))
+      .use(provider<ApiAnalyticsService>((_) => _apiAnalytics))
+      .use(provider<PublicationRepository>((_) => _publicationRepo))
+      .use(provider<PublicationPollerService>((_) => _publicationPoller));
 };
 
 Handler _corsMiddleware(Handler handler) {
@@ -102,8 +133,10 @@ Handler _corsMiddleware(Handler handler) {
         statusCode: HttpStatus.noContent,
         headers: {
           'Access-Control-Allow-Origin': origin,
-          'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type, X-User-Id, Authorization',
+          'Access-Control-Allow-Methods':
+              'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+          'Access-Control-Allow-Headers':
+              'Content-Type, X-User-Id, Authorization',
           'Access-Control-Max-Age': '86400',
         },
       );
@@ -112,14 +145,16 @@ Handler _corsMiddleware(Handler handler) {
     try {
       // 2. Process request
       final response = await handler(context);
-      
+
       // 3. Add CORS to success/expected responses
       return response.copyWith(
         headers: {
           ...response.headers,
           'Access-Control-Allow-Origin': origin,
-          'Access-Control-Allow-Headers': 'Content-Type, X-User-Id, Authorization',
-          'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+          'Access-Control-Allow-Headers':
+              'Content-Type, X-User-Id, Authorization',
+          'Access-Control-Allow-Methods':
+              'GET, POST, PUT, PATCH, DELETE, OPTIONS',
         },
       );
     } catch (e, stack) {
@@ -127,14 +162,16 @@ Handler _corsMiddleware(Handler handler) {
       // Otherwise, the browser hides the real error behind a "CORS Blocked" message.
       print('[SERVER ERROR] $e');
       print(stack);
-      
+
       return Response.json(
         statusCode: HttpStatus.internalServerError,
         body: {'error': e.toString()},
         headers: {
           'Access-Control-Allow-Origin': origin,
-          'Access-Control-Allow-Headers': 'Content-Type, X-User-Id, Authorization',
-          'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+          'Access-Control-Allow-Headers':
+              'Content-Type, X-User-Id, Authorization',
+          'Access-Control-Allow-Methods':
+              'GET, POST, PUT, PATCH, DELETE, OPTIONS',
         },
       );
     }
@@ -144,8 +181,65 @@ Handler _corsMiddleware(Handler handler) {
 Handler _debugMiddleware(Handler handler) {
   return (context) async {
     _loggingReady; // triggers lazy init of the logging listener on first request
-    _envReady;    // triggers env print on first request if startup didn't fire it
+    _envReady; // triggers env print on first request if startup didn't fire it
     print('DEBUG: Request path: ${context.request.uri.path}');
     return handler(context);
   };
+}
+
+Handler _jwtMiddleware(Handler handler) {
+  return (context) async {
+    // OPTIONS preflights bypass JWT — CORS handles them in the outer wrapper.
+    if (context.request.method == HttpMethod.options) {
+      return handler(context);
+    }
+
+    final path = context.request.uri.path;
+    if (_isJwtExempt(path)) {
+      return handler(context);
+    }
+
+    final authHeader = context.request.headers['authorization'];
+    if (authHeader == null || !authHeader.startsWith('Bearer ')) {
+      return Response.json(
+        statusCode: HttpStatus.unauthorized,
+        body: {'error': 'Authorization header required'},
+      );
+    }
+
+    final token = authHeader.substring(7).trim();
+    try {
+      final userResp = await _db.client.auth.getUser(token);
+      final userId = userResp.user?.id;
+      if (userId == null) {
+        return Response.json(
+          statusCode: HttpStatus.unauthorized,
+          body: {'error': 'Invalid or expired token'},
+        );
+      }
+      print('[JWT] auth ok user=$userId path=$path');
+      return handler(context.provide<String>(() => userId));
+    } catch (e) {
+      print('[JWT] auth error path=$path: $e');
+      return Response.json(
+        statusCode: HttpStatus.unauthorized,
+        body: {'error': 'Authentication failed'},
+      );
+    }
+  };
+}
+
+bool _isJwtExempt(String path) {
+  if (path.startsWith('/auth/')) return true;
+  if (path == '/monitor') return true;
+  if (path.startsWith('/proxy/')) return true;
+  if (path.startsWith('/soundcloud/stream')) return true;
+  if (path.startsWith('/twitch/')) return true;
+  if (path == '/discovery/auto_discover') return true;
+  if (path == '/discovery/sc_search') return true;
+  if (path == '/discovery/status') return true;
+  if (path.startsWith('/press_scout/')) return true;
+  if (path.startsWith('/presets/templates')) return true;
+  if (path == '/admin/poll') return true;
+  return false;
 }

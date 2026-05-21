@@ -6,6 +6,7 @@ import 'package:googleai_dart/googleai_dart.dart';
 import 'package:logging/logging.dart';
 
 import '../database.dart';
+import 'api_analytics_service.dart';
 import 'gemini_key_rotator.dart';
 
 final _logger = Logger('PressScoutService');
@@ -15,10 +16,15 @@ const _kScoutIntervalDays = 60;
 const _kDefaultBatchSize = 10;
 
 class PressScoutService {
-  PressScoutService(this.db, {required this.rotator});
+  PressScoutService(
+    this.db, {
+    required this.rotator,
+    ApiAnalyticsService? analytics,
+  }) : _analytics = analytics;
 
   final DatabaseService db;
   final GeminiKeyRotator rotator;
+  final ApiAnalyticsService? _analytics;
 
   /// Scheduled background job: scout press for stale artists in batches.
   /// One Gemini grounded call per batch of N artists instead of one per artist.
@@ -28,10 +34,14 @@ class PressScoutService {
     if (!rotator.hasKeys) {
       final orKey = Platform.environment['OPENROUTER_API_KEY'];
       if (orKey == null || orKey.isEmpty) {
-        _logger.warning('[press_scout] No LLM provider available — scheduled scout skipped');
+        _logger.warning(
+          '[press_scout] No LLM provider available — scheduled scout skipped',
+        );
         return;
       }
-      _logger.info('[press_scout] Gemini unavailable — scout will use OpenRouter fallback only');
+      _logger.info(
+        '[press_scout] Gemini unavailable — scout will use OpenRouter fallback only',
+      );
     }
 
     // Reset key rotation at the start of each batch run so daily quotas are fresh.
@@ -43,9 +53,9 @@ class PressScoutService {
       return;
     }
 
-    final staleAfter = DateTime.now()
-        .toUtc()
-        .subtract(const Duration(days: _kScoutIntervalDays));
+    final staleAfter = DateTime.now().toUtc().subtract(
+      const Duration(days: _kScoutIntervalDays),
+    );
 
     final toScout = <Map<String, dynamic>>[];
     for (final a in allArtists) {
@@ -69,15 +79,16 @@ class PressScoutService {
 
     _logger.info('[press_scout] Found ${toScout.length} artists for scouting');
 
-    final batchSize = int.tryParse(
-          Platform.environment['PRESS_SCOUT_BATCH_SIZE'] ?? '',
-        ) ??
+    final batchSize =
+        int.tryParse(Platform.environment['PRESS_SCOUT_BATCH_SIZE'] ?? '') ??
         _kDefaultBatchSize;
 
     for (var i = 0; i < toScout.length; i += batchSize) {
       final end = (i + batchSize).clamp(0, toScout.length);
       final chunk = toScout.sublist(i, end);
-      _logger.info('[press_scout] Processing batch ${i ~/ batchSize + 1}: ${chunk.map((a) => a['name']).toList()}');
+      _logger.info(
+        '[press_scout] Processing batch ${i ~/ batchSize + 1}: ${chunk.map((a) => a['name']).toList()}',
+      );
       await _scoutBatch(chunk);
       await Future<void>.delayed(const Duration(seconds: 2));
     }
@@ -107,18 +118,24 @@ class PressScoutService {
         await _saveAndUpdate(artistId, name, articles, presetSlug: presetSlug);
       }
     } else {
-      _logger.warning('[press_scout] Batch Gemini failed — falling back to OpenRouter per artist');
+      _logger.warning(
+        '[press_scout] Batch Gemini failed — falling back to OpenRouter per artist',
+      );
       for (final artist in artists) {
         final name = artist['name'] as String;
         final entityType = (artist['entity_type'] as String?) ?? 'artist';
         final artistId = artist['id'] as String;
-        final articles = await _scoutWithOpenRouter(name, entityType, presetSlug: presetSlug);
+        final articles = await _scoutWithOpenRouter(
+          name,
+          entityType,
+          presetSlug: presetSlug,
+        );
         await _saveAndUpdate(artistId, name, articles, presetSlug: presetSlug);
       }
     }
   }
 
-  Future<Map<String, List<Map<String, dynamic>>>?>  _callGeminiBatch(
+  Future<Map<String, List<Map<String, dynamic>>>?> _callGeminiBatch(
     String prompt,
     List<String> names,
   ) async {
@@ -131,7 +148,11 @@ class PressScoutService {
             tools: [Tool(googleSearch: GoogleSearch())],
           ),
         );
-        rotator.logUsage(_logger, 'press_scout.batch(${names.length})', response);
+        rotator.logUsage(
+          _logger,
+          'press_scout.batch(${names.length})',
+          response,
+        );
 
         var text = response.text?.trim() ?? '';
         if (text.contains('```json')) {
@@ -147,7 +168,9 @@ class PressScoutService {
 
         final decoded = jsonDecode(text);
         if (decoded is! Map<String, dynamic>) {
-          _logger.warning('[press_scout] Gemini batch response is not a JSON object');
+          _logger.warning(
+            '[press_scout] Gemini batch response is not a JSON object',
+          );
           return null;
         }
 
@@ -164,7 +187,10 @@ class PressScoutService {
         return result;
       } catch (e) {
         if (GeminiKeyRotator.isQuotaError(e)) {
-          _logger.warning('[press_scout] Quota on key ${rotator.currentIndex}: $e');
+          rotator.logQuotaError('press_scout.batch(${names.length})', e);
+          _logger.warning(
+            '[press_scout] Quota on key ${rotator.currentIndex}: $e',
+          );
           if (!rotator.rotate()) return null;
           // Loop continues with next key
         } else {
@@ -218,7 +244,9 @@ Return a JSON object keyed by artist name. Use an empty array for any artist wit
     if (!rotator.hasKeys) {
       final orKey = Platform.environment['OPENROUTER_API_KEY'];
       if (orKey == null || orKey.isEmpty) {
-        _logger.warning('[press_scout] No LLM provider available — preset scout skipped');
+        _logger.warning(
+          '[press_scout] No LLM provider available — preset scout skipped',
+        );
         return;
       }
     }
@@ -229,7 +257,9 @@ Return a JSON object keyed by artist name. Use an empty array for any artist wit
     // is a safe placeholder here.
     final artists = await db.getArtistsForPreset('local_user', presetSlug);
     if (artists.isEmpty) {
-      _logger.warning('[press_scout] No artists found for preset "$presetSlug"');
+      _logger.warning(
+        '[press_scout] No artists found for preset "$presetSlug"',
+      );
       return;
     }
 
@@ -240,15 +270,16 @@ Return a JSON object keyed by artist name. Use an empty array for any artist wit
       '${toScout.map((a) => a['name']).toList()}',
     );
 
-    final batchSize = int.tryParse(
-          Platform.environment['PRESS_SCOUT_BATCH_SIZE'] ?? '',
-        ) ??
+    final batchSize =
+        int.tryParse(Platform.environment['PRESS_SCOUT_BATCH_SIZE'] ?? '') ??
         _kDefaultBatchSize;
 
     for (var i = 0; i < toScout.length; i += batchSize) {
       final end = (i + batchSize).clamp(0, toScout.length);
       final chunk = toScout.sublist(i, end);
-      _logger.info('[press_scout] Preset batch ${i ~/ batchSize + 1}: ${chunk.map((a) => a['name']).toList()}');
+      _logger.info(
+        '[press_scout] Preset batch ${i ~/ batchSize + 1}: ${chunk.map((a) => a['name']).toList()}',
+      );
       await _scoutBatch(chunk, presetSlug: presetSlug);
       await Future<void>.delayed(const Duration(seconds: 2));
     }
@@ -265,9 +296,13 @@ Return a JSON object keyed by artist name. Use an empty array for any artist wit
     if (rotator.hasKeys) {
       final articles = await scoutWithGemini(name, entityType);
       if (articles.isNotEmpty) return articles;
-      _logger.warning('[press_scout] Gemini returned empty for $name — trying OpenRouter fallback');
+      _logger.warning(
+        '[press_scout] Gemini returned empty for $name — trying OpenRouter fallback',
+      );
     } else {
-      _logger.warning('[press_scout] Gemini client unavailable — trying OpenRouter directly for $name');
+      _logger.warning(
+        '[press_scout] Gemini client unavailable — trying OpenRouter directly for $name',
+      );
     }
     return _scoutWithOpenRouter(name, entityType);
   }
@@ -298,7 +333,9 @@ Return a JSON object keyed by artist name. Use an empty array for any artist wit
         }
 
         if (text.isEmpty) {
-          _logger.warning('[press_scout] Gemini returned empty response for $name');
+          _logger.warning(
+            '[press_scout] Gemini returned empty response for $name',
+          );
           return [];
         }
 
@@ -306,14 +343,19 @@ Return a JSON object keyed by artist name. Use an empty array for any artist wit
         final articles = decoded is List
             ? List<Map<String, dynamic>>.from(decoded)
             : decoded is Map && decoded.containsKey('articles')
-                ? List<Map<String, dynamic>>.from(decoded['articles'] as List)
-                : <Map<String, dynamic>>[];
+            ? List<Map<String, dynamic>>.from(decoded['articles'] as List)
+            : <Map<String, dynamic>>[];
 
-        _logger.info('[press_scout] Gemini returned ${articles.length} articles for $name');
+        _logger.info(
+          '[press_scout] Gemini returned ${articles.length} articles for $name',
+        );
         return articles;
       } catch (e) {
         if (GeminiKeyRotator.isQuotaError(e)) {
-          _logger.warning('[press_scout] Quota on key ${rotator.currentIndex}: $e');
+          rotator.logQuotaError('press_scout.single', e);
+          _logger.warning(
+            '[press_scout] Quota on key ${rotator.currentIndex}: $e',
+          );
           if (!rotator.rotate()) return [];
         } else {
           print('[XENE PRESS_SCOUT] ✗ Gemini scout THREW for "$name": $e');
@@ -357,12 +399,21 @@ Return as a JSON list: [{"title": "", "url": "", "snippet": "", "site_tier": "Ma
     String? presetSlug,
   }) async {
     if (articles.isNotEmpty) {
-      final dbArticles = _mapArticlesToDb(artistId, name, articles, presetSlug: presetSlug);
+      final dbArticles = _mapArticlesToDb(
+        artistId,
+        name,
+        articles,
+        presetSlug: presetSlug,
+      );
       if (await db.saveArtistArticles(dbArticles)) {
         await db.updateLastPressScout(artistId);
-        _logger.info('[press_scout] Saved ${dbArticles.length} articles for $name');
+        _logger.info(
+          '[press_scout] Saved ${dbArticles.length} articles for $name',
+        );
       } else {
-        _logger.warning('[press_scout] Failed to save articles for $name — will retry next cycle');
+        _logger.warning(
+          '[press_scout] Failed to save articles for $name — will retry next cycle',
+        );
       }
     } else {
       _logger.info('[press_scout] No articles found for $name');
@@ -376,19 +427,25 @@ Return as a JSON list: [{"title": "", "url": "", "snippet": "", "site_tier": "Ma
   }) async {
     final apiKey = Platform.environment['OPENROUTER_API_KEY'];
     if (apiKey == null || apiKey.isEmpty) {
-      print('[XENE OPENROUTER] *** PRESS SCOUT FALLBACK SKIPPED — OPENROUTER_API_KEY not set ***');
-      _logger.warning('[press_scout._scoutWithOpenRouter] OPENROUTER_API_KEY not set — fallback disabled');
+      print(
+        '[XENE OPENROUTER] *** PRESS SCOUT FALLBACK SKIPPED — OPENROUTER_API_KEY not set ***',
+      );
+      _logger.warning(
+        '[press_scout._scoutWithOpenRouter] OPENROUTER_API_KEY not set — fallback disabled',
+      );
       return [];
     }
 
     print('');
     print('[XENE OPENROUTER] ▶▶▶ Press scout OpenRouter fallback for "$name"');
-    _logger.info('[press_scout._scoutWithOpenRouter] ▶ calling OpenRouter for "$name" [$entityType]');
+    _logger.info(
+      '[press_scout._scoutWithOpenRouter] ▶ calling OpenRouter for "$name" [$entityType]',
+    );
 
     final prompt = _buildSinglePrompt(name, presetSlug: presetSlug);
 
     try {
-      final dio = Dio();
+      final dio = _analytics?.trackDio(Dio(), 'openrouter') ?? Dio();
       final response = await dio.post<Map<String, dynamic>>(
         'https://openrouter.ai/api/v1/chat/completions',
         data: {
@@ -411,17 +468,26 @@ Return as a JSON list: [{"title": "", "url": "", "snippet": "", "site_tier": "Ma
         ),
       );
 
-      print('[XENE OPENROUTER] ◀◀◀ Press scout response — status=${response.statusCode}');
-      _logger.info('[press_scout._scoutWithOpenRouter] ← status=${response.statusCode}');
+      print(
+        '[XENE OPENROUTER] ◀◀◀ Press scout response — status=${response.statusCode}',
+      );
+      _logger.info(
+        '[press_scout._scoutWithOpenRouter] ← status=${response.statusCode}',
+      );
 
-      final content = (response.data?['choices'] as List?)
+      final content =
+          (response.data?['choices'] as List?)
               ?.firstOrNull?['message']?['content']
               ?.toString() ??
           '';
-      _logger.info('[press_scout._scoutWithOpenRouter] content length=${content.length}');
+      _logger.info(
+        '[press_scout._scoutWithOpenRouter] content length=${content.length}',
+      );
 
       if (content.isEmpty) {
-        _logger.warning('[press_scout._scoutWithOpenRouter] ⚠ empty content — returning []');
+        _logger.warning(
+          '[press_scout._scoutWithOpenRouter] ⚠ empty content — returning []',
+        );
         return [];
       }
 
@@ -436,15 +502,21 @@ Return as a JSON list: [{"title": "", "url": "", "snippet": "", "site_tier": "Ma
       final articles = decoded is List
           ? List<Map<String, dynamic>>.from(decoded)
           : decoded is Map && decoded.containsKey('articles')
-              ? List<Map<String, dynamic>>.from(decoded['articles'] as List)
-              : <Map<String, dynamic>>[];
+          ? List<Map<String, dynamic>>.from(decoded['articles'] as List)
+          : <Map<String, dynamic>>[];
 
-      print('[XENE OPENROUTER] ✓ Press scout returned ${articles.length} articles for "$name"');
-      _logger.info('[press_scout._scoutWithOpenRouter] ✓ ${articles.length} articles for $name');
+      print(
+        '[XENE OPENROUTER] ✓ Press scout returned ${articles.length} articles for "$name"',
+      );
+      _logger.info(
+        '[press_scout._scoutWithOpenRouter] ✓ ${articles.length} articles for $name',
+      );
       return articles;
     } catch (e, st) {
       print('[XENE OPENROUTER] ✗ Press scout OpenRouter THREW for "$name": $e');
-      _logger.warning('[press_scout._scoutWithOpenRouter] ✗ failed for $name: $e');
+      _logger.warning(
+        '[press_scout._scoutWithOpenRouter] ✗ failed for $name: $e',
+      );
       _logger.warning('[press_scout._scoutWithOpenRouter] stacktrace: $st');
       return [];
     }
@@ -460,16 +532,23 @@ Return as a JSON list: [{"title": "", "url": "", "snippet": "", "site_tier": "Ma
       final rawDate = art['published_date'] ?? art['Date'];
       final pubDate = rawDate?.toString().trim().toLowerCase();
       final pubDateVal =
-          (pubDate != null && pubDate != 'n/a' && pubDate != 'unknown' && pubDate.isNotEmpty)
-              ? rawDate.toString()
-              : null;
+          (pubDate != null &&
+              pubDate != 'n/a' &&
+              pubDate != 'unknown' &&
+              pubDate.isNotEmpty)
+          ? rawDate.toString()
+          : null;
       return {
         'artist_id': artistId,
         'artist_name': artistName,
         'title': art['title'] ?? art['Title'] ?? 'Untitled',
         'url': art['url'] ?? art['URL'] ?? '#',
         'snippet': art['snippet'] ?? art['Snippet'] ?? 'No snippet available',
-        'source': art['source'] ?? art['Source'] ?? art['site_tier'] ?? art['Site_tier'],
+        'source':
+            art['source'] ??
+            art['Source'] ??
+            art['site_tier'] ??
+            art['Site_tier'],
         'published_at': pubDateVal,
         if (presetSlug != null) 'preset_slug': presetSlug,
       };

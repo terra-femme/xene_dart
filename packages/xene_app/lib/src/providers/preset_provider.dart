@@ -1,12 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-
-const _kUserId = 'local_user';
-const _kBackendUrl = String.fromEnvironment(
-  'BACKEND_URL',
-  defaultValue: 'http://localhost:8080',
-);
+import 'dio_provider.dart';
 
 @immutable
 class PresetSlot {
@@ -98,29 +93,19 @@ final activePresetSlugProvider = Provider<String>((ref) {
 class PresetDialNotifier extends AsyncNotifier<PresetDialState> {
   Dio? _dio;
 
+  Dio _getDio() {
+    _dio ??= ref.read(authenticatedDioProvider);
+    return _dio!;
+  }
+
   @override
   Future<PresetDialState> build() async {
-    _dio = _createDio();
+    _dio = ref.watch(authenticatedDioProvider);
     return _fetchDial();
   }
 
-  Dio _createDio() {
-    return Dio(
-      BaseOptions(
-        baseUrl: _kBackendUrl,
-        connectTimeout: const Duration(seconds: 10),
-        receiveTimeout: const Duration(seconds: 10),
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-          'X-User-Id': _kUserId,
-        },
-      ),
-    );
-  }
-
   Future<PresetDialState> _fetchDial() async {
-    final dio = _dio ??= _createDio();
+    final dio = _getDio();
     final response = await dio.get<Map<String, dynamic>>('/presets');
     final data = response.data ?? {};
     final slots =
@@ -173,7 +158,7 @@ class PresetDialNotifier extends AsyncNotifier<PresetDialState> {
     state = AsyncData(previous.copyWith(activePresetSlug: slug));
 
     try {
-      final dio = _dio ??= _createDio();
+      final dio = _getDio();
       final response = await dio.post<Map<String, dynamic>>(
         '/presets',
         data: {'activePresetSlug': slug},

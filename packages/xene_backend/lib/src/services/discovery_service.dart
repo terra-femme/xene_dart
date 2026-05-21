@@ -7,6 +7,7 @@ import 'package:logging/logging.dart';
 import 'package:xene_domain/xene_domain.dart';
 
 import '../database.dart';
+import 'api_analytics_service.dart';
 import 'gemini_key_rotator.dart';
 import 'soundcloud_service.dart';
 import 'discogs_service.dart';
@@ -79,12 +80,14 @@ class DiscoveryService {
     required this.soundcloud,
     required this.discogs,
     required this.rotator,
-  });
+    ApiAnalyticsService? analytics,
+  }) : _analytics = analytics;
 
   final DatabaseService db;
   final SoundCloudService soundcloud;
   final DiscogsService discogs;
   final GeminiKeyRotator rotator;
+  final ApiAnalyticsService? _analytics;
 
   bool get hasProviders => rotator.hasKeys;
 
@@ -699,6 +702,7 @@ Return the following JSON ONLY:
       } catch (e, st) {
         final safeError = _redactSensitiveText(e);
         if (GeminiKeyRotator.isQuotaError(e)) {
+          rotator.logQuotaError('discovery._runLlmIdentityWalk', e);
           _logger.warning(
             '[discovery._runLlmIdentityWalk] Quota on key ${rotator.currentIndex}: $safeError',
           );
@@ -783,7 +787,7 @@ Return the following JSON ONLY:
 }''';
 
     try {
-      final dio = Dio();
+      final dio = _analytics?.trackDio(Dio(), 'openrouter') ?? Dio();
       final response = await dio.post<Map<String, dynamic>>(
         'https://openrouter.ai/api/v1/chat/completions',
         data: {
@@ -926,7 +930,7 @@ Return the following JSON ONLY:
 }''';
 
     try {
-      final dio = Dio();
+      final dio = _analytics?.trackDio(Dio(), 'nvidia') ?? Dio();
       final response = await dio.post<Map<String, dynamic>>(
         'https://integrate.api.nvidia.com/v1/chat/completions',
         data: {

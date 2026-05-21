@@ -177,8 +177,7 @@ Future<List<FeedItem>> _runLiveFetch(
   Duration ttl, {
   String? leaseKey,
   String? leaseOwner,
-  }
-) async {
+}) async {
   final now = DateTime.now().toUtc();
   var completed = false;
   try {

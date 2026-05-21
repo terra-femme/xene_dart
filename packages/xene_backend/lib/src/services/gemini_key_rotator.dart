@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:googleai_dart/googleai_dart.dart';
 import 'package:logging/logging.dart';
 
+import 'api_analytics_service.dart';
+
 final _logger = Logger('GeminiKeyRotator');
 
 /// Manages a pool of Gemini API keys, rotating to the next on quota exhaustion.
@@ -12,7 +14,7 @@ final _logger = Logger('GeminiKeyRotator');
 /// Also accumulates in-memory usage stats exposed via [stats] for the monitor
 /// dashboard. Stats reset on server restart — this is intentional (dev tooling).
 class GeminiKeyRotator {
-  GeminiKeyRotator() {
+  GeminiKeyRotator({ApiAnalyticsService? analytics}) : _analytics = analytics {
     _clients = _buildClients();
     if (_clients.isEmpty) {
       _logger.severe('[rotator] No Gemini API keys found in environment');
@@ -22,6 +24,7 @@ class GeminiKeyRotator {
   }
 
   late final List<GoogleAIClient> _clients;
+  final ApiAnalyticsService? _analytics;
   int _currentIndex = 0;
 
   // ── Session stats (in-memory, resets on server restart) ──────────────────
@@ -30,7 +33,7 @@ class GeminiKeyRotator {
   final _perKey = <int, _KeyStats>{};
   final _recentCalls = <_CallEntry>[];
   final _onboarding = _BucketStats(); // discovery + press_scout.single
-  final _upkeep = _BucketStats();     // press_scout.batch(N)
+  final _upkeep = _BucketStats(); // press_scout.batch(N)
   static const _kMaxRecentCalls = 50;
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -71,9 +74,14 @@ class GeminiKeyRotator {
   /// Call bucket routing:
   ///   context starts with "press_scout.batch" → upkeep (scheduled)
   ///   everything else                         → on-boarding (user-triggered)
-  void logUsage(Logger logger, String context, GenerateContentResponse response) {
+  void logUsage(
+    Logger logger,
+    String context,
+    GenerateContentResponse response,
+  ) {
     final usage = response.usageMetadata;
-    final grounded = response.candidates?.any(
+    final grounded =
+        response.candidates?.any(
           (c) => c.groundingMetadata?.groundingChunks?.isNotEmpty == true,
         ) ??
         false;
@@ -94,11 +102,22 @@ class GeminiKeyRotator {
     if (grounded) keyStats.groundedCalls++;
 
     // Bucket routing
-    final bucket = context.startsWith('press_scout.batch') ? _upkeep : _onboarding;
+    final bucket = context.startsWith('press_scout.batch')
+        ? _upkeep
+        : _onboarding;
     bucket.calls++;
     bucket.inputTokens += inTokens;
     bucket.outputTokens += outTokens;
     if (grounded) bucket.groundedCalls++;
+
+    _analytics?.recordLlmCall(
+      provider: 'gemini',
+      context: context,
+      inputTokens: inTokens,
+      outputTokens: outTokens,
+      grounded: grounded,
+      keyIndex: _currentIndex,
+    );
 
     // Ring buffer: keep last 50 calls
     if (_recentCalls.length >= _kMaxRecentCalls) _recentCalls.removeAt(0);
@@ -111,6 +130,15 @@ class GeminiKeyRotator {
         grounded: grounded,
         keyIndex: _currentIndex,
       ),
+    );
+  }
+
+  void logQuotaError(String context, Object error) {
+    _analytics?.recordLlmError(
+      provider: 'gemini',
+      context: context,
+      error: error,
+      throttled: true,
     );
   }
 

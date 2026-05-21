@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:logging/logging.dart';
 
+import 'api_analytics_service.dart';
+
 final _logger = Logger('TwitchService');
 
 const _kTwitchTokenUrl = 'https://id.twitch.tv/oauth2/token';
@@ -10,13 +12,16 @@ const _kTwitchStreamsUrl = 'https://api.twitch.tv/helix/streams';
 const _kCacheTtlSeconds = 120; // 2-minute live status cache
 
 class TwitchService {
+  TwitchService({ApiAnalyticsService? analytics})
+    : _dio = analytics?.trackDio(_createDio(), 'twitch') ?? _createDio();
+
   String? _appToken;
   DateTime? _tokenExpiresAt;
   final Map<String, _LiveCacheEntry> _liveCache = {};
 
-  final Dio _dio = Dio(
-    BaseOptions(listFormat: ListFormat.multi),
-  );
+  final Dio _dio;
+
+  static Dio _createDio() => Dio(BaseOptions(listFormat: ListFormat.multi));
 
   String get _clientId {
     final v = Platform.environment['TWITCH_CLIENT_ID'] ?? '';
@@ -96,14 +101,13 @@ class TwitchService {
       _kTwitchStreamsUrl,
       queryParameters: {'user_login': logins},
       options: Options(
-        headers: {
-          'Client-ID': _clientId,
-          'Authorization': 'Bearer $token',
-        },
+        headers: {'Client-ID': _clientId, 'Authorization': 'Bearer $token'},
       ),
     );
     _logger.info('[twitch] Streams API status=${resp.statusCode}');
-    _logger.fine('[twitch] Raw response: ${resp.data.toString().substring(0, 300)}');
+    _logger.fine(
+      '[twitch] Raw response: ${resp.data.toString().substring(0, 300)}',
+    );
 
     final rawStreams = (resp.data!['data'] as List<dynamic>? ?? []);
     _logger.info('[twitch] Got ${rawStreams.length} live stream(s)');

@@ -5,27 +5,35 @@ import 'package:cookie_jar/cookie_jar.dart';
 import 'package:logging/logging.dart';
 import 'package:xene_domain/xene_domain.dart';
 import '../database.dart';
+import 'api_analytics_service.dart';
 
 final _logger = Logger('BeatportService');
 
 class BeatportService {
-  BeatportService(this._db) {
+  BeatportService(this._db, {ApiAnalyticsService? analytics})
+    : _dio = analytics?.trackDio(_createDio(), 'beatport') ?? _createDio() {
     _dio.interceptors.add(CookieManager(_cookieJar));
   }
 
   final DatabaseService _db;
   final _cookieJar = CookieJar();
-  final _dio = Dio(BaseOptions(
-    baseUrl: 'https://api.beatport.com/v4',
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-    },
-  ));
+  final Dio _dio;
+
+  static Dio _createDio() => Dio(
+    BaseOptions(
+      baseUrl: 'https://api.beatport.com/v4',
+      headers: {
+        'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      },
+    ),
+  );
 
   static const _clientId = '0GIvkCltVIuPkkwSJHp6NDb3s0potTjLBQr388Dd';
-  static const _redirectUri = 'https://api.beatport.com/v4/auth/o/post-message/';
+  static const _redirectUri =
+      'https://api.beatport.com/v4/auth/o/post-message/';
 
-  /// ELI5: The "Sneaky Login" sequence. 
+  /// ELI5: The "Sneaky Login" sequence.
   /// 1. Tell them who we are (Login).
   /// 2. Ask for a "Secret Code" (Authorize).
   /// 3. Trade the code for a "Golden Key" (Token).
@@ -98,11 +106,9 @@ class BeatportService {
 
     final token = await _authenticateSession();
     if (token != null) {
-      await _db.setSystemCache(
-        tokenKey,
-        {'access_token': token},
-        expiresAt: DateTime.now().add(const Duration(hours: 10)),
-      );
+      await _db.setSystemCache(tokenKey, {
+        'access_token': token,
+      }, expiresAt: DateTime.now().add(const Duration(hours: 10)));
     }
     return token;
   }
@@ -121,7 +127,9 @@ class BeatportService {
       );
       final results = (response.data?['results'] as List? ?? [])
           .cast<Map<String, dynamic>>();
-      _logger.info('[beatport] searchArtists "$name": ${results.length} results');
+      _logger.info(
+        '[beatport] searchArtists "$name": ${results.length} results',
+      );
 
       return results.map((r) {
         final id = r['id']?.toString() ?? '';
@@ -142,7 +150,11 @@ class BeatportService {
 
   /// Fetch releases for a label.
   /// ELI5: Checking the "New Arrivals" shelf for a specific record label.
-  Future<List<FeedItem>> getLabelReleases(String labelId, {String? labelName, int limit = 20}) async {
+  Future<List<FeedItem>> getLabelReleases(
+    String labelId, {
+    String? labelName,
+    int limit = 20,
+  }) async {
     final token = await _getToken();
     if (token == null) return [];
 
@@ -164,42 +176,51 @@ class BeatportService {
         try {
           final id = r['id'].toString();
           final title = r['name'] as String;
-          final artists = (r['artists'] as List).map((a) => a['name'] as String).join(', ');
-          
-          final image = r['image'] as Map? ?? {};
-          final imgUrl = (image['uri'] as String? ?? image['dynamic_uri'] as String? ?? '')
-              .replaceFirst('{w}', '500')
-              .replaceFirst('{h}', '500');
+          final artists = (r['artists'] as List)
+              .map((a) => a['name'] as String)
+              .join(', ');
 
-          items.add(FeedItem(
-            id: 'bp_$id',
-            platform: 'beatport',
-            artistName: labelName ?? (r['label'] as Map)['name'] as String,
-            contentType: 'release',
-            title: title,
-            body: artists,
-            externalUrl: 'https://www.beatport.com/release/${r['slug']}/$id',
-            artworkUrl: imgUrl.isEmpty ? null : imgUrl,
-            publishedAt: DateTime.parse(r['publish_date'] as String),
-          ));
+          final image = r['image'] as Map? ?? {};
+          final imgUrl =
+              (image['uri'] as String? ?? image['dynamic_uri'] as String? ?? '')
+                  .replaceFirst('{w}', '500')
+                  .replaceFirst('{h}', '500');
+
+          items.add(
+            FeedItem(
+              id: 'bp_$id',
+              platform: 'beatport',
+              artistName: labelName ?? (r['label'] as Map)['name'] as String,
+              contentType: 'release',
+              title: title,
+              body: artists,
+              externalUrl: 'https://www.beatport.com/release/${r['slug']}/$id',
+              artworkUrl: imgUrl.isEmpty ? null : imgUrl,
+              publishedAt: DateTime.parse(r['publish_date'] as String),
+            ),
+          );
         } catch (e) {
           _logger.warning('Error parsing Beatport release: $e');
         }
       }
 
       if (items.isNotEmpty) {
-        final dbItems = items.map((i) => {
-          'platform': 'beatport',
-          'internal_id': i.id,
-          'artist_name': i.artistName,
-          'content_type': i.contentType,
-          'title': i.title,
-          'body': i.body,
-          'artwork_url': i.artworkUrl,
-          'external_url': i.externalUrl,
-          'published_at': i.publishedAt.toIso8601String(),
-          'updated_at': DateTime.now().toUtc().toIso8601String(),
-        }).toList();
+        final dbItems = items
+            .map(
+              (i) => {
+                'platform': 'beatport',
+                'internal_id': i.id,
+                'artist_name': i.artistName,
+                'content_type': i.contentType,
+                'title': i.title,
+                'body': i.body,
+                'artwork_url': i.artworkUrl,
+                'external_url': i.externalUrl,
+                'published_at': i.publishedAt.toIso8601String(),
+                'updated_at': DateTime.now().toUtc().toIso8601String(),
+              },
+            )
+            .toList();
         await _db.saveFeedItems(dbItems);
       }
 

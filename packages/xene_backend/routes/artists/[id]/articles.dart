@@ -8,14 +8,6 @@ Future<Response> onRequest(RequestContext context, String id) async {
     return Response(statusCode: 405);
   }
 
-  final userId = context.request.headers['x-user-id'];
-  if (userId == null) {
-    return Response.json(
-      statusCode: 401,
-      body: {'error': 'X-User-Id header required'},
-    );
-  }
-
   final db = context.read<DatabaseService>();
   final articles = await db.getArtistArticles(id);
   return Response.json(body: articles);

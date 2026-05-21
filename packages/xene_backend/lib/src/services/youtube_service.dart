@@ -4,14 +4,17 @@ import 'package:logging/logging.dart';
 import 'package:xml/xml.dart';
 import 'package:xene_domain/xene_domain.dart';
 import '../database.dart';
+import 'api_analytics_service.dart';
 
 final _logger = Logger('YouTubeService');
 
 class YouTubeService {
-  YouTubeService(this._db);
+  YouTubeService(this._db, {ApiAnalyticsService? analytics})
+    : _dio = analytics?.trackDio(_createDio(), 'youtube') ?? _createDio();
 
   final DatabaseService _db;
-  final _dio = Dio(
+  final Dio _dio;
+  static Dio _createDio() => Dio(
     BaseOptions(
       connectTimeout: const Duration(seconds: 15),
       receiveTimeout: const Duration(seconds: 20),
@@ -229,7 +232,8 @@ class YouTubeService {
         auditSink?.add({
           'id': videoId,
           'path': 'api',
-          'raw_videoPublishedAt': contentDetails?['videoPublishedAt']?.toString(),
+          'raw_videoPublishedAt': contentDetails?['videoPublishedAt']
+              ?.toString(),
           'raw_snippetPublishedAt': snippet?['publishedAt']?.toString(),
           'usedField': contentDetails?['videoPublishedAt'] != null
               ? 'videoPublishedAt'

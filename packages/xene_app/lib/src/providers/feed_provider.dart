@@ -2,9 +2,10 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:xene_domain/xene_domain.dart';
+import 'auth_provider.dart';
+import 'dio_provider.dart';
 import 'preset_provider.dart';
 
-const _kUserId = 'local_user';
 // Recent feed: 30 items is enough for the initial above-fold view.
 // Archive is fetched separately on sheet open (lazy hydration).
 const _kFeedWindowLimit = 30;
@@ -13,14 +14,6 @@ const _kArchivePageLimit = 16;
 const _kFullArchivePageLimit = 50;
 
 enum FeedMode { methodical, fullFeed }
-
-/// Backend base URL, injected at build time via --dart-define=BACKEND_URL=<url>
-/// Defaults to localhost:8080 for local development.
-/// Production: flutter build web --dart-define=BACKEND_URL=https://xene-backend-abc123.run.app
-const _kBackendUrl = String.fromEnvironment(
-  'BACKEND_URL',
-  defaultValue: 'http://localhost:8080',
-);
 
 final feedProvider = AsyncNotifierProvider<FeedNotifier, List<FeedItem>>(
   FeedNotifier.new,
@@ -55,6 +48,7 @@ final searchFeedProvider = FutureProvider.autoDispose<List<FeedItem>>((
   final q = ref.watch(searchQueryProvider);
   if (q == null || q.trim().length < 2) return const [];
 
+  ref.watch(currentUserIdProvider);
   final presetSlug = ref.watch(activePresetSlugProvider);
   final queryParams = <String, dynamic>{
     'q': q.trim(),
@@ -63,18 +57,7 @@ final searchFeedProvider = FutureProvider.autoDispose<List<FeedItem>>((
   };
 
   debugPrint('[feedProvider] search GET /feed/merged q=$q');
-  final dio = Dio(
-    BaseOptions(
-      baseUrl: _kBackendUrl,
-      connectTimeout: const Duration(seconds: 30),
-      receiveTimeout: const Duration(seconds: 30),
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-        'X-User-Id': _kUserId,
-      },
-    ),
-  );
+  final dio = ref.watch(authenticatedDioProvider);
   final response = await dio.get<dynamic>(
     '/feed/merged',
     queryParameters: queryParams,
@@ -206,7 +189,7 @@ String? _proxyArtworkUrl(String? url) {
     final uri = Uri.parse(url);
     if (corsRestrictedDomains.contains(uri.host)) {
       final encoded = Uri.encodeComponent(url);
-      return '$_kBackendUrl/proxy/image?url=$encoded';
+      return '$kBackendUrl/proxy/image?url=$encoded';
     }
   } catch (e) {
     debugPrint('[feedProvider._proxyArtworkUrl] Failed to parse URL: $url');
@@ -234,10 +217,12 @@ List<FeedItem> _parseFeedItems(List<dynamic> data, String logTag) {
 
 class FeedNotifier extends AsyncNotifier<List<FeedItem>> {
   Dio? _dio;
+  String _userId = '';
 
   @override
   Future<List<FeedItem>> build() async {
-    _dio = _createDio();
+    _userId = ref.watch(currentUserIdProvider);
+    _dio = ref.watch(authenticatedDioProvider);
     final currentPreset = ref.watch(activePresetSlugProvider);
 
     // Debounce rapid preset switches: each notch click invalidates feedProvider,
@@ -249,7 +234,7 @@ class FeedNotifier extends AsyncNotifier<List<FeedItem>> {
     if (cancelled) return const <FeedItem>[];
 
     debugPrint(
-      '[feedProvider] Initialised - baseUrl=$_kBackendUrl user=$_kUserId preset=$currentPreset',
+      '[feedProvider] Initialised - baseUrl=$kBackendUrl user=$_userId preset=$currentPreset',
     );
 
     // Both requests fire simultaneously.
@@ -339,19 +324,9 @@ class FeedNotifier extends AsyncNotifier<List<FeedItem>> {
     return fastItems;
   }
 
-  Dio _createDio() {
-    return Dio(
-      BaseOptions(
-        baseUrl: _kBackendUrl,
-        connectTimeout: const Duration(seconds: 90),
-        receiveTimeout: const Duration(seconds: 90),
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-          'X-User-Id': _kUserId,
-        },
-      ),
-    );
+  Dio _getDio() {
+    _dio ??= ref.read(authenticatedDioProvider);
+    return _dio!;
   }
 
   Future<void> fetchWithSeedDate(String seedDate) async {
@@ -400,7 +375,7 @@ class FeedNotifier extends AsyncNotifier<List<FeedItem>> {
       '${queryParams.entries.map((e) => '${e.key}=${e.value}').join(' ')}',
     );
     try {
-      final dio = _dio ??= _createDio();
+      final dio = _getDio();
       final response = await dio.get<dynamic>(
         '/feed/merged',
         queryParameters: queryParams,
@@ -547,18 +522,7 @@ class ArchiveFetchNotifier extends AsyncNotifier<List<FeedItem>> {
       'full_archive=$isFullFeed',
     );
     try {
-      final dio = Dio(
-        BaseOptions(
-          baseUrl: _kBackendUrl,
-          connectTimeout: const Duration(seconds: 90),
-          receiveTimeout: const Duration(seconds: 90),
-          headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-            'X-User-Id': _kUserId,
-          },
-        ),
-      );
+      final dio = ref.read(authenticatedDioProvider);
       final response = await dio.get<dynamic>(
         '/feed/merged',
         queryParameters: queryParams,

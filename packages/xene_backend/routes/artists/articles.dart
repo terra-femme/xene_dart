@@ -10,13 +10,7 @@ Future<Response> onRequest(RequestContext context) async {
     return Response(statusCode: 405);
   }
 
-  final userId = context.request.headers['x-user-id'];
-  if (userId == null) {
-    return Response.json(
-      statusCode: 401,
-      body: {'error': 'X-User-Id header required'},
-    );
-  }
+  final userId = context.read<String>();
 
   final limitStr = context.request.uri.queryParameters['limit'];
   final limit = int.tryParse(limitStr ?? '') ?? 15;

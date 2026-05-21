@@ -138,8 +138,9 @@ class _PresetPlaygroundScreenState
     if (slug == null) return;
     final messenger = ScaffoldMessenger.of(context);
     try {
-      final result =
-          await ref.read(presetSourcesProvider.notifier).refreshAll(slug);
+      final result = await ref
+          .read(presetSourcesProvider.notifier)
+          .refreshAll(slug);
       if (!mounted) return;
       if (result == null) {
         _showSnack(messenger, 'Refresh all failed — check backend logs.');
@@ -147,14 +148,17 @@ class _PresetPlaygroundScreenState
       }
       final artists = result['artists_refreshed'] as int? ?? 0;
       final total = result['artists_total'] as int? ?? artists;
-      final byPlatform =
-          (result['by_platform'] as Map<String, dynamic>?) ?? {};
-      final platformSummary = byPlatform.entries.map((e) {
-        final data = e.value as Map<String, dynamic>;
-        return '${e.key} ${data['window_items'] ?? 0}';
-      }).join(', ');
+      final byPlatform = (result['by_platform'] as Map<String, dynamic>?) ?? {};
+      final platformSummary = byPlatform.entries
+          .map((e) {
+            final data = e.value as Map<String, dynamic>;
+            return '${e.key} ${data['window_items'] ?? 0}';
+          })
+          .join(', ');
       final errors = (result['errors'] as List<dynamic>?)?.length ?? 0;
-      final countLabel = artists == total ? '$artists artists' : '$artists/$total artists';
+      final countLabel = artists == total
+          ? '$artists artists'
+          : '$artists/$total artists';
       final msg = errors > 0
           ? 'Refreshed $countLabel: $platformSummary ($errors errors)'
           : 'Refreshed $countLabel: $platformSummary';
@@ -272,6 +276,12 @@ class _PresetPlaygroundScreenState
         return LayoutBuilder(
           builder: (context, constraints) {
             final isNarrow = constraints.maxWidth < 760;
+            // Preserve the authored 360px template-list target, but let short
+            // narrow layouts reserve a proportional local height instead of a
+            // fixed block that can crowd the editor below it.
+            final narrowTemplateListHeight = constraints.maxHeight.isFinite
+                ? (constraints.maxHeight * 0.38).clamp(300.0, 420.0)
+                : 360.0;
             final list = _TemplateList(
               templates: templates,
               selectedSlug: _selectedSlug,
@@ -309,7 +319,11 @@ class _PresetPlaygroundScreenState
               return ListView(
                 padding: const EdgeInsets.all(12),
                 children: [
-                  SizedBox(height: 360, child: list),
+                  SizedBox(
+                    key: const ValueKey('presetTemplateListPane'),
+                    height: narrowTemplateListHeight,
+                    child: list,
+                  ),
                   const SizedBox(height: 12),
                   editor,
                 ],
@@ -355,16 +369,21 @@ class _TemplateList extends StatelessWidget {
         children: [
           Row(
             children: [
-              Text(
-                'PRESET SLOTS',
-                style: GoogleFonts.teko(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.black,
-                  letterSpacing: 0.7,
+              Expanded(
+                child: Text(
+                  'PRESET SLOTS',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  softWrap: false,
+                  style: GoogleFonts.teko(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.black,
+                    letterSpacing: 0.7,
+                  ),
                 ),
               ),
-              const Spacer(),
+              const SizedBox(width: 8),
               _IconAction(
                 icon: Icons.refresh,
                 tooltip: 'Refresh',
@@ -541,16 +560,21 @@ class _TemplateEditor extends StatelessWidget {
           children: [
             Row(
               children: [
-                Text(
-                  isCreating ? 'NEW PRESET' : 'EDIT PRESET',
-                  style: GoogleFonts.teko(
-                    fontSize: 24,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.black,
-                    letterSpacing: 0.8,
+                Expanded(
+                  child: Text(
+                    isCreating ? 'NEW PRESET' : 'EDIT PRESET',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    softWrap: false,
+                    style: GoogleFonts.teko(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.black,
+                      letterSpacing: 0.8,
+                    ),
                   ),
                 ),
-                const Spacer(),
+                const SizedBox(width: 8),
                 _SaveButton(saving: saving, onTap: saving ? null : onSave),
               ],
             ),
@@ -664,23 +688,30 @@ class _SourceWorkbench extends StatelessWidget {
       children: [
         Row(
           children: [
-            Text(
-              'SOURCES',
-              style: GoogleFonts.teko(
-                fontSize: 20,
-                fontWeight: FontWeight.w600,
-                color: Colors.black,
-                letterSpacing: 0.7,
+            Expanded(
+              child: Text(
+                'SOURCES',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                softWrap: false,
+                style: GoogleFonts.teko(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.black,
+                  letterSpacing: 0.7,
+                ),
               ),
             ),
-            const Spacer(),
+            const SizedBox(width: 8),
             _SmallActionButton(
-              label: sourcesState.loadingRefreshAll ? 'REFRESHING...' : 'REFRESH ALL',
+              label: sourcesState.loadingRefreshAll
+                  ? 'REFRESHING...'
+                  : 'REFRESH ALL',
               icon: sourcesState.loadingRefreshAll
                   ? Icons.hourglass_top_outlined
                   : Icons.refresh,
-              onTap: sourcesState.loadingRefreshAll ||
-                      sourcesState.sources.isEmpty
+              onTap:
+                  sourcesState.loadingRefreshAll || sourcesState.sources.isEmpty
                   ? null
                   : onRefreshAll,
             ),
@@ -690,6 +721,11 @@ class _SourceWorkbench extends StatelessWidget {
         LayoutBuilder(
           builder: (context, constraints) {
             final isNarrow = constraints.maxWidth < 720;
+            // Keep the authored 280/340 targets for normal widths, but tighten
+            // the local panels slightly on narrow phones so source management
+            // remains inspectable without altering the outer playground layout.
+            final assignedHeight = constraints.maxWidth < 360 ? 240.0 : 280.0;
+            final searchHeight = constraints.maxWidth < 360 ? 300.0 : 340.0;
             final assigned = _AssignedSourcesPanel(
               state: sourcesState,
               onRemove: onRemoveSource,
@@ -703,9 +739,17 @@ class _SourceWorkbench extends StatelessWidget {
             if (isNarrow) {
               return Column(
                 children: [
-                  SizedBox(height: 280, child: assigned),
+                  SizedBox(
+                    key: const ValueKey('presetAssignedSourcesPane'),
+                    height: assignedHeight,
+                    child: assigned,
+                  ),
                   const SizedBox(height: 12),
-                  SizedBox(height: 340, child: search),
+                  SizedBox(
+                    key: const ValueKey('presetSourceSearchPane'),
+                    height: searchHeight,
+                    child: search,
+                  ),
                 ],
               );
             }
@@ -1577,27 +1621,35 @@ class _SmallActionButton extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(4),
-      child: Container(
-        height: 32,
-        padding: const EdgeInsets.symmetric(horizontal: 10),
-        decoration: BoxDecoration(
-          color: onTap == null ? const Color(0xFFAAAAAA) : Colors.black,
-          borderRadius: BorderRadius.circular(4),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 14, color: Colors.white),
-            const SizedBox(width: 5),
-            Text(
-              label,
-              style: GoogleFonts.teko(
-                fontSize: 13,
-                color: Colors.white,
-                letterSpacing: 0.4,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 140),
+        child: Container(
+          height: 32,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            color: onTap == null ? const Color(0xFFAAAAAA) : Colors.black,
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 14, color: Colors.white),
+              const SizedBox(width: 5),
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  softWrap: false,
+                  style: GoogleFonts.teko(
+                    fontSize: 13,
+                    color: Colors.white,
+                    letterSpacing: 0.4,
+                  ),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

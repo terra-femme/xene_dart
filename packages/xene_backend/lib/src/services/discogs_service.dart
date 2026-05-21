@@ -2,41 +2,56 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:logging/logging.dart';
 
+import 'api_analytics_service.dart';
+
 final _logger = Logger('DiscogsService');
 
 class DiscogsService {
-  DiscogsService();
+  DiscogsService({ApiAnalyticsService? analytics})
+    : _dio = analytics?.trackDio(_createDio(), 'discogs') ?? _createDio();
 
-  final _dio = Dio(BaseOptions(
-    baseUrl: 'https://api.discogs.com',
-    headers: {
-      'User-Agent': 'xene/1.0 (github.com/terra-femme/xene)',
-      'Accept': 'application/vnd.discogs.v2.discogs+json',
-    },
-  ));
+  final Dio _dio;
+
+  static Dio _createDio() => Dio(
+    BaseOptions(
+      baseUrl: 'https://api.discogs.com',
+      headers: {
+        'User-Agent': 'xene/1.0 (github.com/terra-femme/xene)',
+        'Accept': 'application/vnd.discogs.v2.discogs+json',
+      },
+    ),
+  );
 
   // Regex patterns for extraction
-  static final _typeIdRe = RegExp(r'discogs\.com/(label|artist)/(\d+)', caseSensitive: false);
-  static final _bandcampRe = RegExp(r'https?://[a-zA-Z0-9-]+\.bandcamp\.com(?:/[^\s"\x27<>]*)?');
-  static final _beatportRe = RegExp(r'https?://(?:www\.)?beatport\.com/(?:label|artist)/[a-zA-Z0-9_%\-]+/(\d+)');
+  static final _typeIdRe = RegExp(
+    r'discogs\.com/(label|artist)/(\d+)',
+    caseSensitive: false,
+  );
+  static final _bandcampRe = RegExp(
+    r'https?://[a-zA-Z0-9-]+\.bandcamp\.com(?:/[^\s"\x27<>]*)?',
+  );
+  static final _beatportRe = RegExp(
+    r'https?://(?:www\.)?beatport\.com/(?:label|artist)/[a-zA-Z0-9_%\-]+/(\d+)',
+  );
 
   /// Parse (entity_type, numeric_id) from a Discogs URL.
   Map<String, String?> parseDiscogsUrl(String url) {
     final match = _typeIdRe.firstMatch(url);
     if (match == null) return {'type': null, 'id': null};
-    return {
-      'type': match.group(1)?.toLowerCase(),
-      'id': match.group(2),
-    };
+    return {'type': match.group(1)?.toLowerCase(), 'id': match.group(2)};
   }
 
   /// Scan external URL list and profile text for known platforms.
-  Map<String, String> extractPlatformLinks(List<String> urls, String? profileText) {
+  Map<String, String> extractPlatformLinks(
+    List<String> urls,
+    String? profileText,
+  ) {
     final found = <String, String>{};
     final combined = '${urls.join(" ")} ${profileText ?? ""}';
 
     final bcMatch = _bandcampRe.firstMatch(combined);
-    if (bcMatch != null) found['bandcamp'] = bcMatch.group(0)!.replaceAll(RegExp(r'[.,)]$'), '');
+    if (bcMatch != null)
+      found['bandcamp'] = bcMatch.group(0)!.replaceAll(RegExp(r'[.,)]$'), '');
 
     final bpMatch = _beatportRe.firstMatch(combined);
     if (bpMatch != null) found['beatport'] = bpMatch.group(0)!;
@@ -51,28 +66,44 @@ class DiscogsService {
         found['beatport'] = u;
       } else if (u.contains('facebook.com') && !found.containsKey('facebook')) {
         found['facebook'] = u;
-      } else if ((u.contains('twitter.com') || u.contains('x.com')) && !found.containsKey('twitter')) {
+      } else if ((u.contains('twitter.com') || u.contains('x.com')) &&
+          !found.containsKey('twitter')) {
         final parts = u.split('/');
-        final username = parts.isNotEmpty ? parts.last.replaceFirst('@', '') : '';
-        if (username.isNotEmpty && !['home', 'share', 'intent'].contains(username)) {
+        final username = parts.isNotEmpty
+            ? parts.last.replaceFirst('@', '')
+            : '';
+        if (username.isNotEmpty &&
+            !['home', 'share', 'intent'].contains(username)) {
           found['twitter'] = u;
         }
       } else if (u.contains('youtube.com') && !found.containsKey('youtube')) {
-        if (!u.contains('/playlist?') && !u.contains('/shorts/') && !u.contains('/@browse')) {
+        if (!u.contains('/playlist?') &&
+            !u.contains('/shorts/') &&
+            !u.contains('/@browse')) {
           found['youtube'] = u;
         }
-      } else if (u.contains('soundcloud.com') && !found.containsKey('soundcloud')) {
+      } else if (u.contains('soundcloud.com') &&
+          !found.containsKey('soundcloud')) {
         final scUser = u.split('/').last;
-        if (scUser.isNotEmpty && !['soundcloud', 'pages', 'stream', 'discover'].contains(scUser)) {
+        if (scUser.isNotEmpty &&
+            !['soundcloud', 'pages', 'stream', 'discover'].contains(scUser)) {
           found['soundcloud'] = u;
         }
       } else if (u.contains('spotify.com') && !found.containsKey('spotify')) {
         found['spotify'] = u;
       } else if (u.startsWith('http') && !found.containsKey('website')) {
         final isKnown = [
-          'discogs.com', 'facebook.com', 'twitter.com', 'x.com', 
-          'youtube.com', 'soundcloud.com', 'bandcamp.com', 
-          'beatport.com', 'spotify.com', 'apple.com', 'amazon.com'
+          'discogs.com',
+          'facebook.com',
+          'twitter.com',
+          'x.com',
+          'youtube.com',
+          'soundcloud.com',
+          'bandcamp.com',
+          'beatport.com',
+          'spotify.com',
+          'apple.com',
+          'amazon.com',
         ].any((domain) => u.contains(domain));
         if (!isKnown) found['website'] = u;
       }
@@ -82,12 +113,17 @@ class DiscogsService {
   }
 
   /// Proactive Discogs search.
-  Future<Map<String, dynamic>> searchEntity(String name, {String entityType = 'label'}) async {
+  Future<Map<String, dynamic>> searchEntity(
+    String name, {
+    String entityType = 'label',
+  }) async {
     final consumerKey = Platform.environment['DISCOGS_CONSUMER_KEY'];
     final consumerSecret = Platform.environment['DISCOGS_CONSUMER_SECRET'];
 
     print('[DISCOGS] searchEntity called: name="$name" entityType=$entityType');
-    print('[DISCOGS] key set: ${consumerKey != null && consumerKey.isNotEmpty} secret set: ${consumerSecret != null && consumerSecret.isNotEmpty}');
+    print(
+      '[DISCOGS] key set: ${consumerKey != null && consumerKey.isNotEmpty} secret set: ${consumerSecret != null && consumerSecret.isNotEmpty}',
+    );
 
     if (consumerKey == null || consumerSecret == null) {
       print('[DISCOGS] ✗ credentials missing — skipping proactive search');
@@ -95,7 +131,9 @@ class DiscogsService {
       return {};
     }
 
-    final dgType = (entityType == 'label' || entityType == 'organization') ? 'label' : 'artist';
+    final dgType = (entityType == 'label' || entityType == 'organization')
+        ? 'label'
+        : 'artist';
 
     try {
       final response = await _dio.get<Map<String, dynamic>>(
@@ -110,7 +148,9 @@ class DiscogsService {
       );
 
       final results = response.data?['results'] as List? ?? [];
-      print('[DISCOGS] search returned ${results.length} results for "$name" (type=$dgType)');
+      print(
+        '[DISCOGS] search returned ${results.length} results for "$name" (type=$dgType)',
+      );
       if (results.isEmpty) return {};
 
       Map<String, dynamic>? best;
@@ -124,7 +164,9 @@ class DiscogsService {
         }
       }
 
-      print('[DISCOGS] best match: "${best?['title']}" score=${bestScore.toStringAsFixed(2)} (threshold=0.80)');
+      print(
+        '[DISCOGS] best match: "${best?['title']}" score=${bestScore.toStringAsFixed(2)} (threshold=0.80)',
+      );
 
       if (best == null || bestScore < 0.80) {
         print('[DISCOGS] ✗ no match above threshold — returning empty');
@@ -149,7 +191,9 @@ class DiscogsService {
     final consumerSecret = Platform.environment['DISCOGS_CONSUMER_SECRET'];
 
     print('[DISCOGS] fetchEntityLinks called: $discogsUrl');
-    print('[DISCOGS] key set: ${consumerKey != null && consumerKey.isNotEmpty} secret set: ${consumerSecret != null && consumerSecret.isNotEmpty}');
+    print(
+      '[DISCOGS] key set: ${consumerKey != null && consumerKey.isNotEmpty} secret set: ${consumerSecret != null && consumerSecret.isNotEmpty}',
+    );
 
     if (consumerKey == null || consumerSecret == null) {
       print('[DISCOGS] ✗ credentials missing — aborting');
@@ -175,7 +219,9 @@ class DiscogsService {
         final slugName = Uri.decodeComponent(
           slugMatch.group(2)!.replaceAll('+', ' '),
         ).trim();
-        print('[DISCOGS] slug-form URL detected — type=$slugType name="$slugName" — falling back to search');
+        print(
+          '[DISCOGS] slug-form URL detected — type=$slugType name="$slugName" — falling back to search',
+        );
         return await searchEntity(slugName, entityType: slugType);
       }
       print('[DISCOGS] ✗ could not parse type/id from URL — aborting');
@@ -185,10 +231,7 @@ class DiscogsService {
     try {
       final response = await _dio.get<Map<String, dynamic>>(
         '/${type}s/$id',
-        queryParameters: {
-          'key': consumerKey,
-          'secret': consumerSecret,
-        },
+        queryParameters: {'key': consumerKey, 'secret': consumerSecret},
       );
 
       final data = response.data!;
@@ -198,13 +241,19 @@ class DiscogsService {
 
       print('[DISCOGS] API response name="$name" urls count=${urls.length}');
       print('[DISCOGS] urls from API: $urls');
-      print('[DISCOGS] profile preview: ${profile.substring(0, profile.length.clamp(0, 300))}');
+      print(
+        '[DISCOGS] profile preview: ${profile.substring(0, profile.length.clamp(0, 300))}',
+      );
 
       final images = data['images'] as List? ?? [];
       String? imageUrl;
       if (images.isNotEmpty) {
-        final primary = images.firstWhere((img) => img['type'] == 'primary', orElse: () => images.first);
-        imageUrl = primary['uri'] as String? ?? primary['resource_url'] as String?;
+        final primary = images.firstWhere(
+          (img) => img['type'] == 'primary',
+          orElse: () => images.first,
+        );
+        imageUrl =
+            primary['uri'] as String? ?? primary['resource_url'] as String?;
       }
 
       final links = extractPlatformLinks(urls, profile);
@@ -230,7 +279,7 @@ class DiscogsService {
   double _calculateSimilarity(String a, String b) {
     if (a == b) return 1.0;
     if (a.length < 2 || b.length < 2) return 0.0;
-    
+
     final aBigrams = <String>{};
     for (var i = 0; i < a.length - 1; i++) {
       aBigrams.add(a.substring(i, i + 2));

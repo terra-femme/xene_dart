@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:logging/logging.dart';
 import 'package:xene_domain/xene_domain.dart';
 import '../database.dart';
+import 'api_analytics_service.dart';
 
 final _logger = Logger('SoundCloudService');
 
@@ -32,7 +33,8 @@ class _ScRepostMeta {
 }
 
 class SoundCloudService {
-  SoundCloudService(this._db);
+  SoundCloudService(this._db, {ApiAnalyticsService? analytics})
+    : _dio = analytics?.trackDio(_createDio(), 'soundcloud') ?? _createDio();
 
   final DatabaseService _db;
 
@@ -42,7 +44,9 @@ class SoundCloudService {
   static const _trackCacheTtl = Duration(hours: 1);
   static const _userCacheTtl = Duration(days: 7);
 
-  final _dio = Dio(
+  final Dio _dio;
+
+  static Dio _createDio() => Dio(
     BaseOptions(
       baseUrl: 'https://api.soundcloud.com',
       connectTimeout: const Duration(seconds: 15),
@@ -404,33 +408,33 @@ class SoundCloudService {
     // Sort, trim to window, save.
     // Pre-orders (future publishedAt) are kept; only past-31d items are dropped.
     items.sort((a, b) => b.publishedAt.compareTo(a.publishedAt));
-    final windowItems = items.where((i) => i.publishedAt.isAfter(cutoff)).toList();
-
-    final dbItems = windowItems
-        .map((i) {
-          final repostMeta = repostMetaById[i.id];
-          return {
-            'platform': i.platform,
-            'internal_id': i.id,
-            'artist_name': artistDisplayName,
-            'content_type': i.contentType,
-            'title': i.title,
-            'body': i.body,
-            'artwork_url': i.artworkUrl,
-            'external_url': i.externalUrl,
-            'published_at': i.publishedAt.toIso8601String(),
-            'duration_seconds': i.durationSeconds,
-            'play_count': i.playCount,
-            'like_count': i.likeCount,
-            'track_count': i.trackCount,
-            'is_repost': repostMeta != null,
-            'reposted_by_name': repostMeta?.repostedByName,
-            'reposted_at': repostMeta?.repostedAt?.toUtc().toIso8601String(),
-            'feed_source_path': repostMeta?.feedSourcePath,
-            'updated_at': DateTime.now().toUtc().toIso8601String(),
-          };
-        })
+    final windowItems = items
+        .where((i) => i.publishedAt.isAfter(cutoff))
         .toList();
+
+    final dbItems = windowItems.map((i) {
+      final repostMeta = repostMetaById[i.id];
+      return {
+        'platform': i.platform,
+        'internal_id': i.id,
+        'artist_name': artistDisplayName,
+        'content_type': i.contentType,
+        'title': i.title,
+        'body': i.body,
+        'artwork_url': i.artworkUrl,
+        'external_url': i.externalUrl,
+        'published_at': i.publishedAt.toIso8601String(),
+        'duration_seconds': i.durationSeconds,
+        'play_count': i.playCount,
+        'like_count': i.likeCount,
+        'track_count': i.trackCount,
+        'is_repost': repostMeta != null,
+        'reposted_by_name': repostMeta?.repostedByName,
+        'reposted_at': repostMeta?.repostedAt?.toUtc().toIso8601String(),
+        'feed_source_path': repostMeta?.feedSourcePath,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      };
+    }).toList();
 
     await _db.saveFeedItems(dbItems);
 
@@ -438,7 +442,9 @@ class SoundCloudService {
     // Uses the canonical SC username from the API (userData['username']) which
     // matches the soundcloud_username key stored in the artists table.
     // Non-fatal — genre update failure must never abort the feed fetch.
-    final scApiUsername = (userData['username'] as String?)?.toLowerCase().trim();
+    final scApiUsername = (userData['username'] as String?)
+        ?.toLowerCase()
+        .trim();
     if (scApiUsername != null) {
       final scGenre = userData['genre'] as String?;
       final scTagList = userData['tag_list'] as String?;
@@ -448,13 +454,18 @@ class SoundCloudService {
         await _db
             .updateArtistGenreTags(genreTags, soundcloudUsername: scApiUsername)
             .catchError((Object e) {
-          _logger.warning('[sc] Genre tags update skipped for $scApiUsername: $e');
-        });
+              _logger.warning(
+                '[sc] Genre tags update skipped for $scApiUsername: $e',
+              );
+            });
       }
     }
 
     // Write to in-memory track cache.
-    _trackCache[username] = _ScTrackCacheEntry(windowItems, DateTime.now().toUtc());
+    _trackCache[username] = _ScTrackCacheEntry(
+      windowItems,
+      DateTime.now().toUtc(),
+    );
     _logger.info(
       '[sc] Track cache WRITE for $username (${windowItems.length} items)',
     );
@@ -504,10 +515,12 @@ class SoundCloudService {
           if (cutoffDate != null && collection.isNotEmpty) {
             final allOld = collection.every((item) {
               if (item is! Map) return false;
-              final raw = (item['display_date'] ??
-                      item['release_date'] ??
-                      item['created_at'] ??
-                      item['last_modified']) as String?;
+              final raw =
+                  (item['display_date'] ??
+                          item['release_date'] ??
+                          item['created_at'] ??
+                          item['last_modified'])
+                      as String?;
               if (raw == null) return false;
               final dt = DateTime.tryParse(raw)?.toUtc();
               return dt != null && dt.isBefore(cutoffDate);
@@ -646,8 +659,9 @@ class SoundCloudService {
           continue;
         }
 
-        final String? repostCreatedAt =
-            isRepost ? trackData['created_at'] as String? : null;
+        final String? repostCreatedAt = isRepost
+            ? trackData['created_at'] as String?
+            : null;
         final repostedAt = _parseSoundCloudDate(repostCreatedAt);
         final publishedAt = isRepost
             ? repostedAt ?? _parsePublicTrackDate(track)
@@ -659,7 +673,9 @@ class SoundCloudService {
         // 3. Mandatory Title Augmentation: "Producer - Title"
         var title = track['title'] as String? ?? '';
         if (title.trim().isEmpty) {
-          _logger.warning('[sc] Dropping track with blank title id=${track['id']}');
+          _logger.warning(
+            '[sc] Dropping track with blank title id=${track['id']}',
+          );
           continue;
         }
         if (!title.toLowerCase().contains(producerName.toLowerCase())) {
@@ -698,14 +714,16 @@ class SoundCloudService {
         );
         items.add(feedItem);
 
-        auditSink?.add(_scAuditEntry(
-          id: trackId,
-          track: track,
-          isRepost: isRepost,
-          repostCreatedAt: repostCreatedAt,
-          publishedAt: publishedAt,
-          path: isRepost ? 'track-repost' : 'own-track',
-        ));
+        auditSink?.add(
+          _scAuditEntry(
+            id: trackId,
+            track: track,
+            isRepost: isRepost,
+            repostCreatedAt: repostCreatedAt,
+            publishedAt: publishedAt,
+            path: isRepost ? 'track-repost' : 'own-track',
+          ),
+        );
       } catch (e) {
         _logger.warning('Error parsing SoundCloud track: $e');
       }
@@ -735,7 +753,9 @@ class SoundCloudService {
 
         // Guard: skip blank-title playlists.
         if (title.trim().isEmpty) {
-          _logger.warning('[sc] Dropping playlist with blank title id=${pl['id']}');
+          _logger.warning(
+            '[sc] Dropping playlist with blank title id=${pl['id']}',
+          );
           continue;
         }
 
@@ -771,8 +791,9 @@ class SoundCloudService {
           continue;
         }
 
-        final String? repostCreatedAt =
-            isRepost ? plData['created_at'] as String? : null;
+        final String? repostCreatedAt = isRepost
+            ? plData['created_at'] as String?
+            : null;
         final repostedAt = _parseSoundCloudDate(repostCreatedAt);
         final publishedAt = isRepost
             ? repostedAt ?? _parsePublicTrackDate(pl)
@@ -817,21 +838,26 @@ class SoundCloudService {
           ),
         );
 
-        auditSink?.add(_scAuditEntry(
-          id: plId,
-          track: pl,
-          isRepost: isRepost,
-          repostCreatedAt: repostCreatedAt,
-          publishedAt: publishedAt,
-          path: isRepost ? 'playlist-repost' : 'own-playlist',
-        ));
+        auditSink?.add(
+          _scAuditEntry(
+            id: plId,
+            track: pl,
+            isRepost: isRepost,
+            repostCreatedAt: repostCreatedAt,
+            publishedAt: publishedAt,
+            path: isRepost ? 'playlist-repost' : 'own-playlist',
+          ),
+        );
       } catch (e) {
         _logger.warning('Error parsing SoundCloud playlist: $e');
       }
     }
   }
 
-  String? _cardBody({required String? description, required String? repostedBy}) {
+  String? _cardBody({
+    required String? description,
+    required String? repostedBy,
+  }) {
     final cleanDescription = description?.trim();
     if (repostedBy == null || repostedBy.trim().isEmpty) {
       return cleanDescription?.isEmpty == true ? null : cleanDescription;
@@ -859,13 +885,16 @@ class SoundCloudService {
     final rd = track['release_day'];
     String? releaseYmd;
     if (ry is int && rm is int && rd is int) {
-      releaseYmd = '$ry-${rm.toString().padLeft(2, '0')}-${rd.toString().padLeft(2, '0')}';
+      releaseYmd =
+          '$ry-${rm.toString().padLeft(2, '0')}-${rd.toString().padLeft(2, '0')}';
     }
 
     // Reconstruct which candidate won the max-date selection.
     final candidates = <String, DateTime>{};
     if (releaseYmd != null) {
-      final parsed = _parseSoundCloudDate('${ry!}-${(rm as int).toString().padLeft(2, '0')}-${(rd as int).toString().padLeft(2, '0')}');
+      final parsed = _parseSoundCloudDate(
+        '${ry!}-${(rm as int).toString().padLeft(2, '0')}-${(rd as int).toString().padLeft(2, '0')}',
+      );
       if (parsed != null) candidates['release_ymd'] = parsed;
     }
     for (final f in ['release_date', 'display_date', 'created_at']) {
@@ -899,7 +928,8 @@ class SoundCloudService {
       // Fallback: label whichever candidate matches publishedAt closest.
       usedField = candidates.entries
           .reduce(
-            (a, b) => (a.value.difference(publishedAt).abs() <
+            (a, b) =>
+                (a.value.difference(publishedAt).abs() <
                     b.value.difference(publishedAt).abs())
                 ? a
                 : b,

@@ -15,7 +15,7 @@ Future<Response> onRequest(RequestContext context) async {
     return Response(statusCode: 405);
   }
 
-  final userId = context.request.headers['x-user-id'] ?? 'local_user';
+  final userId = context.read<String>();
   final db = context.read<DatabaseService>();
   final tokenStore = context.read<TokenStore>();
   final scService = context.read<SoundCloudService>();

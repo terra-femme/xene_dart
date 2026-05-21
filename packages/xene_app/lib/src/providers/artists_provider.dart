@@ -2,38 +2,37 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:xene_domain/xene_domain.dart';
+import 'auth_provider.dart';
+import 'dio_provider.dart';
 
-const _kUserId = 'local_user';
-
-final artistsProvider = AsyncNotifierProvider<ArtistsNotifier, List<Artist>>(ArtistsNotifier.new);
+final artistsProvider = AsyncNotifierProvider<ArtistsNotifier, List<Artist>>(
+  ArtistsNotifier.new,
+);
 
 class ArtistsNotifier extends AsyncNotifier<List<Artist>> {
-  late final Dio _dio;
+  late Dio _dio;
+  late String _userId;
 
   @override
   Future<List<Artist>> build() async {
-    _dio = Dio(BaseOptions(
-      baseUrl: 'http://127.0.0.1:8080',
-      connectTimeout: const Duration(seconds: 15),
-      receiveTimeout: const Duration(seconds: 15),
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-        'X-User-Id': _kUserId,
-      },
-    ));
+    _userId = ref.watch(currentUserIdProvider);
+    _dio = ref.watch(authenticatedDioProvider);
     return _fetchArtists();
   }
 
   Future<List<Artist>> _fetchArtists() async {
-    debugPrint('[artistsProvider] Fetching artists for user=$_kUserId');
+    debugPrint('[artistsProvider] Fetching artists for user=$_userId');
     try {
       final response = await _dio.get<List<dynamic>>('/artists');
-      debugPrint('[artistsProvider] Response status=${response.statusCode} count=${response.data?.length}');
+      debugPrint(
+        '[artistsProvider] Response status=${response.statusCode} count=${response.data?.length}',
+      );
 
       final data = response.data ?? [];
       if (data.isEmpty) {
-        debugPrint('[artistsProvider] WARNING: /artists returned empty list — no artists in DB for user=$_kUserId');
+        debugPrint(
+          '[artistsProvider] WARNING: /artists returned empty list — no artists in DB for user=$_userId',
+        );
         return [];
       }
 
@@ -47,10 +46,14 @@ class ArtistsNotifier extends AsyncNotifier<List<Artist>> {
         }
       }
 
-      debugPrint('[artistsProvider] Parsed ${artists.length} artists successfully');
+      debugPrint(
+        '[artistsProvider] Parsed ${artists.length} artists successfully',
+      );
       return artists;
     } on DioException catch (e) {
-      debugPrint('[artistsProvider] DioException status=${e.response?.statusCode} message=${e.message}');
+      debugPrint(
+        '[artistsProvider] DioException status=${e.response?.statusCode} message=${e.message}',
+      );
       debugPrint('[artistsProvider] Response body=${e.response?.data}');
       rethrow;
     } catch (e) {

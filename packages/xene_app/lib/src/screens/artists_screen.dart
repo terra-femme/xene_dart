@@ -177,8 +177,16 @@ class _ArtistsScreenState extends ConsumerState<ArtistsScreen> {
           child: LayoutBuilder(
             builder: (context, constraints) {
               final isNarrow = constraints.maxWidth < 820;
+              // Preserve the authored 460px narrow-panel target, but derive
+              // the actual height from the viewport so phone/short-window
+              // layouts do not clip or waste panel space. This is a content
+              // guardrail only; desktop panel placement remains unchanged.
+              final narrowPanelHeight = constraints.maxHeight.isFinite
+                  ? (constraints.maxHeight - 24).clamp(360.0, 520.0)
+                  : 460.0;
               final panels = [
                 _PanelShell(
+                  key: const ValueKey('artistsFollowingPanel'),
                   title: 'SOUNDCLOUD IMPORT',
                   subtitle: scState.connected
                       ? 'Imported following stays cached until disconnect'
@@ -197,6 +205,7 @@ class _ArtistsScreenState extends ConsumerState<ArtistsScreen> {
                   ),
                 ),
                 _PanelShell(
+                  key: const ValueKey('artistsSearchPanel'),
                   title: 'SOUNDCLOUD SEARCH',
                   subtitle: 'Find accounts you do not follow',
                   child: _ScSearchPanel(
@@ -213,6 +222,7 @@ class _ArtistsScreenState extends ConsumerState<ArtistsScreen> {
                   ),
                 ),
                 _PanelShell(
+                  key: const ValueKey('artistsSavedPanel'),
                   title: 'XENE FOLLOWING',
                   subtitle: 'Saved nodes persist after SoundCloud disconnect',
                   child: _SavedArtistsPanel(
@@ -234,7 +244,7 @@ class _ArtistsScreenState extends ConsumerState<ArtistsScreen> {
                   itemCount: panels.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 12),
                   itemBuilder: (context, index) =>
-                      SizedBox(height: 460, child: panels[index]),
+                      SizedBox(height: narrowPanelHeight, child: panels[index]),
                 );
               }
 
@@ -327,6 +337,7 @@ class _ArtistsScreenState extends ConsumerState<ArtistsScreen> {
 
 class _PanelShell extends StatelessWidget {
   const _PanelShell({
+    super.key,
     required this.title,
     required this.subtitle,
     required this.child,
@@ -660,17 +671,22 @@ class _SavedArtistsPanelState extends State<_SavedArtistsPanel> {
         children: [
           Row(
             children: [
-              Text(
-                _hovered ? 'REMOVE ENABLED' : 'HOVER TO MANAGE',
-                style: GoogleFonts.teko(
-                  fontSize: 13,
-                  color: _hovered
-                      ? const Color(0xFFFF5500)
-                      : const Color(0xFF888888),
-                  letterSpacing: 0.6,
+              Expanded(
+                child: Text(
+                  _hovered ? 'REMOVE ENABLED' : 'HOVER TO MANAGE',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  softWrap: false,
+                  style: GoogleFonts.teko(
+                    fontSize: 13,
+                    color: _hovered
+                        ? const Color(0xFFFF5500)
+                        : const Color(0xFF888888),
+                    letterSpacing: 0.6,
+                  ),
                 ),
               ),
-              const Spacer(),
+              const SizedBox(width: 8),
               _SmallTextButton(label: 'REFRESH', onTap: widget.onRefresh),
             ],
           ),
@@ -1188,7 +1204,7 @@ class _ActionEmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1240,7 +1256,7 @@ class _EmptyPanelMessage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1250,6 +1266,9 @@ class _EmptyPanelMessage extends StatelessWidget {
             Text(
               title,
               textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              softWrap: false,
               style: GoogleFonts.teko(
                 fontSize: 16,
                 color: const Color(0xFF888888),
@@ -1260,6 +1279,8 @@ class _EmptyPanelMessage extends StatelessWidget {
             Text(
               body,
               textAlign: TextAlign.center,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
               style: GoogleFonts.archivo(
                 fontSize: 11,
                 color: const Color(0xFFAAAAAA),

@@ -33,124 +33,142 @@ class XeneFeedCard extends StatelessWidget {
     final repostAttribution = _repostAttribution(item);
     final bodyText = _bodyWithoutAttribution(item.body, repostAttribution);
 
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        constraints: const BoxConstraints(minHeight: 90),
-        margin: const EdgeInsets.fromLTRB(6, 0, 6, 2),
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: cardColor,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: borderColor, width: 1),
-        ),
-        foregroundDecoration: item.isNew
-            ? BoxDecoration(
-                borderRadius: BorderRadius.circular(8),
-                border: const Border(
-                  left: BorderSide(color: Color(0xFF00C5A5), width: 2.5),
-                ),
-                color: const Color(0x1100C5A5),
-              )
-            : null,
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // 1. Thumbnail (Left)
-            ClipRRect(
-              borderRadius: BorderRadius.circular(5),
-              child: CachedNetworkImage(
-                imageUrl: item.artworkUrl ?? '',
-                width: 39,
-                height: 39,
-                fit: BoxFit.cover,
-                placeholder: (context, url) =>
-                    Container(color: placeholderColor),
-                errorWidget: (context, url, error) =>
-                    Icon(Icons.music_note, size: 20, color: errorIconColor),
-              ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 180;
+        final thumbnailSize = compact ? 32.0 : 39.0;
+        final cardPadding = compact ? 6.0 : 8.0;
+        final contentGap = compact ? 6.0 : 7.0;
+        final badgeMaxWidth = compact ? 70.0 : 112.0;
+
+        return GestureDetector(
+          onTap: onTap,
+          child: Container(
+            constraints: BoxConstraints(minHeight: compact ? 84.0 : 90.0),
+            margin: const EdgeInsets.fromLTRB(6, 0, 6, 2),
+            padding: EdgeInsets.all(cardPadding),
+            decoration: BoxDecoration(
+              color: cardColor,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: borderColor, width: 1),
             ),
+            foregroundDecoration: item.isNew
+                ? BoxDecoration(
+                    borderRadius: BorderRadius.circular(8),
+                    border: const Border(
+                      left: BorderSide(color: Color(0xFF00C5A5), width: 2.5),
+                    ),
+                    color: const Color(0x1100C5A5),
+                  )
+                : null,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // 1. Thumbnail (Left)
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(5),
+                  child: CachedNetworkImage(
+                    imageUrl: item.artworkUrl ?? '',
+                    width: thumbnailSize,
+                    height: thumbnailSize,
+                    fit: BoxFit.cover,
+                    placeholder: (context, url) =>
+                        Container(color: placeholderColor),
+                    errorWidget: (context, url, error) => Icon(
+                      Icons.music_note,
+                      size: compact ? 18 : 20,
+                      color: errorIconColor,
+                    ),
+                  ),
+                ),
 
-            const SizedBox(width: 7),
+                SizedBox(width: contentGap),
 
-            // 2. Content Frame (Right)
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Top Row: Pills & Badges
-                  Row(
+                // 2. Content Frame (Right)
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Flexible(
-                        fit: FlexFit.loose,
-                        child: _TypePill(type: item.contentType),
+                      // Top badges wrap instead of overflowing when the feed
+                      // column gets narrow beside the fixed sidebar.
+                      Wrap(
+                        spacing: 4,
+                        runSpacing: 3,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          ConstrainedBox(
+                            constraints: BoxConstraints(
+                              maxWidth: badgeMaxWidth,
+                            ),
+                            child: _TypePill(type: item.contentType),
+                          ),
+                          ConstrainedBox(
+                            constraints: BoxConstraints(
+                              maxWidth: badgeMaxWidth,
+                            ),
+                            child: _PlatformBadge(platform: item.platform),
+                          ),
+                          if (item.publishedAt.isAfter(DateTime.now()))
+                            const _PreOrderStar(),
+                        ],
                       ),
-                      const SizedBox(width: 4),
-                      Flexible(
-                        fit: FlexFit.loose,
-                        child: _PlatformBadge(platform: item.platform),
+                      const SizedBox(height: 4),
+
+                      // Title
+                      Text(
+                        item.title ?? 'Untitled',
+                        style: GoogleFonts.archivo(
+                          color: titleColor,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                        ),
+                        softWrap: true,
+                        overflow: TextOverflow.fade,
                       ),
-                      if (item.publishedAt.isAfter(DateTime.now())) ...[
-                        const SizedBox(width: 4),
-                        const _PreOrderStar(),
-                      ],
+
+                      // Artist name
+                      Text(
+                        item.artistName,
+                        style: GoogleFonts.archivo(
+                          color: snippetColor,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+
+                      if (repostAttribution != null)
+                        Text(
+                          repostAttribution,
+                          style: GoogleFonts.dmMono(
+                            color: const Color(0xFFFF5500),
+                            fontSize: 9,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+
+                      // Snippet
+                      if (bodyText != null && bodyText.isNotEmpty)
+                        Text(
+                          bodyText,
+                          style: GoogleFonts.archivo(
+                            color: snippetColor,
+                            fontSize: 10,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                     ],
                   ),
-                  const SizedBox(height: 4),
-
-                  // Title
-                  Text(
-                    item.title ?? 'Untitled',
-                    style: GoogleFonts.archivo(
-                      color: titleColor,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13,
-                    ),
-                    softWrap: true,
-                    overflow: TextOverflow.fade,
-                  ),
-
-                  // Artist name
-                  Text(
-                    item.artistName,
-                    style: GoogleFonts.archivo(
-                      color: snippetColor,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w500,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-
-                  if (repostAttribution != null)
-                    Text(
-                      repostAttribution,
-                      style: GoogleFonts.dmMono(
-                        color: const Color(0xFFFF5500),
-                        fontSize: 9,
-                        fontWeight: FontWeight.w700,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-
-                  // Snippet
-                  if (bodyText != null && bodyText.isNotEmpty)
-                    Text(
-                      bodyText,
-                      style: GoogleFonts.archivo(
-                        color: snippetColor,
-                        fontSize: 10,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 }

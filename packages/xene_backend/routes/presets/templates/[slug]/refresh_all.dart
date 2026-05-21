@@ -82,15 +82,17 @@ Future<Response> _runRefreshAll(RequestContext context, String slug) async {
       source['soundcloud_username'],
     ]);
     if (scUrl != null && scUrl.isNotEmpty) {
-      tasks.add(_RefreshTask(
-        artistName: artistName,
-        platform: 'soundcloud',
-        fetch: () => context.read<SoundCloudService>().getTracks(
-          scUrl,
-          artistName,
-          bypassMemoryCache: true,
+      tasks.add(
+        _RefreshTask(
+          artistName: artistName,
+          platform: 'soundcloud',
+          fetch: () => context.read<SoundCloudService>().getTracks(
+            scUrl,
+            artistName,
+            bypassMemoryCache: true,
+          ),
         ),
-      ));
+      );
     }
 
     final ytInput = _firstString([
@@ -100,12 +102,14 @@ Future<Response> _runRefreshAll(RequestContext context, String slug) async {
       source['youtube_url'],
     ]);
     if (ytInput != null && ytInput.isNotEmpty) {
-      tasks.add(_RefreshTask(
-        artistName: artistName,
-        platform: 'youtube',
-        fetch: () =>
-            context.read<YouTubeService>().getVideos(ytInput, artistName),
-      ));
+      tasks.add(
+        _RefreshTask(
+          artistName: artistName,
+          platform: 'youtube',
+          fetch: () =>
+              context.read<YouTubeService>().getVideos(ytInput, artistName),
+        ),
+      );
     }
 
     final bcUrl = _firstString([
@@ -113,16 +117,18 @@ Future<Response> _runRefreshAll(RequestContext context, String slug) async {
       source['bandcamp_url'],
     ]);
     if (bcUrl != null && bcUrl.isNotEmpty) {
-      tasks.add(_RefreshTask(
-        artistName: artistName,
-        platform: 'bandcamp',
-        isBandcamp: true,
-        fetch: () => context.read<BandcampService>().getFeed(
-          bcUrl,
-          artistName,
-          bypassMemoryCache: true,
+      tasks.add(
+        _RefreshTask(
+          artistName: artistName,
+          platform: 'bandcamp',
+          isBandcamp: true,
+          fetch: () => context.read<BandcampService>().getFeed(
+            bcUrl,
+            artistName,
+            bypassMemoryCache: true,
+          ),
         ),
-      ));
+      );
     }
   }
 
@@ -145,7 +151,12 @@ Future<Response> _runRefreshAll(RequestContext context, String slug) async {
     final batch = nonBcTasks.skip(i).take(_kConcurrency).toList();
     final batchResults = await Future.wait(
       batch.map(
-        (t) => _refreshPlatform(db: db, artistName: t.artistName, platform: t.platform, fetch: t.fetch),
+        (t) => _refreshPlatform(
+          db: db,
+          artistName: t.artistName,
+          platform: t.platform,
+          fetch: t.fetch,
+        ),
       ),
     );
     allResults.addAll(batchResults);
@@ -186,8 +197,7 @@ Future<Response> _runRefreshAll(RequestContext context, String slug) async {
   }
 
   // Count distinct artist names — a source with SC+YT+BC is one artist, not three.
-  final allArtists =
-      tasks.map((t) => t.artistName).toSet();
+  final allArtists = tasks.map((t) => t.artistName).toSet();
   final refreshedArtists = allResults
       .where((r) => r['ok'] == true)
       .map((r) => r['artist'] as String)
@@ -294,9 +304,11 @@ String? _firstString(Iterable<dynamic> values) {
 
 DateTime _cacheWindowCutoff(int days) {
   final now = DateTime.now().toLocal();
-  return DateTime(now.year, now.month, now.day)
-      .subtract(Duration(days: days))
-      .toUtc();
+  return DateTime(
+    now.year,
+    now.month,
+    now.day,
+  ).subtract(Duration(days: days)).toUtc();
 }
 
 DateTime? _publishedAt(dynamic item) {

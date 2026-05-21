@@ -12,6 +12,12 @@ const _kSurface = Color(0xFF1A1A1A);
 const _kCard = Color(0xFF242424);
 const _kMuted = Color(0xFF888888);
 
+String _fmt(int n) {
+  if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M';
+  if (n >= 1000) return '${(n / 1000).toStringAsFixed(1)}k';
+  return '$n';
+}
+
 class MonitorScreen extends ConsumerStatefulWidget {
   const MonitorScreen({super.key});
 
@@ -104,7 +110,11 @@ class _TopBar extends StatelessWidget {
         children: [
           GestureDetector(
             onTap: () => Navigator.of(context).maybePop(),
-            child: const Icon(Icons.arrow_back_ios, size: 18, color: Colors.white),
+            child: const Icon(
+              Icons.arrow_back_ios,
+              size: 18,
+              color: Colors.white,
+            ),
           ),
           const SizedBox(width: 12),
           Text(
@@ -119,10 +129,7 @@ class _TopBar extends StatelessWidget {
           const Spacer(),
           Text(
             '↺ ${countdown}s',
-            style: GoogleFonts.teko(
-              color: _kMuted,
-              fontSize: 16,
-            ),
+            style: GoogleFonts.teko(color: _kMuted, fontSize: 16),
           ),
         ],
       ),
@@ -141,11 +148,17 @@ class _Dashboard extends StatelessWidget {
     final gemini = data['gemini'] as Map<String, dynamic>? ?? {};
     final onboarding = data['onboarding'] as Map<String, dynamic>? ?? {};
     final upkeep = data['upkeep'] as Map<String, dynamic>? ?? {};
-    final perKey = (data['perKey'] as List<dynamic>?)
-            ?.cast<Map<String, dynamic>>() ??
+    final perKey =
+        (data['perKey'] as List<dynamic>?)?.cast<Map<String, dynamic>>() ?? [];
+    final recentCalls =
+        (data['recentCalls'] as List<dynamic>?)?.cast<Map<String, dynamic>>() ??
         [];
-    final recentCalls = (data['recentCalls'] as List<dynamic>?)
-            ?.cast<Map<String, dynamic>>() ??
+    final api = data['api'] as Map<String, dynamic>? ?? {};
+    final apiProviders =
+        (api['providers'] as List<dynamic>?)?.cast<Map<String, dynamic>>() ??
+        [];
+    final apiRecentCalls =
+        (api['recentCalls'] as List<dynamic>?)?.cast<Map<String, dynamic>>() ??
         [];
 
     return ListView(
@@ -153,28 +166,55 @@ class _Dashboard extends StatelessWidget {
       children: [
         _GeminiKeySection(gemini: gemini),
         const SizedBox(height: 12),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: _BucketCard(
-                title: 'ON-BOARDING',
-                subtitle: 'add-triggered',
-                data: onboarding,
-                color: _kTeal,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _BucketCard(
-                title: 'UPKEEP',
-                subtitle: 'scheduled batch',
-                data: upkeep,
-                color: _kOrange,
-              ),
-            ),
-          ],
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final isNarrow = constraints.maxWidth < 520;
+            final onboardingCard = _BucketCard(
+              key: const ValueKey('monitorOnboardingBucket'),
+              title: 'ON-BOARDING',
+              subtitle: 'add-triggered',
+              data: onboarding,
+              color: _kTeal,
+            );
+            final upkeepCard = _BucketCard(
+              key: const ValueKey('monitorUpkeepBucket'),
+              title: 'UPKEEP',
+              subtitle: 'scheduled batch',
+              data: upkeep,
+              color: _kOrange,
+            );
+
+            if (isNarrow) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  onboardingCard,
+                  const SizedBox(height: 12),
+                  upkeepCard,
+                ],
+              );
+            }
+
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: onboardingCard),
+                const SizedBox(width: 12),
+                Expanded(child: upkeepCard),
+              ],
+            );
+          },
         ),
+        const SizedBox(height: 12),
+        _ApiOverviewSection(api: api),
+        if (apiProviders.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          _ApiProvidersSection(providers: apiProviders),
+        ],
+        if (apiRecentCalls.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          _RecentApiCallsSection(calls: apiRecentCalls.take(18).toList()),
+        ],
         if (perKey.isNotEmpty) ...[
           const SizedBox(height: 12),
           _PerKeySection(perKey: perKey),
@@ -233,6 +273,7 @@ class _GeminiKeySection extends StatelessWidget {
 
 class _BucketCard extends StatelessWidget {
   const _BucketCard({
+    super.key,
     required this.title,
     required this.subtitle,
     required this.data,
@@ -257,19 +298,29 @@ class _BucketCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              Text(
-                title,
-                style: GoogleFonts.teko(
-                  color: color,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.8,
+              Expanded(
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  softWrap: false,
+                  style: GoogleFonts.teko(
+                    color: color,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.8,
+                  ),
                 ),
               ),
               const SizedBox(width: 6),
-              Text(
-                '($subtitle)',
-                style: GoogleFonts.teko(color: _kMuted, fontSize: 13),
+              Flexible(
+                child: Text(
+                  '($subtitle)',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  softWrap: false,
+                  style: GoogleFonts.teko(color: _kMuted, fontSize: 13),
+                ),
               ),
             ],
           ),
@@ -292,6 +343,332 @@ class _BucketCard extends StatelessWidget {
 }
 
 // ── Per-key breakdown ─────────────────────────────────────────────────────
+
+class _ApiOverviewSection extends StatelessWidget {
+  const _ApiOverviewSection({required this.api});
+  final Map<String, dynamic> api;
+
+  @override
+  Widget build(BuildContext context) {
+    final totals = api['totals'] as Map<String, dynamic>? ?? {};
+    final calls = totals['calls'] as int? ?? 0;
+    final successes = totals['successes'] as int? ?? 0;
+    final failures = totals['failures'] as int? ?? 0;
+    final throttles = totals['throttles'] as int? ?? 0;
+    final inFlight = totals['inFlight'] as int? ?? 0;
+
+    return _Card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.analytics_outlined, color: _kTeal, size: 18),
+              const SizedBox(width: 8),
+              _SectionLabel('API + THROTTLING'),
+            ],
+          ),
+          const SizedBox(height: 8),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final columns = constraints.maxWidth < 540 ? 2 : 5;
+              return GridView.count(
+                crossAxisCount: columns,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                mainAxisSpacing: 8,
+                crossAxisSpacing: 8,
+                childAspectRatio: columns == 2 ? 2.6 : 1.8,
+                children: [
+                  _MiniMetric('calls', _fmt(calls), _kTeal),
+                  _MiniMetric('ok', _fmt(successes), Colors.white),
+                  _MiniMetric('fail', _fmt(failures), Colors.redAccent),
+                  _MiniMetric('throttle', _fmt(throttles), _kOrange),
+                  _MiniMetric('active', _fmt(inFlight), Colors.white70),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ApiProvidersSection extends StatelessWidget {
+  const _ApiProvidersSection({required this.providers});
+  final List<Map<String, dynamic>> providers;
+
+  @override
+  Widget build(BuildContext context) {
+    return _Card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _SectionLabel('PROVIDER HEALTH'),
+          const SizedBox(height: 8),
+          ...providers.map((provider) => _ApiProviderRow(provider)),
+        ],
+      ),
+    );
+  }
+}
+
+class _ApiProviderRow extends StatelessWidget {
+  const _ApiProviderRow(this.provider);
+  final Map<String, dynamic> provider;
+
+  @override
+  Widget build(BuildContext context) {
+    final name = provider['provider'] as String? ?? 'unknown';
+    final calls = provider['calls'] as int? ?? 0;
+    final failures = provider['failures'] as int? ?? 0;
+    final throttles = provider['throttles'] as int? ?? 0;
+    final inFlight = provider['inFlight'] as int? ?? 0;
+    final avgLatency = provider['avgLatencyMs'] as int? ?? 0;
+    final lastStatus = provider['lastStatusCode'];
+    final hasRisk = throttles > 0 || failures > 0;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1F1F1F),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(
+          color: throttles > 0
+              ? _kOrange.withValues(alpha: 0.55)
+              : Colors.white.withValues(alpha: 0.06),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            hasRisk ? Icons.warning_amber_rounded : Icons.check_circle_outline,
+            color: throttles > 0
+                ? _kOrange
+                : failures > 0
+                ? Colors.redAccent
+                : _kTeal,
+            size: 17,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            flex: 2,
+            child: Text(
+              name.toUpperCase(),
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.teko(
+                color: Colors.white,
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.6,
+              ),
+            ),
+          ),
+          Expanded(child: _CompactStat('calls', _fmt(calls))),
+          Expanded(child: _CompactStat('fail', _fmt(failures))),
+          Expanded(
+            child: _CompactStat(
+              'limit',
+              _fmt(throttles),
+              valueColor: throttles > 0 ? _kOrange : Colors.white70,
+            ),
+          ),
+          Expanded(
+            child: _CompactStat('ms', avgLatency == 0 ? '-' : '$avgLatency'),
+          ),
+          Expanded(child: _CompactStat('open', _fmt(inFlight))),
+          SizedBox(
+            width: 44,
+            child: Text(
+              lastStatus?.toString() ?? '-',
+              textAlign: TextAlign.right,
+              style: GoogleFonts.teko(color: _kMuted, fontSize: 13),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RecentApiCallsSection extends StatelessWidget {
+  const _RecentApiCallsSection({required this.calls});
+  final List<Map<String, dynamic>> calls;
+
+  @override
+  Widget build(BuildContext context) {
+    return _Card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _SectionLabel('RECENT API CALLS'),
+          const SizedBox(height: 8),
+          ...calls.map((call) => _ApiCallRow(call)),
+        ],
+      ),
+    );
+  }
+}
+
+class _ApiCallRow extends StatelessWidget {
+  const _ApiCallRow(this.call);
+  final Map<String, dynamic> call;
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = call['provider'] as String? ?? '';
+    final method = call['method'] as String? ?? '';
+    final path = call['path'] as String? ?? '';
+    final status = call['statusCode'];
+    final ms = call['durationMs'];
+    final throttled = call['throttled'] as bool? ?? false;
+    final transient = call['transient'] as bool? ?? false;
+    final tsRaw = call['timestamp'] as String? ?? '';
+
+    String timeLabel = '';
+    try {
+      final dt = DateTime.parse(tsRaw).toLocal();
+      timeLabel =
+          '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}:${dt.second.toString().padLeft(2, '0')}';
+    } catch (_) {}
+
+    final color = throttled
+        ? _kOrange
+        : transient
+        ? Colors.redAccent
+        : Colors.white70;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 58,
+            child: Text(
+              timeLabel,
+              style: GoogleFonts.teko(color: _kMuted, fontSize: 13),
+            ),
+          ),
+          SizedBox(
+            width: 86,
+            child: Text(
+              provider.toUpperCase(),
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.teko(color: color, fontSize: 13),
+            ),
+          ),
+          SizedBox(
+            width: 42,
+            child: Text(
+              method,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.teko(color: Colors.white54, fontSize: 13),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              path,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.teko(color: Colors.white70, fontSize: 13),
+            ),
+          ),
+          SizedBox(
+            width: 44,
+            child: Text(
+              status?.toString() ?? '-',
+              textAlign: TextAlign.right,
+              style: GoogleFonts.teko(color: color, fontSize: 13),
+            ),
+          ),
+          SizedBox(
+            width: 54,
+            child: Text(
+              ms == null ? '-' : '${ms}ms',
+              textAlign: TextAlign.right,
+              style: GoogleFonts.teko(color: _kMuted, fontSize: 13),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MiniMetric extends StatelessWidget {
+  const _MiniMetric(this.label, this.value, this.color);
+  final String label;
+  final String value;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1F1F1F),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.teko(
+              color: color,
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.teko(color: _kMuted, fontSize: 13),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CompactStat extends StatelessWidget {
+  const _CompactStat(this.label, this.value, {this.valueColor});
+  final String label;
+  final String value;
+  final Color? valueColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          value,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: GoogleFonts.teko(
+            color: valueColor ?? Colors.white70,
+            fontSize: 13,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: GoogleFonts.teko(color: _kMuted, fontSize: 11),
+        ),
+      ],
+    );
+  }
+}
 
 class _PerKeySection extends StatelessWidget {
   const _PerKeySection({required this.perKey});
@@ -490,10 +867,7 @@ class _StatRow extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 2),
       child: Row(
         children: [
-          Text(
-            label,
-            style: GoogleFonts.teko(color: _kMuted, fontSize: 14),
-          ),
+          Text(label, style: GoogleFonts.teko(color: _kMuted, fontSize: 14)),
           const Spacer(),
           Text(
             value,

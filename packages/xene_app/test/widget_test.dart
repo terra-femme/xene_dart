@@ -4,9 +4,25 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:xene_app/src/layout/xene_layout_metrics.dart';
 import 'package:xene_app/src/providers/articles_provider.dart';
+import 'package:xene_app/src/providers/artists_provider.dart';
+import 'package:xene_app/src/providers/discovery_provider.dart';
 import 'package:xene_app/src/providers/feed_provider.dart';
+import 'package:xene_app/src/providers/following_provider.dart';
+import 'package:xene_app/src/providers/graph_provider.dart';
+import 'package:xene_app/src/providers/monitor_provider.dart';
 import 'package:xene_app/src/providers/preset_provider.dart';
+import 'package:xene_app/src/providers/preset_sources_provider.dart';
+import 'package:xene_app/src/providers/preset_templates_provider.dart';
+import 'package:xene_app/src/providers/player_provider.dart';
+import 'package:xene_app/src/providers/sc_search_provider.dart';
+import 'package:xene_app/src/providers/soundcloud_connection_provider.dart';
+import 'package:xene_app/src/screens/artist_detail_screen.dart';
+import 'package:xene_app/src/screens/artists_screen.dart';
 import 'package:xene_app/src/screens/feed_screen.dart';
+import 'package:xene_app/src/screens/monitor_screen.dart';
+import 'package:xene_app/src/screens/network_screen.dart';
+import 'package:xene_app/src/screens/preset_playground_screen.dart';
+import 'package:xene_app/src/widgets/logo_pip_player.dart';
 import 'package:xene_app/src/widgets/preset_dial.dart';
 import 'package:xene_app/src/widgets/xene_content_modal.dart';
 import 'package:xene_app/src/widgets/xene_draggable_sheet.dart';
@@ -164,6 +180,30 @@ void main() {
         expect(tester.takeException(), isNull);
       });
     }
+
+    testWidgets('feed card wraps long badges at narrow feed width', (
+      WidgetTester tester,
+    ) async {
+      await _setViewport(tester, const Size(320, 568));
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      await tester.pumpWidget(
+        _testApp(
+          Center(
+            child: SizedBox(
+              width: 132,
+              child: XeneFeedCard(item: _longMetadataFeedItem),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text('EXCEPTIONALLY-LONG-RELEASE-TYPE'), findsOneWidget);
+      expect(find.text('A-VERY-LONG-PLATFORM-NAME'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
 
     testWidgets('preset dial long press overlay builds and dismisses', (
       WidgetTester tester,
@@ -457,13 +497,47 @@ void main() {
         await tester.pump();
         await tester.pump();
 
-        final headerBottom = tester.getBottomLeft(find.text('JUST DROPPED')).dy;
-        final filterTop = tester.getTopLeft(find.text('FILTER BY -')).dy;
+        final headerBand = find.byKey(const ValueKey('feedHeaderBand'));
+        final controlsBar = find.byKey(const ValueKey('feedControlsBar'));
+        final feedBody = find.byKey(const ValueKey('feedBodyStack'));
 
-        expect(filterTop, greaterThanOrEqualTo(headerBottom));
+        final headerBottom = tester.getBottomLeft(headerBand).dy;
+        final controlsTop = tester.getTopLeft(controlsBar).dy;
+        final controlsBottom = tester.getBottomLeft(controlsBar).dy;
+        final feedBodyTop = tester.getTopLeft(feedBody).dy;
+
+        expect(controlsTop, greaterThanOrEqualTo(headerBottom));
+        expect(controlsTop - headerBottom, lessThanOrEqualTo(1));
+        expect(feedBodyTop, greaterThanOrEqualTo(controlsBottom));
+        expect(feedBodyTop - controlsBottom, lessThanOrEqualTo(1));
         expect(tester.takeException(), isNull);
       },
     );
+
+    testWidgets('feed controls keep authored left and right alignment', (
+      WidgetTester tester,
+    ) async {
+      await _setViewport(tester, const Size(1366, 768));
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      await tester.pumpWidget(_testApp(const FeedScreen()));
+      await tester.pump();
+      await tester.pump();
+
+      final controlsRect = tester.getRect(
+        find.byKey(const ValueKey('feedControlsBar')),
+      );
+      final sevenDaysRect = tester.getRect(find.text('\u2264 7 DAYS'));
+      final filterRect = tester.getRect(find.text('FILTER BY -'));
+      final searchRect = tester.getRect(find.byIcon(Icons.search));
+
+      expect(sevenDaysRect.left, closeTo(controlsRect.left + 16, 1));
+      expect(filterRect.left, greaterThan(sevenDaysRect.right));
+      expect(searchRect.left, greaterThan(filterRect.right));
+      expect(searchRect.right, lessThanOrEqualTo(controlsRect.right));
+      expect(tester.takeException(), isNull);
+    });
 
     testWidgets('archive sheet content guardrails build at narrow width', (
       WidgetTester tester,
@@ -512,6 +586,219 @@ void main() {
       expect(find.textContaining('A very long modal title'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
+
+    testWidgets('content modal artwork stays within narrow content width', (
+      WidgetTester tester,
+    ) async {
+      await _setViewport(tester, const Size(260, 568));
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      await tester.pumpWidget(
+        _testApp(
+          SizedBox(
+            width: 180,
+            child: XeneContentModal(item: _playableLongMetadataFeedItem),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      final modalRect = tester.getRect(find.byType(XeneContentModal));
+      final artworkRect = tester.getRect(
+        find.byKey(const ValueKey('contentModalArtwork')),
+      );
+
+      expect(artworkRect.width, lessThanOrEqualTo(200));
+      expect(artworkRect.left, greaterThanOrEqualTo(modalRect.left));
+      expect(artworkRect.right, lessThanOrEqualTo(modalRect.right));
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('logo pip player preserves locked outer geometry', (
+      WidgetTester tester,
+    ) async {
+      await _setViewport(tester, const Size(390, 844));
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      await tester.pumpWidget(
+        _testApp(
+          const Stack(children: [LogoPipPlayer()]),
+          overrides: [
+            playerProvider.overrideWith((ref) => _VisiblePlayerNotifier()),
+          ],
+        ),
+      );
+      await tester.pump();
+
+      expect(
+        tester.getSize(find.byKey(const ValueKey('logoPipPlayerSurface'))),
+        const Size(175, 275),
+      );
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('artists narrow panels derive height from viewport', (
+      WidgetTester tester,
+    ) async {
+      await _setViewport(tester, const Size(390, 640));
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      await tester.pumpWidget(
+        _testApp(const ArtistsScreen(), overrides: _artistsScreenOverrides()),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      final panelHeight = tester
+          .getSize(find.byKey(const ValueKey('artistsFollowingPanel')))
+          .height;
+
+      expect(panelHeight, inInclusiveRange(360, 520));
+      expect(panelHeight, isNot(460));
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('preset playground narrow panes derive local heights', (
+      WidgetTester tester,
+    ) async {
+      await _setViewport(tester, const Size(390, 640));
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      await tester.pumpWidget(
+        _testApp(
+          const PresetPlaygroundScreen(),
+          overrides: _presetPlaygroundOverrides(),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      final templateHeight = tester
+          .getSize(find.byKey(const ValueKey('presetTemplateListPane')))
+          .height;
+
+      expect(templateHeight, inInclusiveRange(300, 420));
+      expect(templateHeight, isNot(360));
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('monitor buckets stack on narrow screens', (
+      WidgetTester tester,
+    ) async {
+      await _setViewport(tester, const Size(390, 640));
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      await tester.pumpWidget(
+        _testApp(
+          const MonitorScreen(),
+          overrides: [
+            monitorProvider.overrideWith((ref) => Stream.value(_monitorStats)),
+          ],
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      final onboardingRect = tester.getRect(
+        find.byKey(const ValueKey('monitorOnboardingBucket')),
+      );
+      final upkeepRect = tester.getRect(
+        find.byKey(const ValueKey('monitorUpkeepBucket')),
+      );
+
+      expect(upkeepRect.top, greaterThan(onboardingRect.bottom));
+      expect(upkeepRect.left, closeTo(onboardingRect.left, 1));
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('network graph clips long hub labels and badges locally', (
+      WidgetTester tester,
+    ) async {
+      await _setViewport(tester, const Size(320, 568));
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      await tester.pumpWidget(
+        _testApp(
+          const NetworkScreen(),
+          overrides: [
+            discoveryStatusProvider.overrideWith(
+              (ref) async => {
+                'has_providers': true,
+                'providers': ['gemini-provider-with-a-very-long-name'],
+              },
+            ),
+            graphProvider.overrideWith((ref) async => _networkGraph),
+          ],
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      expect(
+        find.byKey(const ValueKey('networkHubCard_hub-long')),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('artist detail clips long title inside app bar', (
+      WidgetTester tester,
+    ) async {
+      await _setViewport(tester, const Size(320, 568));
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      await tester.pumpWidget(
+        _testApp(ArtistDetailScreen(artist: _detailArtist)),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      final titleFinder = find.byKey(const ValueKey('artistDetailTitle'));
+      expect(titleFinder, findsWidgets);
+
+      final title = tester.widgetList<Text>(titleFinder).first;
+
+      expect(title.maxLines, 1);
+      expect(title.overflow, TextOverflow.ellipsis);
+      expect(
+        find.byKey(const ValueKey('artistDetailPlatformLinks')),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    });
+
+    for (final viewport in _mobileReadinessViewportMatrix) {
+      for (final screen in _secondaryScreenSmokeCases) {
+        testWidgets(
+          '${screen.name} secondary screen builds at ${viewport.name}',
+          (WidgetTester tester) async {
+            await _setViewport(tester, viewport.size);
+            addTearDown(tester.view.resetPhysicalSize);
+            addTearDown(tester.view.resetDevicePixelRatio);
+
+            await tester.pumpWidget(
+              _testApp(
+                screen.builder(),
+                safePadding: viewport.safePadding,
+                textScaleFactor: viewport.textScaleFactor,
+                overrides: screen.overrides?.call() ?? const [],
+              ),
+            );
+            await tester.pump();
+            await tester.pump();
+
+            expect(tester.takeException(), isNull);
+          },
+        );
+      }
+    }
   });
 }
 
@@ -520,6 +807,7 @@ Widget _testApp(
   EdgeInsets safePadding = EdgeInsets.zero,
   EdgeInsets viewInsets = EdgeInsets.zero,
   double textScaleFactor = 1,
+  List<Override> overrides = const [],
 }) {
   return ProviderScope(
     overrides: [
@@ -528,6 +816,7 @@ Widget _testApp(
       feedProvider.overrideWith(_TestFeedNotifier.new),
       archiveFetchProvider.overrideWith(_TestArchiveFetchNotifier.new),
       feedEffectiveDateProvider.overrideWith((ref) => DateTime(2026, 5, 19)),
+      ...overrides,
     ],
     child: MaterialApp(
       builder: (context, appChild) {
@@ -620,6 +909,180 @@ class _TestArchiveFetchNotifier extends ArchiveFetchNotifier {
   Future<void> fetchNextPage({bool showInitialLoading = false}) async {}
 }
 
+class _VisiblePlayerNotifier extends PlayerNotifier {
+  _VisiblePlayerNotifier() {
+    state = PlayerState(
+      currentTrack: _playableLongMetadataFeedItem,
+      activePlatform: ActivePlatform.none,
+      isVisible: true,
+    );
+  }
+}
+
+List<Override> _artistsScreenOverrides() {
+  return [
+    artistsProvider.overrideWith(_TestArtistsNotifier.new),
+    soundcloudConnectionProvider.overrideWith(
+      (ref) => _TestScConnectionNotifier(ref),
+    ),
+    followingProvider.overrideWith((ref) => _TestFollowingNotifier(ref)),
+    scSearchProvider.overrideWith((ref) => _TestScSearchNotifier(ref)),
+    discoveryProvider.overrideWith((ref) => _TestDiscoveryNotifier(ref)),
+  ];
+}
+
+List<Override> _presetPlaygroundOverrides() {
+  return [
+    presetTemplatesProvider.overrideWith(_TestPresetTemplatesNotifier.new),
+    presetSourcesProvider.overrideWith(
+      (ref) => _TestPresetSourcesNotifier(ref),
+    ),
+    scSearchProvider.overrideWith((ref) => _TestScSearchNotifier(ref)),
+  ];
+}
+
+class _TestArtistsNotifier extends ArtistsNotifier {
+  @override
+  Future<List<Artist>> build() async => _artists;
+
+  @override
+  Future<void> refresh() async {
+    state = AsyncData(_artists);
+  }
+
+  @override
+  Future<void> deleteArtist(String id) async {}
+}
+
+class _TestPresetTemplatesNotifier extends PresetTemplatesNotifier {
+  @override
+  Future<List<PresetTemplate>> build() async => _presetTemplates;
+
+  @override
+  Future<void> refresh() async {
+    state = AsyncData(_presetTemplates);
+  }
+
+  @override
+  Future<void> create(Map<String, dynamic> data) async {}
+
+  @override
+  Future<void> updateTemplate(
+    String originalSlug,
+    Map<String, dynamic> data,
+  ) async {}
+}
+
+class _TestPresetSourcesNotifier extends PresetSourcesNotifier {
+  _TestPresetSourcesNotifier(super.ref);
+
+  @override
+  Future<void> load(String slug) async {
+    state = PresetSourcesState(slug: slug, sources: _presetSources);
+  }
+
+  @override
+  Future<void> addSoundCloudSource(
+    String slug,
+    Map<String, dynamic> candidate,
+  ) async {}
+
+  @override
+  Future<void> removeSource(String slug, String sourceId) async {}
+
+  @override
+  Future<Map<String, dynamic>?> refreshSource(
+    String slug,
+    String sourceId,
+  ) async {
+    return null;
+  }
+
+  @override
+  Future<Map<String, dynamic>?> refreshAll(String slug) async {
+    return null;
+  }
+
+  @override
+  Future<void> patchSource(
+    String slug,
+    String sourceId, {
+    String? bandcampUrl,
+    String? youtubeUrl,
+  }) async {}
+
+  @override
+  Future<void> addArticle(
+    String slug,
+    String sourceId, {
+    required String title,
+    required String url,
+    String? snippet,
+    String? source,
+  }) async {}
+
+  @override
+  Future<void> preview(String slug) async {
+    state = state.copyWith(previewItems: _feedItems.take(2).toList());
+  }
+}
+
+class _TestScConnectionNotifier extends ScConnectionNotifier {
+  _TestScConnectionNotifier(super.ref) {
+    state = const ScConnectionState(status: ScConnectionStatus.disconnected);
+  }
+
+  @override
+  Future<void> checkStatus() async {}
+
+  @override
+  Future<void> connect() async {}
+
+  @override
+  Future<void> disconnect() async {
+    state = const ScConnectionState(status: ScConnectionStatus.disconnected);
+  }
+}
+
+class _TestFollowingNotifier extends FollowingNotifier {
+  _TestFollowingNotifier(super.ref);
+
+  @override
+  Future<void> fetch({bool force = false}) async {}
+
+  @override
+  void reset() {
+    state = const FollowingState();
+  }
+}
+
+class _TestScSearchNotifier extends ScSearchNotifier {
+  _TestScSearchNotifier(super.ref);
+
+  @override
+  Future<void> search(String query) async {}
+
+  @override
+  void clear() {
+    state = const ScSearchState();
+  }
+}
+
+class _TestDiscoveryNotifier extends DiscoveryNotifier {
+  _TestDiscoveryNotifier(super.ref);
+
+  @override
+  Future<void> autoDiscover(String name, {String? scProfileUrl}) async {}
+
+  @override
+  Future<void> saveDiscovery(Map<String, dynamic> result) async {}
+
+  @override
+  void reset() {
+    state = const DiscoveryState();
+  }
+}
+
 class _ViewportCase {
   const _ViewportCase(
     this.name,
@@ -632,6 +1095,18 @@ class _ViewportCase {
   final Size size;
   final EdgeInsets safePadding;
   final double textScaleFactor;
+}
+
+class _SecondaryScreenSmokeCase {
+  const _SecondaryScreenSmokeCase(
+    this.name, {
+    required this.builder,
+    this.overrides,
+  });
+
+  final String name;
+  final Widget Function() builder;
+  final List<Override> Function()? overrides;
 }
 
 const _viewportMatrix = [
@@ -651,6 +1126,64 @@ const _viewportMatrix = [
   _ViewportCase('tablet landscape', Size(1024, 768), textScaleFactor: 1.15),
   _ViewportCase('desktop', Size(1366, 768)),
   _ViewportCase('short desktop', Size(1440, 540)),
+];
+
+const _mobileReadinessViewportMatrix = [
+  _ViewportCase(
+    'iPhone SE portrait',
+    Size(320, 568),
+    safePadding: EdgeInsets.only(top: 20),
+  ),
+  _ViewportCase(
+    'small notched phone',
+    Size(375, 812),
+    safePadding: EdgeInsets.only(top: 47, bottom: 34),
+  ),
+  _ViewportCase(
+    'large text phone',
+    Size(390, 844),
+    safePadding: EdgeInsets.only(top: 47, bottom: 21),
+    textScaleFactor: 1.35,
+  ),
+  _ViewportCase('phone landscape', Size(844, 390)),
+  _ViewportCase('tablet portrait', Size(768, 1024)),
+];
+
+final _secondaryScreenSmokeCases = [
+  _SecondaryScreenSmokeCase(
+    'artists',
+    builder: () => const ArtistsScreen(),
+    overrides: _artistsScreenOverrides,
+  ),
+  _SecondaryScreenSmokeCase(
+    'preset playground',
+    builder: () => const PresetPlaygroundScreen(),
+    overrides: _presetPlaygroundOverrides,
+  ),
+  _SecondaryScreenSmokeCase(
+    'monitor',
+    builder: () => const MonitorScreen(),
+    overrides: () => [
+      monitorProvider.overrideWith((ref) => Stream.value(_monitorStats)),
+    ],
+  ),
+  _SecondaryScreenSmokeCase(
+    'network',
+    builder: () => const NetworkScreen(),
+    overrides: () => [
+      discoveryStatusProvider.overrideWith(
+        (ref) async => {
+          'has_providers': true,
+          'providers': ['gemini-provider-with-a-very-long-name'],
+        },
+      ),
+      graphProvider.overrideWith((ref) async => _networkGraph),
+    ],
+  ),
+  _SecondaryScreenSmokeCase(
+    'artist detail',
+    builder: () => ArtistDetailScreen(artist: _detailArtist),
+  ),
 ];
 
 const _presetSlots = [
@@ -675,6 +1208,37 @@ const _presetSlots = [
   ),
 ];
 
+const _presetTemplates = [
+  PresetTemplate(
+    slug: 'dnb-foundations',
+    name: 'DNB Foundations',
+    notchIndex: 0,
+    themeColor: '#FF5500',
+    isDefault: true,
+    enabled: true,
+    description: 'Baseline preset for narrow playground tests.',
+  ),
+  PresetTemplate(
+    slug: 'leftfield',
+    name: 'Leftfield',
+    notchIndex: 3,
+    themeColor: '#00A88F',
+    isDefault: false,
+    enabled: true,
+  ),
+];
+
+const _presetSources = [
+  PresetSource(
+    id: 'source-1',
+    displayName: 'Constraint Operator',
+    enabled: true,
+    soundcloudUsername: 'constraint-operator',
+    soundcloudUrl: 'https://soundcloud.com/constraint-operator',
+    manuallyVerified: true,
+  ),
+];
+
 final _articles = [
   ArticleItem(
     title: 'Scene Report: Constraint Driven Club Tools',
@@ -693,6 +1257,37 @@ final _articles = [
   ),
 ];
 
+final _artists = [
+  Artist(
+    id: 'artist-1',
+    name: 'Constraint Operator',
+    soundcloudUsername: 'constraint-operator',
+    soundcloudUrl: 'https://soundcloud.com/constraint-operator',
+    createdAt: DateTime(2026, 5, 19),
+  ),
+  Artist(
+    id: 'artist-2',
+    name: 'Adaptive Layout Crew',
+    soundcloudUsername: 'adaptive-layout-crew',
+    soundcloudUrl: 'https://soundcloud.com/adaptive-layout-crew',
+    createdAt: DateTime(2026, 5, 18),
+  ),
+];
+
+final _detailArtist = Artist(
+  id: 'artist-detail-long',
+  name:
+      'An Extremely Long Artist Detail Screen Name That Must Stay Inside The App Bar',
+  soundcloudUsername: 'artist-detail-long',
+  soundcloudUrl: 'https://soundcloud.com/artist-detail-long',
+  youtubeUrl: 'https://youtube.com/@artist-detail-long',
+  spotifyUrl: 'https://open.spotify.com/artist/detail-long',
+  bandcampUrl: 'https://artist-detail-long.bandcamp.com',
+  instagramUrl: 'https://instagram.com/artist_detail_long',
+  websiteUrl: 'https://example.com/artist-detail-long',
+  createdAt: DateTime(2026, 5, 19),
+);
+
 final _feedItems = List<FeedItem>.generate(12, (index) {
   final platforms = ['soundcloud', 'bandcamp', 'youtube'];
   return FeedItem(
@@ -707,6 +1302,102 @@ final _feedItems = List<FeedItem>.generate(12, (index) {
     isNew: index < 2,
   );
 });
+
+final _longMetadataFeedItem = FeedItem(
+  id: 'long-metadata-card',
+  platform: 'a-very-long-platform-name',
+  artistName: 'An Extremely Long Artist Name That Needs Ellipsis',
+  contentType: 'exceptionally-long-release-type',
+  title:
+      'A narrow feed card title that should wrap without forcing badge overflow',
+  body: 'A compact body that should stay inside the card bounds.',
+  externalUrl: 'https://example.com/long-metadata-card',
+  publishedAt: DateTime(2026, 5, 19),
+  isNew: true,
+);
+
+final _playableLongMetadataFeedItem = FeedItem(
+  id: 'playable-long-metadata-card',
+  platform: 'youtube',
+  artistName: 'An Extremely Long Playable Artist Name That Needs Ellipsis',
+  contentType: 'exceptionally-long-playable-release-type',
+  title:
+      'A playable modal title that should wrap without changing modal geometry',
+  body: 'A compact playable modal body for content guardrail coverage.',
+  externalUrl: 'https://youtube.com/watch?v=playable-long-metadata-card',
+  publishedAt: DateTime(2026, 5, 19),
+);
+
+final _monitorStats = <String, dynamic>{
+  'gemini': {
+    'keyCount': 2,
+    'currentKeyIndex': 1,
+    'rotations': 3,
+    'hasKeys': true,
+  },
+  'onboarding': {
+    'calls': 12,
+    'inputTokens': 24000,
+    'outputTokens': 3200,
+    'groundedCalls': 9,
+    'estimatedCostUsd': '0.042',
+  },
+  'upkeep': {
+    'calls': 7,
+    'inputTokens': 18000,
+    'outputTokens': 2100,
+    'groundedCalls': 6,
+    'estimatedCostUsd': '0.031',
+  },
+  'perKey': [
+    {'keyIndex': 1, 'calls': 10, 'inputTokens': 22000, 'groundedCalls': 8},
+  ],
+  'recentCalls': [
+    {
+      'context': 'press_scout.batch.long_context_for_ellipsis',
+      'inputTokens': 9000,
+      'grounded': true,
+      'timestamp': '2026-05-19T18:30:00.000Z',
+    },
+  ],
+};
+
+final _networkGraph = <String, dynamic>{
+  'nodes': [
+    {
+      'id': 'hub-long',
+      'type': 'HUB',
+      'label':
+          'An Extremely Long Artist Identity Graph Hub Name That Must Ellipsize',
+      'data': {
+        'entityType': 'artist-with-a-very-long-type-label',
+        'identityConfidence': 'HIGH',
+        'coverageLevel':
+            'EXTREMELY-LONG-COVERAGE-LABEL-THAT-SHOULD-NOT-OVERFLOW',
+      },
+    },
+    {
+      'id': 'platform-long',
+      'type': 'DATA_POINT',
+      'label':
+          'soundcloud.com/a-path-with-an-exceptionally-long-artist-identity-url',
+      'data': {'url': 'https://example.com/platform-long'},
+    },
+    {
+      'id': 'analysis-long',
+      'type': 'ANALYSIS',
+      'label': 'analysis',
+      'data': {
+        'text':
+            'This analysis copy is intentionally long enough to verify the card keeps text inside the existing graph composition on phone-width surfaces.',
+      },
+    },
+  ],
+  'links': [
+    {'source': 'hub-long', 'target': 'platform-long'},
+    {'source': 'hub-long', 'target': 'analysis-long'},
+  ],
+};
 
 final _archiveItems = List<FeedItem>.generate(8, (index) {
   return FeedItem(
