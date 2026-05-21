@@ -4,7 +4,9 @@ import 'package:flutter/widget_previews.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:xene_app/src/providers/auth_provider.dart';
 import 'package:xene_app/src/providers/feed_provider.dart';
+import 'package:xene_app/src/widgets/auth_gate_sheet.dart';
 import '../providers/soundcloud_connection_provider.dart';
 
 class XeneHeader extends ConsumerStatefulWidget {
@@ -49,6 +51,7 @@ class _XeneHeaderState extends ConsumerState<XeneHeader> {
   @override
   Widget build(BuildContext context) {
     final scState = ref.watch(soundcloudConnectionProvider);
+    final isAnon = ref.watch(isAnonymousProvider);
 
     String location;
     try {
@@ -66,6 +69,15 @@ class _XeneHeaderState extends ConsumerState<XeneHeader> {
         path: path,
         isActive: isActive,
         onTap: () {
+          if (isAnon && (path == '/following' || path == '/profile')) {
+            showAuthGate(
+              context,
+              featureHint: path == '/following'
+                  ? 'to track new releases from artists you follow'
+                  : 'to manage your account',
+            );
+            return;
+          }
           try {
             context.go(path);
           } catch (e) {
@@ -132,7 +144,17 @@ class _XeneHeaderState extends ConsumerState<XeneHeader> {
       }
 
       return GestureDetector(
-        onTap: () => ref.read(soundcloudConnectionProvider.notifier).connect(),
+        onTap: () {
+          if (isAnon) {
+            showAuthGate(
+              context,
+              featureHint:
+                  'to link your SoundCloud and see releases from artists you follow',
+            );
+            return;
+          }
+          ref.read(soundcloudConnectionProvider.notifier).connect();
+        },
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 10),
           child: Row(

@@ -30,6 +30,13 @@ Future<void> main() async {
     anonKey: const String.fromEnvironment('SUPABASE_ANON_KEY'),
   );
 
+  // Auto sign-in anonymously so there is always a valid JWT from first launch.
+  // Features that require a real account (custom preset, following, SC connect)
+  // check isAnonymousProvider and show a sign-up gate rather than blocking all access.
+  if (Supabase.instance.client.auth.currentUser == null) {
+    await Supabase.instance.client.auth.signInAnonymously();
+  }
+
   // app_links is mobile-only — web handles the magic link redirect automatically
   // via Supabase's built-in URL fragment detection, no listener needed.
   if (!kIsWeb) {
@@ -209,8 +216,9 @@ final _router = GoRouter(
   redirect: (context, state) {
     final session = Supabase.instance.client.auth.currentSession;
     final isOnAuth = state.matchedLocation == '/auth';
-    if (session == null && !isOnAuth) return '/auth';
-    if (session != null && isOnAuth) return '/';
+    // Only redirect away from /auth for real (non-anonymous) accounts.
+    // Anonymous users reach /auth via feature gates and should not be bounced.
+    if (session != null && !(session.user.isAnonymous) && isOnAuth) return '/';
     return null;
   },
   routes: [

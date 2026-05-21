@@ -56,3 +56,12 @@ final isAdminProvider = FutureProvider<bool>((ref) async {
   final role = await ref.watch(userRoleProvider.future);
   return role == 'admin';
 });
+
+/// True when the session is anonymous or there is no session yet.
+/// Gate features that require a real account: custom preset, following,
+/// SoundCloud connect. The app auto-signs in anonymously on startup so
+/// this is the canonical way to distinguish "browsing" from "signed in".
+final isAnonymousProvider = Provider<bool>((ref) {
+  final user = ref.watch(currentUserProvider);
+  return user == null || user.isAnonymous;
+});
