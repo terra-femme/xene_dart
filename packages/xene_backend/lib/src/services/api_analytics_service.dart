@@ -22,7 +22,7 @@ class ApiAnalyticsService {
     required int inputTokens,
     required int outputTokens,
     required bool grounded,
-    required int keyIndex,
+    int? keyIndex,
   }) {
     final stats = _statsFor(provider);
     stats.calls++;
@@ -49,6 +49,34 @@ class ApiAnalyticsService {
         grounded: grounded,
         keyIndex: keyIndex,
       ),
+    );
+  }
+
+  void recordLlmResponse({
+    required String provider,
+    required String context,
+    required Map<String, dynamic>? data,
+    bool grounded = false,
+  }) {
+    final usage = data?['usage'] as Map?;
+    recordLlmCall(
+      provider: provider,
+      context: context,
+      inputTokens: _usageInt(usage, [
+        'prompt_tokens',
+        'promptTokens',
+        'input_tokens',
+        'inputTokens',
+        'promptTokenCount',
+      ]),
+      outputTokens: _usageInt(usage, [
+        'completion_tokens',
+        'completionTokens',
+        'output_tokens',
+        'outputTokens',
+        'candidatesTokenCount',
+      ]),
+      grounded: grounded,
     );
   }
 
@@ -277,6 +305,20 @@ class ApiAnalyticsService {
   static String _shortError(Object error) {
     final raw = error.toString().replaceAll(RegExp(r'\s+'), ' ');
     return raw.length > 160 ? '${raw.substring(0, 157)}...' : raw;
+  }
+
+  static int _usageInt(Map? usage, List<String> keys) {
+    if (usage == null) return 0;
+    for (final key in keys) {
+      final value = usage[key];
+      if (value is int) return value;
+      if (value is num) return value.round();
+      if (value is String) {
+        final parsed = int.tryParse(value);
+        if (parsed != null) return parsed;
+      }
+    }
+    return 0;
   }
 }
 

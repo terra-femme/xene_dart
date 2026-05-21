@@ -52,6 +52,7 @@ class _XeneHeaderState extends ConsumerState<XeneHeader> {
   Widget build(BuildContext context) {
     final scState = ref.watch(soundcloudConnectionProvider);
     final isAnon = ref.watch(isAnonymousProvider);
+    final isAdmin = ref.watch(isAdminProvider).valueOrNull ?? false;
 
     String location;
     try {
@@ -265,7 +266,7 @@ class _XeneHeaderState extends ConsumerState<XeneHeader> {
                         child: Row(
                           children: [
                             navButton('HOME', '/'),
-                            devMenuButton(),
+                            if (isAdmin) devMenuButton(),
                             navButton('FOLLOWING', '/following'),
                             navButton('PROFILE', '/profile'),
                             soundcloudButton(),

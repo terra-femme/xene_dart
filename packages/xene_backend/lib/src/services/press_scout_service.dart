@@ -445,7 +445,7 @@ Return as a JSON list: [{"title": "", "url": "", "snippet": "", "site_tier": "Ma
     final prompt = _buildSinglePrompt(name, presetSlug: presetSlug);
 
     try {
-      final dio = _analytics?.trackDio(Dio(), 'openrouter') ?? Dio();
+      final dio = Dio();
       final response = await dio.post<Map<String, dynamic>>(
         'https://openrouter.ai/api/v1/chat/completions',
         data: {
@@ -473,6 +473,11 @@ Return as a JSON list: [{"title": "", "url": "", "snippet": "", "site_tier": "Ma
       );
       _logger.info(
         '[press_scout._scoutWithOpenRouter] ← status=${response.statusCode}',
+      );
+      _analytics?.recordLlmResponse(
+        provider: 'openrouter',
+        context: 'press_scout.openrouter',
+        data: response.data,
       );
 
       final content =
@@ -513,6 +518,12 @@ Return as a JSON list: [{"title": "", "url": "", "snippet": "", "site_tier": "Ma
       );
       return articles;
     } catch (e, st) {
+      _analytics?.recordLlmError(
+        provider: 'openrouter',
+        context: 'press_scout.openrouter',
+        error: e,
+        throttled: GeminiKeyRotator.isQuotaError(e),
+      );
       print('[XENE OPENROUTER] ✗ Press scout OpenRouter THREW for "$name": $e');
       _logger.warning(
         '[press_scout._scoutWithOpenRouter] ✗ failed for $name: $e',
