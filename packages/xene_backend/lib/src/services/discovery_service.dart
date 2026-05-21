@@ -784,10 +784,10 @@ Return the following JSON ONLY:
     {"targetName": "string", "relationship": "string", "sourceUrl": "string", "type": "EXPLICIT_BIO_LINK | AI_SUGGESTED"}
   ],
   "analysis": "Specific explanation of breadcrumbs found including alias resolution."
-}''';
+    }''';
 
     try {
-      final dio = _analytics?.trackDio(Dio(), 'openrouter') ?? Dio();
+      final dio = Dio();
       final response = await dio.post<Map<String, dynamic>>(
         'https://openrouter.ai/api/v1/chat/completions',
         data: {
@@ -816,6 +816,11 @@ Return the following JSON ONLY:
       );
       _logger.info(
         '[discovery._runOpenRouterFallback] ← status=${response.statusCode}',
+      );
+      _analytics?.recordLlmResponse(
+        provider: 'openrouter',
+        context: 'discovery.openrouter',
+        data: response.data,
       );
 
       final choices = response.data?['choices'] as List?;
@@ -863,6 +868,12 @@ Return the following JSON ONLY:
       return {};
     } catch (e, st) {
       final safeError = _redactSensitiveText(e);
+      _analytics?.recordLlmError(
+        provider: 'openrouter',
+        context: 'discovery.openrouter',
+        error: e,
+        throttled: GeminiKeyRotator.isQuotaError(e),
+      );
       print(
         '[XENE OPENROUTER] OpenRouter fallback THREW for "$name": $safeError',
       );
@@ -930,7 +941,7 @@ Return the following JSON ONLY:
 }''';
 
     try {
-      final dio = _analytics?.trackDio(Dio(), 'nvidia') ?? Dio();
+      final dio = Dio();
       final response = await dio.post<Map<String, dynamic>>(
         'https://integrate.api.nvidia.com/v1/chat/completions',
         data: {
@@ -956,6 +967,11 @@ Return the following JSON ONLY:
       print('[XENE NVIDIA] Response received - status=${response.statusCode}');
       _logger.info(
         '[discovery._runNvidiaFallback] status=${response.statusCode}',
+      );
+      _analytics?.recordLlmResponse(
+        provider: 'nvidia',
+        context: 'discovery.nvidia',
+        data: response.data,
       );
 
       final choices = response.data?['choices'] as List?;
@@ -997,6 +1013,12 @@ Return the following JSON ONLY:
       );
       return {};
     } catch (e, st) {
+      _analytics?.recordLlmError(
+        provider: 'nvidia',
+        context: 'discovery.nvidia',
+        error: e,
+        throttled: GeminiKeyRotator.isQuotaError(e),
+      );
       print('[XENE NVIDIA] NVIDIA fallback THREW for "$name": $e');
       _logger.warning(
         '[discovery._runNvidiaFallback] NVIDIA call failed for "$name": $e',
