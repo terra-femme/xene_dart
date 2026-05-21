@@ -8,7 +8,9 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:xene_app/src/layout/xene_layout_metrics.dart';
 import 'package:xene_app/src/layout/xene_responsive_debug.dart';
 import 'package:xene_app/src/providers/articles_provider.dart';
+import 'package:xene_app/src/providers/auth_provider.dart';
 import 'package:xene_app/src/providers/preset_provider.dart';
+import 'package:xene_app/src/widgets/auth_gate_sheet.dart';
 import 'package:xene_app/src/widgets/preset_dial.dart';
 
 // PROTECTED UI SURFACE - DO NOT REFACTOR CASUALLY.
@@ -793,6 +795,63 @@ class _ArticlesDock extends ConsumerWidget {
             const SizedBox(height: 4),
             body,
           ],
+        ),
+      );
+    }
+
+    // Auth gate: anonymous users see a sign-in prompt on the custom preset.
+    // All other presets (genre-based) are public and unaffected.
+    final isAnon = ref.watch(isAnonymousProvider);
+    if (isAnon && slug == 'custom') {
+      return _DelayedTopFadeIn(
+        key: const ValueKey('articles-auth-gate'),
+        height: dockHeight,
+        child: buildContent(
+          SizedBox(
+            height: sliderHeight,
+            child: Align(
+              alignment: alignRight
+                  ? Alignment.centerRight
+                  : Alignment.centerLeft,
+              child: GestureDetector(
+                onTap: () => showAuthGate(
+                  // _ArticlesDock is a ConsumerWidget so context is available
+                  // via the surrounding build scope — safe to call here.
+                  // ignore: use_build_context_synchronously
+                  context,
+                  featureHint: 'to access editorial picks, curated fresh daily',
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: alignRight
+                      ? CrossAxisAlignment.end
+                      : CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'LOG IN OR CREATE AN ACCOUNT',
+                      textAlign: alignRight ? TextAlign.right : TextAlign.left,
+                      style: const TextStyle(
+                        fontFamily: 'Teko',
+                        fontSize: 11,
+                        color: Color(0xFFFF5500),
+                        letterSpacing: 1.2,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'editorial picks, curated fresh daily',
+                      textAlign: alignRight ? TextAlign.right : TextAlign.left,
+                      style: const TextStyle(
+                        fontFamily: 'Archivo',
+                        fontSize: 10,
+                        color: Color(0xFFAAAAAA),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
         ),
       );
     }
