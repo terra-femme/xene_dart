@@ -63,51 +63,76 @@ class XeneContentModal extends ConsumerWidget {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         Center(
-                          child: Stack(
-                            alignment: Alignment.center,
-                            children: [
-                              ClipRRect(
-                                borderRadius: BorderRadius.circular(16),
-                                child: CachedNetworkImage(
-                                  imageUrl: item.artworkUrl ?? '',
-                                  width: 200,
-                                  height: 200,
-                                  fit: BoxFit.cover,
-                                ),
-                              ),
-                              if (isPlayable)
-                                Material(
-                                  color: Colors.transparent,
-                                  child: InkWell(
-                                    onTap: () {
-                                      print(
-                                        '[UI] Play button tapped for item: ${item.id}',
-                                      );
-                                      ref
-                                          .read(playerProvider.notifier)
-                                          .playTrack(item);
-                                      Navigator.pop(context);
-                                    },
-                                    borderRadius: BorderRadius.circular(50),
-                                    child: Container(
-                                      padding: const EdgeInsets.all(12),
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        color: Colors.black.withValues(
-                                          alpha: 0.4,
-                                        ),
-                                      ),
-                                      child: Icon(
-                                        isPlaying
-                                            ? Icons.pause
-                                            : Icons.play_arrow,
-                                        color: Colors.white,
-                                        size: 48,
+                          child: LayoutBuilder(
+                            builder: (context, artworkConstraints) {
+                              final artworkSize = artworkConstraints.maxWidth
+                                  .clamp(96.0, 200.0)
+                                  .toDouble();
+
+                              XeneResponsiveDebug.values(
+                                'ContentModal.artwork',
+                                {
+                                  'maxWidth': artworkConstraints.maxWidth,
+                                  'artworkSize': artworkSize,
+                                },
+                              );
+
+                              return SizedBox(
+                                key: const ValueKey('contentModalArtwork'),
+                                width: artworkSize,
+                                height: artworkSize,
+                                child: Stack(
+                                  alignment: Alignment.center,
+                                  children: [
+                                    ClipRRect(
+                                      borderRadius: BorderRadius.circular(16),
+                                      child: CachedNetworkImage(
+                                        imageUrl: item.artworkUrl ?? '',
+                                        width: artworkSize,
+                                        height: artworkSize,
+                                        fit: BoxFit.cover,
                                       ),
                                     ),
-                                  ),
+                                    if (isPlayable)
+                                      Material(
+                                        color: Colors.transparent,
+                                        child: InkWell(
+                                          onTap: () {
+                                            print(
+                                              '[UI] Play button tapped for item: ${item.id}',
+                                            );
+                                            ref
+                                                .read(playerProvider.notifier)
+                                                .playTrack(item);
+                                            Navigator.pop(context);
+                                          },
+                                          borderRadius: BorderRadius.circular(
+                                            50,
+                                          ),
+                                          child: Container(
+                                            padding: const EdgeInsets.all(12),
+                                            decoration: BoxDecoration(
+                                              shape: BoxShape.circle,
+                                              color: Colors.black.withValues(
+                                                alpha: 0.4,
+                                              ),
+                                            ),
+                                            child: Icon(
+                                              isPlaying
+                                                  ? Icons.pause
+                                                  : Icons.play_arrow,
+                                              color: Colors.white,
+                                              size: (artworkSize * 0.24)
+                                                  .clamp(32.0, 48.0)
+                                                  .toDouble(),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                  ],
                                 ),
-                            ],
+                              );
+                            },
                           ),
                         ),
                         const SizedBox(height: 24),

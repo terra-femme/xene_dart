@@ -21,7 +21,7 @@ Thumbs.db
 # ── Folders to ignore ───────────────────────────────
 docs/
 audit_reports/
-test/
+/test/
 tools/
 supabase/
 

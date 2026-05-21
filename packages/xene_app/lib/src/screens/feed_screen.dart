@@ -541,6 +541,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
             });
 
             return SizedBox(
+              key: const ValueKey('feedHeaderBand'),
               height: headerHeight,
               width: double.infinity,
               child: Stack(
@@ -586,6 +587,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
             });
 
             return Container(
+              key: const ValueKey('feedControlsBar'),
               height: 32,
               padding: EdgeInsets.symmetric(
                 horizontal: compactControls ? 8 : 16,
@@ -777,6 +779,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
         // ------------------------------------------------------------
         Expanded(
           child: Stack(
+            key: const ValueKey('feedBodyStack'),
             fit: StackFit.expand,
             children: [
               // Cards — fades out during preset transition.

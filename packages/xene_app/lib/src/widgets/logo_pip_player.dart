@@ -159,6 +159,7 @@ class _LogoPipPlayerState extends ConsumerState<LogoPipPlayer>
             });
 
             return Container(
+              key: const ValueKey('logoPipPlayerSurface'),
               width: sheetWidth,
               height: sheetHeight,
               decoration: BoxDecoration(
