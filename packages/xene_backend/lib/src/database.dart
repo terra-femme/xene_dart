@@ -1624,12 +1624,18 @@ class DatabaseService {
   /// Stamp when a platform was last polled for an artist.
   /// Writes to system_cache with key `last_polled:{platform}:{artistName}`.
   /// Mirrors database.py :: set_last_polled.
-  Future<void> setLastPolled(String platform, String artistName) async {
+  ///
+  /// [at] — optional override timestamp. Pass a back-dated value to apply TTL
+  /// jitter so artists do not all expire simultaneously after a cold start.
+  Future<void> setLastPolled(
+    String platform,
+    String artistName, {
+    DateTime? at,
+  }) async {
     final key = 'last_polled:$platform:$artistName';
-    await setSystemCache(key, {
-      'timestamp': DateTime.now().toUtc().toIso8601String(),
-    });
-    _logger.fine('[db] setLastPolled: $artistName ($platform)');
+    final stamp = (at ?? DateTime.now().toUtc()).toIso8601String();
+    await setSystemCache(key, {'timestamp': stamp});
+    _logger.fine('[db] setLastPolled: $artistName ($platform) stamp=$stamp');
   }
 
   /// Read when a platform was last polled for an artist.

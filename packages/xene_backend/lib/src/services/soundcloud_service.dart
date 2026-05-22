@@ -600,6 +600,48 @@ class SoundCloudService {
     }
   }
 
+  /// Search SoundCloud tracks by query string.
+  /// Returns up to [limit] track objects with the fields needed for party submission.
+  Future<List<Map<String, dynamic>>> searchTracks(
+    String query, {
+    int limit = 10,
+  }) async {
+    final token = await _getToken();
+    if (token == null) return [];
+
+    try {
+      final response = await _dio.get<Map<String, dynamic>>(
+        '/tracks',
+        queryParameters: {
+          'q': query,
+          'limit': limit,
+          'linked_partitioning': true,
+        },
+        options: Options(headers: {'Authorization': 'OAuth $token'}),
+      );
+      final collection = (response.data?['collection'] as List? ?? [])
+          .cast<Map<String, dynamic>>();
+      _logger.info('[sc] searchTracks "$query": ${collection.length} results');
+
+      return collection.map((t) {
+        final artworkRaw = t['artwork_url'] as String?;
+        final artwork = artworkRaw?.replaceFirst('-large', '-t500x500');
+        final durationMs = t['duration'] as int? ?? 0;
+        return {
+          'id': t['id']?.toString() ?? '',
+          'title': t['title'] as String? ?? 'Unknown',
+          'artwork_url': artwork,
+          'duration_seconds': (durationMs / 1000).round(),
+          'permalink_url': t['permalink_url'] as String? ?? '',
+          'username': (t['user'] as Map?)?['username'] as String? ?? 'Unknown',
+        };
+      }).toList();
+    } catch (e) {
+      _logger.warning('[sc] searchTracks failed for "$query": $e');
+      return [];
+    }
+  }
+
   /// Resolve a track's stream URL using the official token.
   Future<String?> getStreamUrl(String trackId) async {
     final token = await _getToken();

@@ -17,6 +17,9 @@ import 'package:xene_app/src/screens/preset_playground_screen.dart';
 import 'package:xene_app/src/screens/monitor_screen.dart';
 import 'package:xene_app/src/screens/following_screen.dart';
 import 'package:xene_app/src/screens/profile_screen.dart';
+import 'package:xene_app/src/screens/about_screen.dart';
+import 'package:xene_app/src/screens/game_screen.dart';
+import 'package:xene_app/src/screens/party_screen.dart';
 import 'package:xene_app/src/widgets/xene_header.dart';
 import 'package:xene_app/src/widgets/xene_sidebar.dart';
 import 'package:xene_app/src/widgets/xene_draggable_sheet.dart';
@@ -252,6 +255,18 @@ final _router = GoRouter(
           const _InnerPageLayout(title: 'FOLLOWING', child: FollowingScreen()),
     ),
     GoRoute(
+      path: '/game',
+      builder: (context, state) =>
+          const _InnerPageLayout(title: 'GAME', child: GameScreen()),
+    ),
+    GoRoute(
+      path: '/game/party/:partyId',
+      builder: (context, state) => _InnerPageLayout(
+        title: 'PARTY',
+        child: PartyScreen(partyId: state.pathParameters['partyId']!),
+      ),
+    ),
+    GoRoute(
       path: '/profile',
       builder: (context, state) =>
           const _InnerPageLayout(title: 'PROFILE', child: ProfileScreen()),
@@ -270,6 +285,11 @@ final _router = GoRouter(
       builder: (context, state) => const AdminGuard(
         child: _InnerPageLayout(title: 'MONITOR', child: MonitorScreen()),
       ),
+    ),
+    GoRoute(
+      path: '/about',
+      builder: (context, state) =>
+          const _InnerPageLayout(title: 'ABOUT', child: AboutScreen()),
     ),
     GoRoute(
       path: '/sandbox',

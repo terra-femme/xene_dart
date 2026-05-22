@@ -19,6 +19,7 @@ import 'package:xene_backend/src/services/token_store.dart';
 import 'package:xene_backend/src/services/twitch_service.dart';
 import 'package:xene_backend/src/services/youtube_service.dart';
 import 'package:xene_backend/src/services/discogs_service.dart';
+import 'package:xene_backend/src/services/game_service.dart';
 
 // Wire up the logging package — must run before any route handler.
 // Top-level vars in Dart are lazily initialized, so we reference _loggingReady
@@ -45,6 +46,7 @@ final _bandcamp = BandcampService(_db, analytics: _apiAnalytics);
 final _tokenStore = TokenStore();
 final _twitch = TwitchService(analytics: _apiAnalytics);
 final _discogs = DiscogsService(analytics: _apiAnalytics);
+final _game = GameService(_db);
 
 // Shared Gemini key rotator — one instance for all services so key state is global.
 final _geminiRotator = GeminiKeyRotator(analytics: _apiAnalytics);
@@ -121,7 +123,8 @@ final middleware = (Handler handler) {
       .use(provider<GeminiKeyRotator>((_) => _geminiRotator))
       .use(provider<ApiAnalyticsService>((_) => _apiAnalytics))
       .use(provider<PublicationRepository>((_) => _publicationRepo))
-      .use(provider<PublicationPollerService>((_) => _publicationPoller));
+      .use(provider<PublicationPollerService>((_) => _publicationPoller))
+      .use(provider<GameService>((_) => _game));
 };
 
 Handler _corsMiddleware(Handler handler) {

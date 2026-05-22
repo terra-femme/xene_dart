@@ -60,7 +60,7 @@ class SchedulerService {
               db,
               'bandcamp',
               name,
-              const Duration(hours: 2),
+              const Duration(hours: 24),
               () => bandcamp.getFeed(bc, name),
               cacheDays: 31,
             );
@@ -142,7 +142,7 @@ class SchedulerService {
             db,
             'bandcamp',
             name,
-            const Duration(hours: 2),
+            const Duration(hours: 24),
             () => bandcamp.getFeed(bc, name),
             cacheDays: 31,
           );

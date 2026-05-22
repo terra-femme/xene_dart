@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:math';
+
 import 'package:logging/logging.dart';
 import 'package:xene_domain/xene_domain.dart';
 import 'database.dart';
@@ -7,6 +10,15 @@ final _logger = Logger('feed_cache');
 // In-process coalescing: prevents concurrent requests from each launching an
 // independent live scrape for the same platform/artist.
 final _inFlight = <String, Future<List<FeedItem>>>{};
+
+final _random = Random();
+
+// Bandcamp background-refresh concurrency cap.
+// At ~2,000 unique BC artists, all going stale simultaneously (cold start /
+// overnight idle) would otherwise fire 2,000 concurrent scrapes from one IP.
+// This semaphore limits how many background BC scrapes run at the same time.
+const _kBcBackgroundMaxConcurrent = 3;
+final _bcBackgroundSemaphore = _Semaphore(_kBcBackgroundMaxConcurrent);
 
 /// Check last_polled TTL. If fresh -> return from feed_items DB.
 /// If stale -> serve stale rows immediately and kick off a background refresh.
@@ -182,7 +194,11 @@ Future<List<FeedItem>> _runLiveFetch(
   var completed = false;
   try {
     final items = await fetchLive();
-    await db.setLastPolled(platform, artistName);
+    await db.setLastPolled(
+      platform,
+      artistName,
+      at: DateTime.now().toUtc().subtract(_jitterFor(platform)),
+    );
     final cutoff = _cacheWindowCutoff(cacheDays);
     final hasWindowItems = items.any(
       (item) => item.publishedAt.isAfter(cutoff),
@@ -271,6 +287,7 @@ void _backgroundRefresh(
   Future(() async {
     var claimedHere = false;
     var completed = false;
+    var bcSemaphoreAcquired = false;
     try {
       if (leaseKey == null || leaseOwner == null) {
         final claimKey = _refreshLeaseCacheKey(platform, artistName);
@@ -302,8 +319,19 @@ void _backgroundRefresh(
       _logger.fine(
         '[feed_cache] Background refresh started: $platform/$artistName',
       );
+      if (platform == 'bandcamp') {
+        await _bcBackgroundSemaphore.acquire();
+        bcSemaphoreAcquired = true;
+        _logger.fine(
+          '[feed_cache] BC background semaphore acquired: $artistName',
+        );
+      }
       final items = await fetchLive();
-      await db.setLastPolled(platform, artistName);
+      await db.setLastPolled(
+        platform,
+        artistName,
+        at: DateTime.now().toUtc().subtract(_jitterFor(platform)),
+      );
       final now = DateTime.now().toUtc();
       final cutoff = _cacheWindowCutoff(cacheDays);
       final emptyWindowKey = _emptyWindowCacheKey(
@@ -329,6 +357,12 @@ void _backgroundRefresh(
         '[feed_cache] Background refresh failed: $platform/$artistName - $e',
       );
     } finally {
+      if (bcSemaphoreAcquired) {
+        _bcBackgroundSemaphore.release();
+        _logger.fine(
+          '[feed_cache] BC background semaphore released: $artistName',
+        );
+      }
       if (completed && releaseLease && leaseKey != null && leaseOwner != null) {
         await db.releaseSystemCacheLease(leaseKey!, leaseOwner!);
         _logger.info(
@@ -397,4 +431,37 @@ String? _bodyWithRepostAttribution(Map<String, dynamic> row) {
   if (body == null || body.isEmpty) return attribution;
   if (body.startsWith(attribution)) return body;
   return '$attribution\n$body';
+}
+
+// Jitter window per platform. Bandcamp gets 0\u20134 hours so 2,000 artists spread
+// their expiry times across the window rather than all going stale at once.
+Duration _jitterFor(String platform) {
+  if (platform != 'bandcamp') return Duration.zero;
+  return Duration(minutes: _random.nextInt(240));
+}
+
+// Counting semaphore using a Completer queue \u2014 Dart stdlib has no built-in.
+class _Semaphore {
+  _Semaphore(int permits) : _available = permits;
+
+  int _available;
+  final _queue = <Completer<void>>[];
+
+  Future<void> acquire() async {
+    if (_available > 0) {
+      _available--;
+      return;
+    }
+    final completer = Completer<void>();
+    _queue.add(completer);
+    await completer.future;
+  }
+
+  void release() {
+    if (_queue.isNotEmpty) {
+      _queue.removeAt(0).complete();
+    } else {
+      _available++;
+    }
+  }
 }

@@ -15,7 +15,7 @@ final _logger = Logger('feed.merged');
 // Mirrors feed.py TTL constants per platform.
 const _platformTtls = {
   'soundcloud': Duration(hours: 6),
-  'bandcamp': Duration(hours: 2),
+  'bandcamp': Duration(hours: 24),
   'youtube': Duration(hours: 24),
 };
 
