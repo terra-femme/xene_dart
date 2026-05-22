@@ -5,10 +5,10 @@
 .pub/
 build/
 
-# ── Generated Code (The "Hidden" files) ──────────────
-# We don't upload these because 'build_runner' recreates them
-*.freezed.dart
-*.g.dart
+# ── Generated Code ───────────────────────────────────
+# Freezed/json_serializable generated files are committed so CI can run
+# dart analyze without needing a build_runner step.
+# Regenerate locally with: dart run build_runner build --delete-conflicting-outputs
 
 # ── Secrets ──────────────────────────────────────────
 .env
