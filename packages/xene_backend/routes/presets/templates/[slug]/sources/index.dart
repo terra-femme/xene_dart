@@ -4,6 +4,7 @@ import 'package:dart_frog/dart_frog.dart';
 import 'package:logging/logging.dart';
 import 'package:xene_backend/src/database.dart';
 import 'package:xene_backend/src/services/soundcloud_service.dart';
+import 'package:xene_backend/src/utils/auth_utils.dart';
 import 'package:xene_backend/src/utils/json_utils.dart';
 
 final _logger = Logger('presets.sources');
@@ -29,6 +30,9 @@ Future<Response> _listSources(RequestContext context, String slug) async {
 }
 
 Future<Response> _addSource(RequestContext context, String slug) async {
+  final guard = requireRealUser(context);
+  if (guard != null) return guard;
+
   Map<String, dynamic> body;
   try {
     body = await context.request.json() as Map<String, dynamic>;
@@ -152,6 +156,9 @@ Future<void> _warmSoundCloudSource({
 }
 
 Future<Response> _removeSource(RequestContext context, String slug) async {
+  final guard = requireRealUser(context);
+  if (guard != null) return guard;
+
   final sourceId = context.request.uri.queryParameters['source_id']?.trim();
   if (sourceId == null || sourceId.isEmpty) {
     return Response.json(

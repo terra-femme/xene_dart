@@ -1,4 +1,5 @@
 import 'dart:ui';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/widget_previews.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,6 +9,8 @@ import 'package:xene_app/src/providers/auth_provider.dart';
 import 'package:xene_app/src/providers/feed_provider.dart';
 import 'package:xene_app/src/widgets/auth_gate_sheet.dart';
 import '../providers/soundcloud_connection_provider.dart';
+
+const _forceDevMenu = bool.fromEnvironment('XENE_FORCE_DEV_MENU');
 
 class XeneHeader extends ConsumerStatefulWidget {
   const XeneHeader({super.key});
@@ -53,6 +56,7 @@ class _XeneHeaderState extends ConsumerState<XeneHeader> {
     final scState = ref.watch(soundcloudConnectionProvider);
     final isAnon = ref.watch(isAnonymousProvider);
     final isAdmin = ref.watch(isAdminProvider).valueOrNull ?? false;
+    final showDevMenu = isAdmin || (kDebugMode && _forceDevMenu);
 
     String location;
     try {
@@ -266,7 +270,7 @@ class _XeneHeaderState extends ConsumerState<XeneHeader> {
                         child: Row(
                           children: [
                             navButton('HOME', '/'),
-                            if (isAdmin) devMenuButton(),
+                            if (showDevMenu) devMenuButton(),
                             navButton('FOLLOWING', '/following'),
                             navButton('PROFILE', '/profile'),
                             soundcloudButton(),

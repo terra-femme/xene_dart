@@ -31,6 +31,7 @@ import '../routes/discovery/auto_discover.dart' as discovery_auto_discover;
 import '../routes/connections/status.dart' as connections_status;
 import '../routes/connections/soundcloud/following.dart' as connections_soundcloud_following;
 import '../routes/connections/soundcloud/disconnect.dart' as connections_soundcloud_disconnect;
+import '../routes/auth/soundcloud/nonce.dart' as auth_soundcloud_nonce;
 import '../routes/auth/soundcloud/index.dart' as auth_soundcloud_index;
 import '../routes/auth/soundcloud/done.dart' as auth_soundcloud_done;
 import '../routes/auth/soundcloud/callback.dart' as auth_soundcloud_callback;
@@ -186,7 +187,7 @@ Handler buildConnectionsSoundcloudHandler() {
 Handler buildAuthSoundcloudHandler() {
   final pipeline = const Pipeline();
   final router = Router()
-    ..all('/callback', (context) => auth_soundcloud_callback.onRequest(context,))..all('/done', (context) => auth_soundcloud_done.onRequest(context,))..all('/', (context) => auth_soundcloud_index.onRequest(context,));
+    ..all('/callback', (context) => auth_soundcloud_callback.onRequest(context,))..all('/done', (context) => auth_soundcloud_done.onRequest(context,))..all('/nonce', (context) => auth_soundcloud_nonce.onRequest(context,))..all('/', (context) => auth_soundcloud_index.onRequest(context,));
   return pipeline.addHandler(router);
 }
 

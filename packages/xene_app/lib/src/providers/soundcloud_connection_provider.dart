@@ -4,7 +4,6 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'auth_provider.dart';
 import 'dio_provider.dart';
 
 const _kPollInterval = Duration(seconds: 3);
@@ -71,10 +70,23 @@ class ScConnectionNotifier extends StateNotifier<ScConnectionState> {
   }
 
   Future<void> connect() async {
-    final userId = ref.read(currentUserIdProvider);
-    final uri = Uri.parse('$kBackendUrl/auth/soundcloud?user_id=$userId');
-    if (!await canLaunchUrl(uri)) return;
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
+    try {
+      final dio = ref.read(authenticatedDioProvider);
+      final resp = await dio.post<Map<String, dynamic>>(
+        '/auth/soundcloud/nonce',
+      );
+      final authUrl = resp.data?['auth_url'] as String?;
+      if (authUrl == null) {
+        debugPrint('[scConnection] nonce endpoint returned no auth_url');
+        return;
+      }
+      final uri = Uri.parse(authUrl);
+      if (!await canLaunchUrl(uri)) return;
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (e) {
+      debugPrint('[scConnection] connect error: $e');
+      return;
+    }
     if (state.isPolling) return;
     state = state.copyWith(isPolling: true);
     _pollTimer = Timer.periodic(_kPollInterval, (_) async {

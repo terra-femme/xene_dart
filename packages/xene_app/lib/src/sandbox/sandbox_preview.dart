@@ -24,7 +24,7 @@ class SandboxPreview extends ConsumerWidget {
                 width: 160,
                 decoration: BoxDecoration(
                   border: Border(
-                    right: BorderSide(color: Colors.black.withOpacity(0.05)),
+                    right: BorderSide(color: Colors.black.withValues(alpha: 0.05)),
                   ),
                 ),
                 child: Center(
@@ -62,7 +62,7 @@ class SandboxPreview extends ConsumerWidget {
             child: Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.8),
+                color: Colors.black.withValues(alpha: 0.8),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Column(
@@ -106,7 +106,7 @@ class _MockCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withOpacity(0.05)),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
       ),
       child: Row(
         children: [

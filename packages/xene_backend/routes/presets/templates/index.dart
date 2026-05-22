@@ -1,6 +1,7 @@
 import 'package:dart_frog/dart_frog.dart';
 import 'package:xene_backend/src/database.dart';
 import 'package:xene_backend/src/preset_template_payload.dart';
+import 'package:xene_backend/src/utils/auth_utils.dart';
 import 'package:xene_backend/src/utils/json_utils.dart';
 
 Future<Response> onRequest(RequestContext context) async {
@@ -20,6 +21,9 @@ Future<Response> _listTemplates(RequestContext context) async {
 }
 
 Future<Response> _createTemplate(RequestContext context) async {
+  final guard = requireRealUser(context);
+  if (guard != null) return guard;
+
   final body = await _readJsonBody(context);
   if (body == null) {
     return Response.json(statusCode: 400, body: {'error': 'Invalid JSON body'});

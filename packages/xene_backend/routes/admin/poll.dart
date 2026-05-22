@@ -30,9 +30,10 @@ Future<Response> onRequest(RequestContext context) async {
     return Response.json(statusCode: 401, body: {'error': 'Unauthorized'});
   }
 
-  _logger.info('[admin/poll] Manual poll triggered');
+  final force = context.request.uri.queryParameters['force'] == 'true';
+  _logger.info('[admin/poll] Manual poll triggered (force=$force)');
   final poller = context.read<PublicationPollerService>();
-  final result = await poller.pollAll();
+  final result = await poller.pollAll(force: force);
   _logger.info('[admin/poll] Poll complete: $result');
 
   return Response.json(body: result);

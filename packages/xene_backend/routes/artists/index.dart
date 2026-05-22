@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:dart_frog/dart_frog.dart';
 import 'package:xene_backend/src/database.dart';
+import 'package:xene_backend/src/utils/auth_utils.dart';
 import 'package:xene_backend/src/services/press_scout_service.dart';
 import 'package:xene_backend/src/services/soundcloud_service.dart';
 import 'package:xene_backend/src/utils/json_utils.dart';
@@ -36,6 +37,9 @@ Future<Response> _listArtists(RequestContext context) async {
 }
 
 Future<Response> _createArtist(RequestContext context) async {
+  final guard = requireRealUser(context);
+  if (guard != null) return guard;
+
   final userId = context.read<String>();
 
   final db = context.read<DatabaseService>();
@@ -73,6 +77,13 @@ Future<Response> _createArtist(RequestContext context) async {
     );
   }
 
+  unawaited(
+    db.logArtistAction(
+      userId: userId,
+      artistId: created['id'].toString(),
+      action: 'create',
+    ),
+  );
   // Fire-and-forget press scout for the new artist
   unawaited(_scoutNewArtist(pressScout, db, created));
 

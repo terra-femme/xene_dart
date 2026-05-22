@@ -1,6 +1,7 @@
 import 'package:dart_frog/dart_frog.dart';
 import 'package:xene_backend/src/database.dart';
 import 'package:xene_backend/src/preset_template_payload.dart';
+import 'package:xene_backend/src/utils/auth_utils.dart';
 import 'package:xene_backend/src/utils/json_utils.dart';
 
 Future<Response> onRequest(RequestContext context, String slug) async {
@@ -13,6 +14,9 @@ Future<Response> onRequest(RequestContext context, String slug) async {
 }
 
 Future<Response> _patchTemplate(RequestContext context, String slug) async {
+  final guard = requireRealUser(context);
+  if (guard != null) return guard;
+
   Map<String, dynamic> body;
   try {
     body = await context.request.json() as Map<String, dynamic>;

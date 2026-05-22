@@ -1,6 +1,7 @@
 import 'package:dart_frog/dart_frog.dart';
 import 'package:logging/logging.dart';
 import 'package:xene_backend/src/services/soundcloud_service.dart';
+import 'package:xene_backend/src/utils/auth_utils.dart';
 
 final _logger = Logger('discovery.sc_search');
 
@@ -12,6 +13,9 @@ Future<Response> onRequest(RequestContext context) async {
   if (context.request.method != HttpMethod.get) {
     return Response(statusCode: 405);
   }
+
+  final guard = requireRealUser(context);
+  if (guard != null) return guard;
 
   final query = context.request.uri.queryParameters['q']?.trim() ?? '';
   if (query.isEmpty) {

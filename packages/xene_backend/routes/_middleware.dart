@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:dart_frog/dart_frog.dart';
 import 'package:dio/dio.dart' hide Response;
+import 'package:xene_backend/src/utils/auth_utils.dart';
 import 'package:logging/logging.dart';
 import 'package:xene_backend/src/database.dart';
 import 'package:xene_backend/src/repositories/publication_repository.dart';
@@ -165,7 +166,7 @@ Handler _corsMiddleware(Handler handler) {
 
       return Response.json(
         statusCode: HttpStatus.internalServerError,
-        body: {'error': e.toString()},
+        body: {'error': 'Internal server error'},
         headers: {
           'Access-Control-Allow-Origin': origin,
           'Access-Control-Allow-Headers':
@@ -195,7 +196,7 @@ Handler _jwtMiddleware(Handler handler) {
     }
 
     final path = context.request.uri.path;
-    if (_isJwtExempt(path)) {
+    if (_isJwtExempt(path, context.request.method)) {
       return handler(context);
     }
 
@@ -217,8 +218,13 @@ Handler _jwtMiddleware(Handler handler) {
           body: {'error': 'Invalid or expired token'},
         );
       }
-      print('[JWT] auth ok user=$userId path=$path');
-      return handler(context.provide<String>(() => userId));
+      final isAnon = decodeIsAnonymous(token);
+      print('[JWT] auth ok user=$userId isAnonymous=$isAnon path=$path');
+      return handler(
+        context
+            .provide<String>(() => userId)
+            .provide<IsAnonymous>(() => IsAnonymous(isAnon)),
+      );
     } catch (e) {
       print('[JWT] auth error path=$path: $e');
       return Response.json(
@@ -229,17 +235,22 @@ Handler _jwtMiddleware(Handler handler) {
   };
 }
 
-bool _isJwtExempt(String path) {
-  if (path.startsWith('/auth/')) return true;
-  if (path == '/monitor') return true;
+bool _isJwtExempt(String path, HttpMethod method) {
+  // OAuth callback paths are browser-navigated — no JWT header possible.
+  // /auth/soundcloud/nonce is intentionally NOT exempt: it requires a real JWT.
+  if (path == '/auth/soundcloud') return true;
+  if (path == '/auth/soundcloud/callback') return true;
+  if (path == '/auth/soundcloud/done') return true;
+  // Public infrastructure — no user identity needed.
   if (path.startsWith('/proxy/')) return true;
   if (path.startsWith('/soundcloud/stream')) return true;
   if (path.startsWith('/twitch/')) return true;
-  if (path == '/discovery/auto_discover') return true;
-  if (path == '/discovery/sc_search') return true;
   if (path == '/discovery/status') return true;
-  if (path.startsWith('/press_scout/')) return true;
-  if (path.startsWith('/presets/templates')) return true;
+  // /admin/poll is protected by X-Admin-Secret, not JWT.
   if (path == '/admin/poll') return true;
+  // Template listing is used by the preset dial for anonymous users.
+  // All mutations (POST, PATCH on templates; POST/DELETE on sources) require JWT
+  // and are further guarded by requireRealUser() in each handler.
+  if (path == '/presets/templates' && method == HttpMethod.get) return true;
   return false;
 }

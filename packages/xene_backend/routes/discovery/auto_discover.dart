@@ -2,6 +2,8 @@ import 'package:dart_frog/dart_frog.dart';
 import 'package:logging/logging.dart';
 import 'package:xene_backend/src/services/discovery_service.dart';
 import 'package:xene_backend/src/services/soundcloud_service.dart';
+import 'package:xene_backend/src/utils/auth_utils.dart';
+import 'package:xene_backend/src/utils/rate_limiter.dart';
 
 final _logger = Logger('discovery.auto_discover');
 
@@ -16,6 +18,15 @@ Future<Response> onRequest(RequestContext context) async {
   if (context.request.method != HttpMethod.get) {
     return Response(statusCode: 405);
   }
+
+  final guard = requireRealUser(context);
+  if (guard != null) return guard;
+
+  final rateLimited = checkRateLimit(
+    discoveryRateLimiter,
+    extractClientIp(context),
+  );
+  if (rateLimited != null) return rateLimited;
 
   final params = context.request.uri.queryParameters;
   final name = params['name']?.trim() ?? '';
@@ -102,9 +113,6 @@ Future<Response> onRequest(RequestContext context) async {
   } catch (e, st) {
     _logger.severe('[auto_discover] ✗ UNEXPECTED ERROR: $e');
     _logger.severe('[auto_discover] stacktrace: $st');
-    return Response.json(
-      statusCode: 500,
-      body: {'error': 'Discovery failed: $e'},
-    );
+    return Response.json(statusCode: 500, body: {'error': 'Discovery failed'});
   }
 }
