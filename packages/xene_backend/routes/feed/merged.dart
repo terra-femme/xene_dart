@@ -7,6 +7,7 @@ import 'package:xene_backend/src/feed_cache.dart';
 import 'package:xene_backend/src/services/soundcloud_service.dart';
 import 'package:xene_backend/src/services/youtube_service.dart';
 import 'package:xene_backend/src/services/bandcamp_service.dart';
+import 'package:xene_backend/src/utils/rate_limiter.dart';
 import 'package:xene_domain/xene_domain.dart';
 
 final _logger = Logger('feed.merged');
@@ -31,6 +32,10 @@ Future<Response> onRequest(RequestContext context) async {
     return Response(statusCode: 405);
   }
 
+  final ip = extractClientIp(context);
+  final rateLimited = checkRateLimit(feedMergedRateLimiter, ip);
+  if (rateLimited != null) return rateLimited;
+
   final userId = context.read<String>();
   final params = context.request.uri.queryParameters;
   final page = int.tryParse(params['page'] ?? '1') ?? 1;
@@ -54,6 +59,10 @@ Future<Response> onRequest(RequestContext context) async {
   // BandcampService in-memory cache for all BC artists in this preset.
   // Use sparingly — triggers a full live scrape for every BC artist.
   final forceRefresh = params['force_refresh'] == 'true';
+  if (forceRefresh) {
+    final forceRateLimited = checkRateLimit(forceRefreshRateLimiter, ip);
+    if (forceRateLimited != null) return forceRateLimited;
+  }
   final searchQuery = params['q']?.trim();
 
   final effectiveDate = seedDateParam != null

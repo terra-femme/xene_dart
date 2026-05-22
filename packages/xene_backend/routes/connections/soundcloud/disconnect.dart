@@ -33,7 +33,7 @@ Future<Response> onRequest(RequestContext context) async {
     _logger.severe('[disconnect] Error removing connection: $e');
     return Response.json(
       statusCode: 500,
-      body: {'error': 'Failed to disconnect: $e'},
+      body: {'error': 'Failed to disconnect'},
     );
   }
 }

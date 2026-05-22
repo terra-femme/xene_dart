@@ -7,6 +7,7 @@ import 'package:xene_domain/xene_domain.dart';
 import 'package:xene_backend/src/database.dart';
 import 'package:xene_backend/src/feed_cache.dart';
 import 'package:xene_backend/src/services/discovery_service.dart';
+import 'package:xene_backend/src/utils/auth_utils.dart';
 import 'package:xene_backend/src/services/bandcamp_service.dart';
 import 'package:xene_backend/src/services/press_scout_service.dart';
 import 'package:xene_backend/src/services/soundcloud_service.dart';
@@ -25,6 +26,9 @@ Future<Response> onRequest(RequestContext context) async {
   if (context.request.method != HttpMethod.post) {
     return Response(statusCode: 405);
   }
+
+  final guard = requireRealUser(context);
+  if (guard != null) return guard;
 
   final userId = context.read<String>();
   _logger.info('[save_discovery] userId=$userId');
@@ -211,7 +215,7 @@ Future<Response> onRequest(RequestContext context) async {
     _logger.severe('[save_discovery] Upsert failed for $name: $e');
     return Response.json(
       statusCode: 500,
-      body: {'error': 'Failed to save artist: $e', 'details': e.toString()},
+      body: {'error': 'Failed to save artist'},
     );
   }
 }

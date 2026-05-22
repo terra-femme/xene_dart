@@ -2,6 +2,8 @@ import 'dart:async';
 import 'package:dart_frog/dart_frog.dart';
 import 'package:logging/logging.dart';
 import 'package:xene_backend/src/services/press_scout_service.dart';
+import 'package:xene_backend/src/utils/auth_utils.dart';
+import 'package:xene_backend/src/utils/rate_limiter.dart';
 
 final _logger = Logger('press_scout/run');
 
@@ -12,6 +14,15 @@ Future<Response> onRequest(RequestContext context) async {
   if (context.request.method != HttpMethod.post) {
     return Response(statusCode: 405);
   }
+
+  final guard = requireRealUser(context);
+  if (guard != null) return guard;
+
+  final rateLimited = checkRateLimit(
+    pressScoutRateLimiter,
+    extractClientIp(context),
+  );
+  if (rateLimited != null) return rateLimited;
 
   final scout = context.read<PressScoutService>();
   final presetId = context.request.uri.queryParameters['preset_id']?.trim();

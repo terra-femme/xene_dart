@@ -463,9 +463,10 @@ class DatabaseService {
     final keys = <String>{normalised};
 
     // Drum & Bass — "drum & bass" → "drumbass", "drum and bass" → "drumandbass",
-    // "DnB", neurofunk, darkstep, techstep, drumstep all resolve to 'dnb'.
+    // "DnB", "d&b" → "db", neurofunk, darkstep, techstep, drumstep all resolve to 'dnb'.
     if ((normalised.contains('drum') && normalised.contains('bass')) ||
         normalised.contains('dnb') ||
+        normalised == 'db' ||
         normalised == 'neurofunk' ||
         normalised == 'darkstep' ||
         normalised == 'techstep' ||
@@ -612,6 +613,18 @@ class DatabaseService {
         normalised == 'clubbing') {
       keys.add('dance');
       keys.add('electronic');
+    }
+
+    // Rock — "rock", "indie rock" → "indierock", "hard rock" → "hardrock", "alt-rock"
+    if (normalised.contains('rock') && !normalised.contains('electronic')) {
+      keys.add('rock');
+    }
+
+    // Punk — "punk", "punk rock" → "punkrock", "post-punk" → "postpunk"
+    if (normalised.contains('punk')) {
+      keys.add('punk');
+      keys.add('rock');
+      keys.add('alternative');
     }
 
     return keys;
@@ -1072,6 +1085,7 @@ class DatabaseService {
     try {
       final userId = data['user_id'] as String?;
       final artistData = Map<String, dynamic>.from(data)..remove('user_id');
+      if (userId != null) artistData['created_by'] = userId;
       final response = await client
           .from('artists')
           .insert(artistData)
@@ -1263,6 +1277,27 @@ class DatabaseService {
     } catch (e) {
       _logger.severe('Error unfollowing artist $id: $e');
       return false;
+    }
+  }
+
+  /// Record a create/update/delete action on an artist for audit purposes.
+  /// Non-fatal — a failure here must never abort the caller.
+  Future<void> logArtistAction({
+    required String userId,
+    required String artistId,
+    required String action,
+    Map<String, dynamic>? changedFields,
+  }) async {
+    try {
+      await client.from('artist_audit_log').insert({
+        'user_id': userId,
+        'artist_id': artistId,
+        'action': action,
+        if (changedFields != null && changedFields.isNotEmpty)
+          'changed_fields': changedFields,
+      });
+    } catch (e) {
+      _logger.warning('[db] logArtistAction failed (non-fatal): $e');
     }
   }
 

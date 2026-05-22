@@ -84,23 +84,26 @@ class SchedulerService {
       }
     });
 
-    // Run publication RSS poller 60 seconds after startup so articles are
-    // available before the first user request instead of waiting up to 4 hours.
-    Future<void>.delayed(const Duration(seconds: 60), () async {
-      _logger.info('[Scheduler] Startup publication poller warmup starting');
-      try {
-        final result = await publicationPoller.pollAll();
-        _logger.info(
-          '[Scheduler] Startup publication poller warmup done: '
-          'polled=${result['publications_polled']} '
-          'articles=${result['articles_saved']}',
-        );
-      } catch (e) {
-        _logger.warning(
-          '[Scheduler] Startup publication poller warmup failed: $e',
-        );
-      }
-    });
+    // Run publication RSS poller 60 seconds after startup.
+    // Gated by PUBLICATION_STARTUP_POLL=true so dev restarts don't trigger
+    // unnecessary re-polls. Set the env var in production only.
+    if (Platform.environment['PUBLICATION_STARTUP_POLL'] == 'true') {
+      Future<void>.delayed(const Duration(seconds: 60), () async {
+        _logger.info('[Scheduler] Startup publication poller warmup starting');
+        try {
+          final result = await publicationPoller.pollAll();
+          _logger.info(
+            '[Scheduler] Startup publication poller warmup done: '
+            'polled=${result['publications_polled']} '
+            'articles=${result['articles_saved']}',
+          );
+        } catch (e) {
+          _logger.warning(
+            '[Scheduler] Startup publication poller warmup failed: $e',
+          );
+        }
+      });
+    }
 
     // 1. SoundCloud: Every 8 hours (3x/day)
     // Fix B: use fetchWithCache so last_polled is stamped automatically —

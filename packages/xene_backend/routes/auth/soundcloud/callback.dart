@@ -2,14 +2,18 @@ import 'dart:io';
 
 import 'package:dart_frog/dart_frog.dart';
 import 'package:dio/dio.dart' hide Response;
+import 'package:logging/logging.dart';
 import 'package:xene_backend/src/database.dart';
 import 'package:xene_backend/src/services/token_store.dart';
+import 'package:xene_backend/src/utils/sc_nonce_store.dart';
 
+final _logger = Logger('auth.soundcloud.callback');
 const _kScTokenUrl = 'https://secure.soundcloud.com/oauth/token';
 
 /// GET /auth/soundcloud/callback
-/// SoundCloud redirects here with ?code=...&state=...
-/// state encodes "userId:codeVerifier" set during initiation.
+/// SoundCloud redirects here with ?code=...&state=<nonce>
+/// The nonce is looked up in the in-memory store (single-use, 10-min TTL)
+/// to retrieve the userId and codeVerifier bound at nonce creation time.
 Future<Response> onRequest(RequestContext context) async {
   if (context.request.method != HttpMethod.get) {
     return Response(statusCode: 405);
@@ -26,16 +30,19 @@ Future<Response> onRequest(RequestContext context) async {
     );
   }
 
-  // Unpack state: format is "userId:codeVerifier"
-  final colonIndex = state.indexOf(':');
-  if (colonIndex == -1) {
+  // Consume the nonce — single-use. Returns null if not found or expired.
+  final nonceData = consumeScNonce(state);
+  if (nonceData == null) {
+    _logger.warning('[callback] Nonce not found or expired: state=$state');
     return Response.json(
       statusCode: 400,
-      body: {'error': 'Invalid state format — expected userId:codeVerifier'},
+      body: {
+        'error': 'Invalid or expired OAuth state — please try connecting again',
+      },
     );
   }
-  final userId = state.substring(0, colonIndex);
-  final codeVerifier = state.substring(colonIndex + 1);
+  final userId = nonceData.userId;
+  final codeVerifier = nonceData.codeVerifier;
 
   final clientId = Platform.environment['SC_CLIENT_ID'];
   final clientSecret = Platform.environment['SC_CLIENT_SECRET'];
@@ -81,16 +88,21 @@ Future<Response> onRequest(RequestContext context) async {
     }
 
     final tokenStore = context.read<TokenStore>();
-    final encrypted = tokenStore.encryptToken(accessToken);
+    final encryptedAccess = tokenStore.encryptToken(accessToken);
+    final encryptedRefresh = refreshToken != null
+        ? tokenStore.encryptToken(refreshToken)
+        : null;
 
     final db = context.read<DatabaseService>();
     await db.savePlatformConnection({
       'user_id': userId,
       'platform': 'soundcloud',
-      'encrypted_token': encrypted,
-      if (refreshToken != null) 'refresh_token': refreshToken,
+      'encrypted_token': encryptedAccess,
+      if (encryptedRefresh != null) 'refresh_token': encryptedRefresh,
       if (expiresAt != null) 'expires_at': expiresAt,
     });
+
+    _logger.info('[callback] SC connection saved for user=$userId');
 
     return Response(
       statusCode: 302,
@@ -107,7 +119,7 @@ Future<Response> onRequest(RequestContext context) async {
   } catch (e) {
     return Response.json(
       statusCode: 500,
-      body: {'error': 'Internal error during token storage: $e'},
+      body: {'error': 'Internal error during token storage'},
     );
   }
 }

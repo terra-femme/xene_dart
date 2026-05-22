@@ -147,7 +147,10 @@ Future<Response> onRequest(RequestContext context) async {
     } on DioException catch (e) {
       if (e.response?.statusCode == 401) {
         _logger.warning('[following] SC API 401: ${e.response?.data}');
-        final refreshToken = connection['refresh_token'] as String?;
+        final encryptedRefresh = connection['refresh_token'] as String?;
+        final refreshToken = encryptedRefresh != null
+            ? tokenStore.decryptToken(encryptedRefresh)
+            : null;
         if (refreshToken != null) {
           _logger.info('[following] Token expired, attempting refresh...');
           final newData = await scService.refreshUserToken(refreshToken);
@@ -164,7 +167,8 @@ Future<Response> onRequest(RequestContext context) async {
               'platform': 'soundcloud',
               'encrypted_token': encrypted,
               'updated_at': DateTime.now().toUtc().toIso8601String(),
-              if (newRefresh != null) 'refresh_token': newRefresh,
+              if (newRefresh != null)
+                'refresh_token': tokenStore.encryptToken(newRefresh),
             });
 
             _logger.info('[following] Refresh successful, retrying request');
@@ -191,9 +195,6 @@ Future<Response> onRequest(RequestContext context) async {
       body: {'error': 'SoundCloud API error', 'detail': e.message},
     );
   } catch (e) {
-    return Response.json(
-      statusCode: 500,
-      body: {'error': 'Internal error: $e'},
-    );
+    return Response.json(statusCode: 500, body: {'error': 'Internal error'});
   }
 }

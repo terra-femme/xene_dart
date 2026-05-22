@@ -6,6 +6,8 @@ import '../repositories/publication_repository.dart';
 
 final _logger = Logger('PublicationPollerService');
 
+const _pollTtl = Duration(hours: 2);
+
 /// Fetches RSS feeds for every enabled press_publication and persists the
 /// parsed articles to publication_articles.
 ///
@@ -22,19 +24,45 @@ class PublicationPollerService {
   final Dio _dio;
 
   /// Polls all enabled publications in tier + name order.
+  ///
+  /// When [force] is false (default), publications polled within the last
+  /// [_pollTtl] are skipped — applies to both scheduled and manual runs.
+  /// Pass [force]=true from the admin endpoint to override.
+  ///
   /// Errors on individual publications are swallowed — one bad feed must not
   /// abort the rest of the run.
-  Future<Map<String, dynamic>> pollAll() async {
+  Future<Map<String, dynamic>> pollAll({bool force = false}) async {
     final publications = await _repo.getEnabledPublications();
     _logger.info(
-      '[PublicationPoller] pollAll start: ${publications.length} publications',
+      '[PublicationPoller] pollAll start: ${publications.length} publications'
+      '${force ? " (force=true, TTL skip disabled)" : ""}',
     );
 
     var succeeded = 0;
     var failed = 0;
+    var skipped = 0;
     var articlesTotal = 0;
 
     for (final pub in publications) {
+      if (!force) {
+        final lastPolledStr = pub['last_polled'] as String?;
+        if (lastPolledStr != null) {
+          final lastPolled = DateTime.tryParse(lastPolledStr)?.toUtc();
+          if (lastPolled != null) {
+            final age = DateTime.now().toUtc().difference(lastPolled);
+            if (age < _pollTtl) {
+              final name = pub['name'] as String? ?? 'Unknown';
+              _logger.fine(
+                '[PublicationPoller] $name: skipped '
+                '(polled ${age.inMinutes}m ago, TTL=${_pollTtl.inHours}h)',
+              );
+              skipped++;
+              continue;
+            }
+          }
+        }
+      }
+
       final result = await _pollOne(pub);
       if (result >= 0) {
         succeeded++;
@@ -46,11 +74,12 @@ class PublicationPollerService {
 
     _logger.info(
       '[PublicationPoller] pollAll complete: '
-      'succeeded=$succeeded failed=$failed articles=$articlesTotal',
+      'succeeded=$succeeded failed=$failed skipped=$skipped articles=$articlesTotal',
     );
 
     return {
       'publications_polled': succeeded + failed,
+      'skipped': skipped,
       'succeeded': succeeded,
       'failed': failed,
       'articles_saved': articlesTotal,

@@ -22,6 +22,7 @@ import 'package:xene_app/src/widgets/xene_sidebar.dart';
 import 'package:xene_app/src/widgets/xene_draggable_sheet.dart';
 import 'package:xene_app/src/widgets/logo_pip_player.dart';
 import 'package:xene_app/src/sandbox/sandbox_preview.dart';
+import 'package:xene_app/src/widgets/admin_guard.dart';
 import 'package:xene_app/src/widgets/loading_overlay.dart';
 
 Future<void> main() async {
@@ -257,15 +258,18 @@ final _router = GoRouter(
     ),
     GoRoute(
       path: '/dev/presets',
-      builder: (context, state) => const _InnerPageLayout(
-        title: 'PRESET PLAYGROUND',
-        child: PresetPlaygroundScreen(),
+      builder: (context, state) => const AdminGuard(
+        child: _InnerPageLayout(
+          title: 'PRESET PLAYGROUND',
+          child: PresetPlaygroundScreen(),
+        ),
       ),
     ),
     GoRoute(
       path: '/dev/monitor',
-      builder: (context, state) =>
-          const _InnerPageLayout(title: 'MONITOR', child: MonitorScreen()),
+      builder: (context, state) => const AdminGuard(
+        child: _InnerPageLayout(title: 'MONITOR', child: MonitorScreen()),
+      ),
     ),
     GoRoute(
       path: '/sandbox',
