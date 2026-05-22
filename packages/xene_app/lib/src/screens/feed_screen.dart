@@ -1001,7 +1001,7 @@ class _AnimatingFeedCardState extends ConsumerState<_AnimatingFeedCard>
     }
     return SizeTransition(
       sizeFactor: _size,
-      axisAlignment: -1.0,
+      alignment: Alignment.topCenter,
       child: FadeTransition(
         opacity: _opacity,
         child: XeneFeedCard(item: widget.item, onTap: widget.onTap),

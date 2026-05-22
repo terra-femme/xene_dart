@@ -161,7 +161,7 @@ class _ChannelDialState extends ConsumerState<ChannelDial>
                         shape: BoxShape.circle,
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withOpacity(0.1),
+                            color: Colors.black.withValues(alpha: 0.1),
                             blurRadius: 15,
                             spreadRadius: 2,
                             offset: const Offset(0, 5),
@@ -211,7 +211,7 @@ class _ChannelDialState extends ConsumerState<ChannelDial>
                       fontSize: 28,
                       fontWeight: FontWeight.bold,
                       letterSpacing: 3,
-                      color: activeChannel.themeColor.withOpacity(0.7),
+                      color: activeChannel.themeColor.withValues(alpha: 0.7),
                     ),
                   ),
                 ),

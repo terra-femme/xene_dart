@@ -55,7 +55,7 @@ Future<List<FeedItem>> fetchWithCache(
     // This prevents rapid-fire retry loops when saveFeedItems fails non-fatally
     // (save logged, last_polled stamped, but 0 rows in DB) while keeping the
     // empty window short so users see real data quickly after cache resets.
-    final secondsSincePolled = now.difference(lastPolled!).inSeconds;
+    final secondsSincePolled = now.difference(lastPolled).inSeconds;
     if (secondsSincePolled < 30) {
       _logger.warning(
         '[feed_cache] Cache HIT but 0 rows for $platform/$artistName — '
