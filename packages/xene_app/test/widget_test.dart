@@ -626,7 +626,7 @@ void main() {
         _testApp(
           const Stack(children: [LogoPipPlayer()]),
           overrides: [
-            playerProvider.overrideWith((ref) => _VisiblePlayerNotifier()),
+            playerProvider.overrideWith((ref) => _VisiblePlayerNotifier(ref)),
           ],
         ),
       );
@@ -910,7 +910,7 @@ class _TestArchiveFetchNotifier extends ArchiveFetchNotifier {
 }
 
 class _VisiblePlayerNotifier extends PlayerNotifier {
-  _VisiblePlayerNotifier() {
+  _VisiblePlayerNotifier(super.ref) {
     state = PlayerState(
       currentTrack: _playableLongMetadataFeedItem,
       activePlatform: ActivePlatform.none,

@@ -35,12 +35,19 @@ class GameService {
     );
   }
 
-  /// True if the voting + submission window has closed (past Friday 21:00 UTC).
+  /// True if the voting window has closed (past Friday 21:00 UTC).
+  /// Does NOT gate track submission — use [isSubmissionClosed] for that.
   static bool isWeekClosed(String weekStart) {
     final monday = _parseWeekStart(weekStart);
     final friday = monday.add(const Duration(days: 4));
     final deadline = DateTime.utc(friday.year, friday.month, friday.day, 21);
     return DateTime.now().toUtc().isAfter(deadline);
+  }
+
+  /// True if track submission is closed for a given week.
+  /// Submission is open the entire current week; closes only when the week rolls over.
+  static bool isSubmissionClosed(String weekStart) {
+    return weekStart != currentWeekStart();
   }
 
   /// True if results are visible (past Friday 21:05 UTC).
@@ -319,8 +326,8 @@ class GameService {
       'trackId=${track['sc_track_id']} week=$weekStart',
     );
 
-    if (isWeekClosed(weekStart)) {
-      throw StateError('Submission window is closed for this week');
+    if (isSubmissionClosed(weekStart)) {
+      throw StateError('Submission is only allowed for the current week');
     }
 
     final isMember = await _isMember(partyId, userId);

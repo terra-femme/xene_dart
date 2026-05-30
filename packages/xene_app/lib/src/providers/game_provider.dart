@@ -153,6 +153,25 @@ class WeeklyTracksNotifier
     _logger.info('[game] deleteTrack partyId=$arg trackId=$trackId');
     await refresh();
   }
+
+  Future<String?> exportToScPlaylist(String weekStart) async {
+    final dio = ref.read(authenticatedDioProvider);
+    _logger.info('[game] exportToScPlaylist partyId=$arg week=$weekStart');
+    try {
+      final res = await dio.post<Map<String, dynamic>>(
+        '/game/parties/$arg/export_sc',
+        data: {'week': weekStart},
+      );
+      _logger.info('[game] exportToScPlaylist response: ${res.data}');
+      return res.data?['playlist_url'] as String?;
+    } on DioException catch (e) {
+      _logger.warning(
+        '[game] exportToScPlaylist HTTP error: '
+        'status=${e.response?.statusCode} body=${e.response?.data}',
+      );
+      rethrow;
+    }
+  }
 }
 
 final weeklyTracksProvider =
@@ -174,6 +193,10 @@ class WeeklyTracksState {
   final bool isWeekClosed;
   final bool isResultsVisible;
   final List<MemberTracks> memberTracks;
+
+  /// True when this week's data is the live/current week.
+  /// Submission is open the entire current week, regardless of isWeekClosed.
+  bool get isCurrentWeek => weekStart == _currentWeekStart();
 }
 
 // ── Votes ─────────────────────────────────────────────────────────────────────

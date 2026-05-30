@@ -1,9 +1,12 @@
+import 'dart:developer' as dev;
+
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:xene_domain/xene_domain.dart';
 import 'auth_provider.dart';
 import 'dio_provider.dart';
+import 'feed_frontend_cache.dart';
 import 'preset_provider.dart';
 
 // Recent feed: 30 items is enough for the initial above-fold view.
@@ -84,15 +87,17 @@ DateTime _midnightCutoff(DateTime effectiveDate, int daysBack) {
 final recentFeedProvider = Provider<AsyncValue<List<FeedItem>>>((ref) {
   final effectiveDate = ref.watch(feedEffectiveDateProvider) ?? DateTime.now();
   final cutoff = _midnightCutoff(effectiveDate, 7);
-  return ref
-      .watch(feedProvider)
-      .whenData(
-        (items) => _sortNewestFirst(
-          items
-              .where((i) => !i.publishedAt.toLocal().isBefore(cutoff))
-              .toList(),
-        ),
-      );
+  return ref.watch(feedProvider).whenData((items) {
+    final filtered = _sortNewestFirst(
+      items.where((i) => !i.publishedAt.toLocal().isBefore(cutoff)).toList(),
+    );
+    debugPrint(
+      '[recentFeedProvider] total=${items.length} passed7d=${filtered.length} '
+      'cutoff=${cutoff.toLocal().toIso8601String().substring(0, 10)} '
+      '${items.isNotEmpty ? "newest=${items.first.publishedAt.toLocal().toIso8601String().substring(0, 10)}" : ""}',
+    );
+    return filtered;
+  });
 });
 
 List<FeedItem> _sortNewestFirst(List<FeedItem> items) {
@@ -215,19 +220,56 @@ List<FeedItem> _parseFeedItems(List<dynamic> data, String logTag) {
   return items;
 }
 
+/// Sentinel thrown by [FeedNotifier._fetchFeed] on HTTP 429.
+/// Lets callers differentiate rate-limit from real network errors and
+/// fall back to stale cache rather than propagating an error state.
+class _RateLimitedException implements Exception {
+  const _RateLimitedException();
+  @override
+  String toString() => 'Rate limit exceeded — try again shortly.';
+}
+
 class FeedNotifier extends AsyncNotifier<List<FeedItem>> {
   Dio? _dio;
   String _userId = '';
+
+  // Track items for each phase so background refreshes can merge correctly
+  // without filtering state by platform (which would break if platforms change).
+  List<FeedItem> _fastItems = const []; // SC + YT
+  List<FeedItem> _bcItems = const []; // Bandcamp
 
   @override
   Future<List<FeedItem>> build() async {
     _userId = ref.watch(currentUserIdProvider);
     _dio = ref.watch(authenticatedDioProvider);
     final currentPreset = ref.watch(activePresetSlugProvider);
+    final cache = ref.read(feedFrontendCacheProvider);
+
+    // Suspend until presetDialProvider has resolved.
+    // Returning [] would set _dataReady=true in LoadingOverlay immediately,
+    // causing it to dismiss at 2500ms before real feed content is ready.
+    // Awaiting the future keeps feedProvider in AsyncLoading until the preset
+    // is known. In practice this build is cancelled/restarted by Riverpod
+    // the moment presetDialProvider resolves.
+    final presetAsync = ref.watch(presetDialProvider);
+    if (!presetAsync.hasValue) {
+      debugPrint(
+        '[feedProvider] presetDialProvider loading — suspending build',
+      );
+      try {
+        await ref.read(presetDialProvider.future);
+      } catch (_) {}
+      return const <FeedItem>[];
+    }
+
+    // Reset per-preset phase tracking so background refreshes always merge
+    // against data that belongs to this build's preset.
+    _fastItems = const [];
+    _bcItems = const [];
 
     // Debounce rapid preset switches: each notch click invalidates feedProvider,
-    // queuing multiple concurrent build() calls. Register a dispose flag so that
-    // when this scope is superseded by a newer build, we bail before firing HTTP.
+    // queuing multiple concurrent build() calls. The dispose flag fires when
+    // this scope is superseded so in-flight work can be abandoned early.
     var cancelled = false;
     ref.onDispose(() => cancelled = true);
     await Future<void>.delayed(const Duration(milliseconds: 150));
@@ -236,54 +278,124 @@ class FeedNotifier extends AsyncNotifier<List<FeedItem>> {
     debugPrint(
       '[feedProvider] Initialised - baseUrl=$kBackendUrl user=$_userId preset=$currentPreset',
     );
-
-    // Both requests fire simultaneously.
-    // SC+YT returns in ~300ms (cache hits); BC may take 10s on cold start.
-    debugPrint(
-      '[feedProvider] Phase-1 firing: platforms=soundcloud,youtube zone=recent',
-    );
-    debugPrint(
-      '[feedProvider] Phase-2 firing: platforms=bandcamp zone=recent (concurrent)',
-    );
-    final bcFuture = _fetchFeed(
-      page: 1,
-      presetSlug: currentPreset,
-      zone: 'recent',
-      platforms: 'bandcamp',
-    );
-    final fastItems = await _fetchFeed(
-      page: 1,
-      presetSlug: currentPreset,
-      zone: 'recent',
-      platforms: 'soundcloud,youtube',
+    dev.log(
+      '[feedProvider] build preset=$currentPreset user=$_userId',
+      name: 'FeedProvider',
+      level: 800,
     );
 
-    // Guard: if the preset changed while SC+YT was in flight, discard results.
-    // Without this check the stale HTTP response would still update state and
-    // briefly show wrong-preset cards before the correct build overwrites them.
+    // ── Phase-1: SoundCloud + YouTube ─────────────────────────────────────────
+    final fastResult = cache.get(currentPreset, CacheZone.recentFast);
+
+    if (fastResult.hasData) {
+      // Cache hit (fresh or stale) — use immediately, no HTTP.
+      _fastItems = List<FeedItem>.from(fastResult.items);
+      debugPrint(
+        '[feedProvider] Phase-1 ${fastResult.isStale ? "STALE-HIT" : "HIT"}: '
+        '${_fastItems.length} SC+YT items from cache',
+      );
+      if (fastResult.isStale && !fastResult.isRefreshing) {
+        debugPrint(
+          '[feedProvider] Phase-1 stale — scheduling background refresh',
+        );
+        _scheduleBackgroundRefresh(
+          presetSlug: currentPreset,
+          zone: CacheZone.recentFast,
+          platforms: 'soundcloud,youtube',
+          isCancelledFn: () => cancelled,
+          cache: cache,
+        );
+      }
+    } else {
+      // Cache miss — fetch from backend.
+      debugPrint(
+        '[feedProvider] Phase-1 MISS — fetching: platforms=soundcloud,youtube zone=recent',
+      );
+      try {
+        _fastItems = await _fetchFeed(
+          page: 1,
+          presetSlug: currentPreset,
+          zone: 'recent',
+          platforms: 'soundcloud,youtube',
+        );
+        cache.set(currentPreset, CacheZone.recentFast, _fastItems);
+        debugPrint(
+          '[feedProvider] Phase-1 complete: ${_fastItems.length} SC+YT items — rendering feed now',
+        );
+      } on _RateLimitedException {
+        debugPrint(
+          '[feedProvider] Phase-1 rate-limited (429) — no stale cache, showing empty',
+        );
+        dev.log(
+          '[feedProvider] Phase-1 rate-limited preset=$currentPreset',
+          name: 'FeedProvider',
+          level: 900,
+        );
+        _fastItems = const [];
+      }
+    }
+
+    // Guard: if the preset changed while phase-1 was in flight, abandon.
     if (cancelled || ref.read(activePresetSlugProvider) != currentPreset) {
+      debugPrint('[feedProvider] Phase-1 result discarded — preset changed');
       return const <FeedItem>[];
     }
 
-    debugPrint(
-      '[feedProvider] Phase-1 complete: ${fastItems.length} SC+YT items — rendering feed now',
-    );
+    // ── Phase-2: Bandcamp ─────────────────────────────────────────────────────
+    final bcResult = cache.get(currentPreset, CacheZone.recentBc);
 
-    // BC appends when ready without blocking the initial render.
-    bcFuture
+    if (bcResult.hasData) {
+      // BC also cached — merge and return immediately. Zero HTTP calls total.
+      _bcItems = List<FeedItem>.from(bcResult.items);
+      debugPrint(
+        '[feedProvider] Phase-2 ${bcResult.isStale ? "STALE-HIT" : "HIT"}: '
+        '${_bcItems.length} BC items from cache — returning merged feed',
+      );
+      dev.log(
+        '[feedProvider] full cache hit: fast=${_fastItems.length} bc=${_bcItems.length} '
+        'preset=$currentPreset',
+        name: 'FeedProvider',
+        level: 800,
+      );
+      if (bcResult.isStale && !bcResult.isRefreshing) {
+        debugPrint(
+          '[feedProvider] Phase-2 stale — scheduling background refresh',
+        );
+        _scheduleBackgroundRefresh(
+          presetSlug: currentPreset,
+          zone: CacheZone.recentBc,
+          platforms: 'bandcamp',
+          isCancelledFn: () => cancelled,
+          cache: cache,
+        );
+      }
+      return _sortNewestFirst([..._fastItems, ..._bcItems]);
+    }
+
+    // BC cache miss — fetch async and append when ready (non-blocking).
+    debugPrint(
+      '[feedProvider] Phase-2 MISS — fetching BC async (non-blocking append)',
+    );
+    _fetchFeed(
+          page: 1,
+          presetSlug: currentPreset,
+          zone: 'recent',
+          platforms: 'bandcamp',
+        )
         .then((bcItems) {
-          // Discard if this build was superseded (preset changed mid-flight).
-          if (cancelled) return;
-          debugPrint(
-            '[feedProvider] Phase-2 BC response received: ${bcItems.length} items',
-          );
-          if (ref.read(activePresetSlugProvider) != currentPreset) {
+          if (cancelled ||
+              ref.read(activePresetSlugProvider) != currentPreset) {
             debugPrint(
               '[feedProvider] Phase-2 DISCARDED — preset changed from $currentPreset '
               'to ${ref.read(activePresetSlugProvider)} while BC was loading',
             );
             return;
           }
+          cache.set(currentPreset, CacheZone.recentBc, bcItems);
+          _bcItems = bcItems;
+          debugPrint(
+            '[feedProvider] Phase-2 BC response: ${bcItems.length} items',
+          );
           if (bcItems.isEmpty) {
             debugPrint(
               '[feedProvider] Phase-2 WARNING: BC returned 0 items — nothing to append',
@@ -303,25 +415,40 @@ class FeedNotifier extends AsyncNotifier<List<FeedItem>> {
             'duplicatesSkipped=${bcItems.length - newBcItems.length}',
           );
           if (newBcItems.isNotEmpty) {
-            // Mark new IDs BEFORE updating state so cards read the set on first build.
             final newIds = newBcItems
                 .map((i) => '${i.platform}_${i.id}')
                 .toSet();
             ref.read(newFeedItemIdsProvider.notifier).state = newIds;
             state = AsyncData(_sortNewestFirst([...current, ...newBcItems]));
             debugPrint(
-              '[feedProvider] Phase-2 state updated — total items now '
-              '${(state.valueOrNull ?? []).length} newAnimatingIds=${newIds.length}',
+              '[feedProvider] Phase-2 state updated — total=${(state.valueOrNull ?? []).length} '
+              'newAnimatingIds=${newIds.length}',
+            );
+            dev.log(
+              '[feedProvider] Phase-2 appended ${newBcItems.length} BC items preset=$currentPreset',
+              name: 'FeedProvider',
+              level: 800,
             );
           }
         })
         .catchError((Object e) {
-          debugPrint(
-            '[feedProvider] Phase-2 ERROR (feed still showing SC+YT): $e',
-          );
+          if (e is _RateLimitedException) {
+            debugPrint(
+              '[feedProvider] Phase-2 rate-limited (429) — BC not appended, feed shows SC+YT only',
+            );
+            dev.log(
+              '[feedProvider] Phase-2 rate-limited preset=$currentPreset',
+              name: 'FeedProvider',
+              level: 900,
+            );
+          } else {
+            debugPrint(
+              '[feedProvider] Phase-2 ERROR (feed still showing SC+YT): $e',
+            );
+          }
         });
 
-    return fastItems;
+    return _fastItems;
   }
 
   Dio _getDio() {
@@ -344,15 +471,32 @@ class FeedNotifier extends AsyncNotifier<List<FeedItem>> {
     final effectiveDate = ref.read(feedEffectiveDateProvider);
     final seedDate = effectiveDate?.toIso8601String().substring(0, 10);
     final presetSlug = ref.read(activePresetSlugProvider);
+
+    // Bust frontend cache so fresh data is fetched instead of the stale entry.
+    ref.read(feedFrontendCacheProvider).invalidatePreset(presetSlug);
+    debugPrint('[feedProvider] refresh() — cache invalidated for $presetSlug');
+
     state = const AsyncLoading();
-    state = await AsyncValue.guard(
-      () => _fetchFeed(
-        page: 1,
-        presetSlug: presetSlug,
-        seedDate: seedDate,
-        zone: seedDate == null ? 'recent' : null,
-      ),
-    );
+    state = await AsyncValue.guard(() async {
+      try {
+        return await _fetchFeed(
+          page: 1,
+          presetSlug: presetSlug,
+          seedDate: seedDate,
+          zone: seedDate == null ? 'recent' : null,
+        );
+      } on _RateLimitedException {
+        debugPrint(
+          '[feedProvider] refresh() rate-limited — keeping current state',
+        );
+        dev.log(
+          '[feedProvider] refresh rate-limited preset=$presetSlug',
+          name: 'FeedProvider',
+          level: 900,
+        );
+        return state.valueOrNull ?? const <FeedItem>[];
+      }
+    });
   }
 
   Future<List<FeedItem>> _fetchFeed({
@@ -405,6 +549,17 @@ class FeedNotifier extends AsyncNotifier<List<FeedItem>> {
       );
       return items;
     } on DioException catch (e) {
+      if (e.response?.statusCode == 429) {
+        debugPrint(
+          '[feedProvider] _fetchFeed 429 platforms=${platforms ?? "all"} — throwing _RateLimitedException',
+        );
+        dev.log(
+          '[feedProvider] 429 platforms=${platforms ?? "all"} preset=$presetSlug',
+          name: 'FeedProvider',
+          level: 900,
+        );
+        throw const _RateLimitedException();
+      }
       debugPrint(
         '[feedProvider] DioException status=${e.response?.statusCode} message=${e.message}',
       );
@@ -414,6 +569,79 @@ class FeedNotifier extends AsyncNotifier<List<FeedItem>> {
       debugPrint('[feedProvider] Unexpected error: $e');
       rethrow;
     }
+  }
+
+  /// Fires a background HTTP refresh for [zone] and updates cache + state on
+  /// completion. Safe to call fire-and-forget. Guards against cancelled builds
+  /// and preset changes before touching state.
+  void _scheduleBackgroundRefresh({
+    required String presetSlug,
+    required String zone,
+    required String platforms,
+    required bool Function() isCancelledFn,
+    required FeedFrontendCache cache,
+  }) {
+    cache.markRefreshing(presetSlug, zone);
+    debugPrint(
+      '[feedProvider] bg-refresh START zone=$zone platforms=$platforms preset=$presetSlug',
+    );
+    dev.log(
+      '[feedProvider] bg-refresh start zone=$zone preset=$presetSlug',
+      name: 'FeedProvider',
+      level: 800,
+    );
+    _fetchFeed(
+          page: 1,
+          presetSlug: presetSlug,
+          zone: 'recent',
+          platforms: platforms,
+        )
+        .then((freshItems) {
+          cache.clearRefreshing(presetSlug, zone);
+          if (isCancelledFn() ||
+              ref.read(activePresetSlugProvider) != presetSlug) {
+            debugPrint(
+              '[feedProvider] bg-refresh DISCARDED zone=$zone preset=$presetSlug (preset changed)',
+            );
+            return;
+          }
+          cache.set(presetSlug, zone, freshItems);
+          if (zone == CacheZone.recentFast) _fastItems = freshItems;
+          if (zone == CacheZone.recentBc) _bcItems = freshItems;
+          // Merge both phases from instance state so neither is lost.
+          state = AsyncData(_sortNewestFirst([..._fastItems, ..._bcItems]));
+          debugPrint(
+            '[feedProvider] bg-refresh DONE zone=$zone preset=$presetSlug '
+            '${freshItems.length} items — state updated',
+          );
+          dev.log(
+            '[feedProvider] bg-refresh done zone=$zone ${freshItems.length} items preset=$presetSlug',
+            name: 'FeedProvider',
+            level: 800,
+          );
+        })
+        .catchError((Object e) {
+          cache.clearRefreshing(presetSlug, zone);
+          if (e is _RateLimitedException) {
+            debugPrint(
+              '[feedProvider] bg-refresh rate-limited zone=$zone preset=$presetSlug — keeping stale',
+            );
+            dev.log(
+              '[feedProvider] bg-refresh rate-limited zone=$zone preset=$presetSlug',
+              name: 'FeedProvider',
+              level: 900,
+            );
+          } else {
+            debugPrint(
+              '[feedProvider] bg-refresh ERROR zone=$zone preset=$presetSlug: $e',
+            );
+            dev.log(
+              '[feedProvider] bg-refresh error zone=$zone preset=$presetSlug: $e',
+              name: 'FeedProvider',
+              level: 1000,
+            );
+          }
+        });
   }
 }
 
@@ -443,6 +671,73 @@ class ArchiveFetchNotifier extends AsyncNotifier<List<FeedItem>> {
 
   Future<void> fetchOnce() async {
     if (_fetched) return;
+
+    final cache = ref.read(feedFrontendCacheProvider);
+    final presetSlug = ref.read(activePresetSlugProvider);
+    final archiveResult = cache.get(presetSlug, CacheZone.archive);
+
+    if (archiveResult.isFresh) {
+      // Fresh cache hit — paint the sheet immediately, zero HTTP.
+      final items = List<FeedItem>.from(archiveResult.items);
+      debugPrint(
+        '[archiveFetchProvider] Cache HIT: ${items.length} items preset=$presetSlug — skipping HTTP',
+      );
+      dev.log(
+        '[archiveFetchProvider] cache hit ${items.length} items preset=$presetSlug',
+        name: 'ArchiveFetchProvider',
+        level: 800,
+      );
+      _fetched = true;
+      final isFullFeed = ref.read(feedModeProvider) == FeedMode.fullFeed;
+      // If in full-archive mode but the cache has fewer items than one
+      // full-archive page, it was built from the daily carousel. Full-archive
+      // page 1 must still run so items at positions 0–49 (which may not be
+      // in the carousel window) are not silently skipped.
+      final cacheCoversFullArchive =
+          !isFullFeed || items.length >= _kFullArchivePageLimit;
+      state = AsyncData(items);
+      if (!cacheCoversFullArchive) {
+        debugPrint(
+          '[archiveFetchProvider] Cache HIT but mode=fullFeed with carousel-sized cache '
+          '(${items.length} < $_kFullArchivePageLimit) — fetching page 1 to fill gaps',
+        );
+        _nextPage = 1;
+        _hasMore = true;
+        fetchNextPage(showInitialLoading: false);
+      } else {
+        _nextPage = 2;
+        _hasMore =
+            items.length >=
+            (isFullFeed ? _kFullArchivePageLimit : _kArchivePageLimit);
+      }
+      return;
+    }
+
+    if (archiveResult.isStale) {
+      // Stale-while-revalidate: show stale data instantly, refresh in background.
+      final staleItems = List<FeedItem>.from(archiveResult.items);
+      debugPrint(
+        '[archiveFetchProvider] STALE-HIT: ${staleItems.length} items preset=$presetSlug '
+        '— showing stale, refreshing in background',
+      );
+      dev.log(
+        '[archiveFetchProvider] stale-hit ${staleItems.length} items preset=$presetSlug',
+        name: 'ArchiveFetchProvider',
+        level: 700,
+      );
+      _fetched = true;
+      _nextPage = 1; // refresh from page 1
+      _hasMore = true;
+      state = AsyncData(staleItems);
+      // Fire without await — user sees stale data instantly, state updates when fresh arrives.
+      fetchNextPage(showInitialLoading: false);
+      return;
+    }
+
+    // Cache miss — normal fetch with loading indicator.
+    debugPrint(
+      '[archiveFetchProvider] Cache MISS preset=$presetSlug — fetching',
+    );
     await fetchNextPage(showInitialLoading: true);
   }
 
@@ -483,15 +778,34 @@ class ArchiveFetchNotifier extends AsyncNotifier<List<FeedItem>> {
     }
     result.when(
       data: (items) {
-        final merged = page == 1 ? items : [...existingItems, ...items];
+        final rawMerged = page == 1 ? items : [...existingItems, ...items];
+        final seen = <String>{};
+        final merged = rawMerged
+            .where((i) => seen.add('${i.platform}_${i.id}'))
+            .toList();
         final pageLimit = requestFeedMode == FeedMode.fullFeed
             ? _kFullArchivePageLimit
             : _kArchivePageLimit;
         _hasMore = items.length == pageLimit;
         _nextPage = page + 1;
         state = AsyncData(merged);
+        // Update frontend cache with accumulated archive items.
+        // Stale-while-revalidate: next sheet open for this preset skips HTTP.
+        ref
+            .read(feedFrontendCacheProvider)
+            .set(requestPresetSlug, CacheZone.archive, merged);
+        debugPrint(
+          '[archiveFetchProvider] Cache SET preset=$requestPresetSlug '
+          '${merged.length} archive items (page=$page hasMore=$_hasMore)',
+        );
       },
       error: (error, stackTrace) {
+        debugPrint('[archiveFetchProvider] ERROR page=$page: $error');
+        dev.log(
+          '[archiveFetchProvider] fetch error page=$page: $error',
+          name: 'ArchiveFetchProvider',
+          level: 1000,
+        );
         state = existingItems.isEmpty
             ? AsyncError(error, stackTrace)
             : AsyncData(existingItems);
@@ -553,6 +867,17 @@ class ArchiveFetchNotifier extends AsyncNotifier<List<FeedItem>> {
       );
       return items;
     } on DioException catch (e) {
+      if (e.response?.statusCode == 429) {
+        debugPrint(
+          '[archiveFetchProvider] rate-limited (429) page=$page preset=$presetSlug',
+        );
+        dev.log(
+          '[archiveFetchProvider] 429 page=$page preset=$presetSlug',
+          name: 'ArchiveFetchProvider',
+          level: 900,
+        );
+        throw const _RateLimitedException();
+      }
       debugPrint(
         '[archiveFetchProvider] DioException status=${e.response?.statusCode} message=${e.message}',
       );

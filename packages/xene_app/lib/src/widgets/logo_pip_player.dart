@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:xene_app/src/layout/xene_layout_metrics.dart';
 import 'package:xene_app/src/layout/xene_responsive_debug.dart';
+import 'package:xene_app/src/providers/auth_provider.dart';
 import 'package:xene_app/src/providers/player_provider.dart';
+import 'package:xene_app/src/providers/saved_provider.dart';
+import 'package:xene_app/src/widgets/auth_gate_sheet.dart';
 import 'package:xene_app/src/widgets/soundcloud_embed.dart';
 import 'package:xene_app/src/widgets/youtube_embed.dart';
 
@@ -87,6 +90,15 @@ class _LogoPipPlayerState extends ConsumerState<LogoPipPlayer>
     }
 
     final playerState = ref.watch(playerProvider);
+    final currentTrack = playerState.currentTrack;
+    final isAnon = ref.watch(isAnonymousProvider);
+    ref.watch(savedProvider);
+    final isBookmarked =
+        currentTrack != null &&
+        ref
+                .read(savedProvider.notifier)
+                .matchForUrl(currentTrack.externalUrl) !=
+            null;
     final mediaQuery = MediaQuery.of(context);
     final topPadding = mediaQuery.padding.top;
     final isLandscape = mediaQuery.orientation == Orientation.landscape;
@@ -114,7 +126,7 @@ class _LogoPipPlayerState extends ConsumerState<LogoPipPlayer>
       }
     });
 
-    if (!playerState.isVisible || playerState.currentTrack == null) {
+    if (!playerState.isVisible || currentTrack == null) {
       return const SizedBox.shrink();
     }
 
@@ -198,6 +210,39 @@ class _LogoPipPlayerState extends ConsumerState<LogoPipPlayer>
                               : MainAxisAlignment.end,
                           children: [
                             GestureDetector(
+                              onTap: () async {
+                                if (isAnon) {
+                                  showAuthGate(
+                                    context,
+                                    featureHint: 'to save tracks',
+                                  );
+                                  return;
+                                }
+                                final match = ref
+                                    .read(savedProvider.notifier)
+                                    .matchForUrl(currentTrack.externalUrl);
+                                if (match != null) {
+                                  await ref
+                                      .read(savedProvider.notifier)
+                                      .unbookmark(match.id);
+                                } else {
+                                  await ref
+                                      .read(savedProvider.notifier)
+                                      .bookmarkFeedItem(currentTrack);
+                                }
+                              },
+                              child: Icon(
+                                isBookmarked
+                                    ? Icons.bookmark
+                                    : Icons.bookmark_border,
+                                color: isBookmarked
+                                    ? const Color(0xFF39FF14)
+                                    : iconColor,
+                                size: 16,
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            GestureDetector(
                               onTap: _close,
                               child: Icon(
                                 Icons.close,
@@ -227,13 +272,18 @@ class _LogoPipPlayerState extends ConsumerState<LogoPipPlayer>
                                 clipBehavior: Clip.antiAlias,
                                 child: switch (playerState.activePlatform) {
                                   ActivePlatform.soundcloud => SoundCloudEmbed(
-                                    trackId: playerState.currentTrack!.id,
+                                    key: ValueKey(
+                                      'pip-soundcloud-${currentTrack.id}-${currentTrack.externalUrl}',
+                                    ),
+                                    trackId: currentTrack.id,
                                     isVisual: true,
                                   ),
                                   ActivePlatform.youtube => YouTubeEmbed(
-                                    videoId: playerState.currentTrack!.id,
-                                    externalUrl:
-                                        playerState.currentTrack!.externalUrl,
+                                    key: ValueKey(
+                                      'pip-youtube-${currentTrack.id}-${currentTrack.externalUrl}',
+                                    ),
+                                    videoId: currentTrack.id,
+                                    externalUrl: currentTrack.externalUrl,
                                   ),
                                   ActivePlatform.none =>
                                     const SizedBox.shrink(),

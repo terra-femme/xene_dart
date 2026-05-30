@@ -2,6 +2,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:xene_domain/xene_domain.dart';
 
+import 'history_provider.dart';
+
 enum ActivePlatform { none, soundcloud, youtube }
 
 bool canPlayInApp(FeedItem item) {
@@ -45,11 +47,11 @@ class PlayerState {
 final playerProvider = StateNotifierProvider<PlayerNotifier, PlayerState>((
   ref,
 ) {
-  return PlayerNotifier();
+  return PlayerNotifier(ref);
 });
 
 class PlayerNotifier extends StateNotifier<PlayerState> {
-  PlayerNotifier() : super(PlayerState()) {
+  PlayerNotifier(this._ref) : super(PlayerState()) {
     _audioPlayer.playerStateStream.listen((state) {
       this.state = this.state.copyWith(isPlaying: state.playing);
 
@@ -60,6 +62,7 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     });
   }
 
+  final Ref _ref;
   final AudioPlayer _audioPlayer = AudioPlayer();
 
   Future<void> playTrack(FeedItem item) async {
@@ -70,14 +73,22 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
       return;
     }
 
-    // Explicitly hide PiP before starting the delay to ensure the modal slides down first
-    state = state.copyWith(isVisible: false);
+    _ref.read(historyProvider.notifier).logFeedPlay(item);
 
     final platform = switch (item.platform.toLowerCase()) {
       'soundcloud' => ActivePlatform.soundcloud,
       'youtube' => ActivePlatform.youtube,
       _ => ActivePlatform.none,
     };
+    final shouldMountImmediately = platform == ActivePlatform.soundcloud;
+
+    // SoundCloud autoplay is most reliable when the iframe is mounted while the
+    // browser still associates playback with the user's tap.
+    if (!shouldMountImmediately) {
+      // Explicitly hide PiP before starting the delay to ensure the modal slides
+      // down first for embeds that do not depend on immediate user activation.
+      state = state.copyWith(isVisible: false);
+    }
 
     // Stop current if switching
     if (state.activePlatform != platform &&
@@ -85,20 +96,23 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
       await _audioPlayer.stop();
     }
 
-    // Set track data but keep invisible initially for the cascade effect
+    // Set track data. SoundCloud mounts immediately to preserve mobile autoplay
+    // eligibility; other platforms keep the existing cascade effect.
     state = state.copyWith(
       currentTrack: item,
       activePlatform: platform,
-      isVisible: false,
+      isVisible: shouldMountImmediately,
     );
 
-    // Cascade Delay: Wait for the modal to slide down ~90% (approx 350ms)
-    // before making the PiP player visible and starting its slide-in.
-    Future.delayed(const Duration(milliseconds: 350), () {
-      if (mounted) {
-        state = state.copyWith(isVisible: true);
-      }
-    });
+    if (!shouldMountImmediately) {
+      // Cascade Delay: Wait for the modal to slide down ~90% (approx 350ms)
+      // before making the PiP player visible and starting its slide-in.
+      Future.delayed(const Duration(milliseconds: 350), () {
+        if (mounted) {
+          state = state.copyWith(isVisible: true);
+        }
+      });
+    }
 
     // SoundCloud use case: The Widget handles playback, but we might still want to track state.
     // For now, we only use just_audio if we have a direct streamUrl.

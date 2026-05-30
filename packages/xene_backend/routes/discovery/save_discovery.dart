@@ -464,7 +464,12 @@ Future<void> _scoutSavedArtist(
           'artist_id': artistId,
           'title': art['title'] ?? art['Title'] ?? 'Untitled',
           'url': art['url'] ?? art['URL'] ?? '#',
-          'snippet': art['snippet'] ?? art['Snippet'] ?? 'No snippet available',
+          if ((art['snippet'] ?? art['Snippet'])
+                  ?.toString()
+                  .trim()
+                  .isNotEmpty ==
+              true)
+            'snippet': (art['snippet'] ?? art['Snippet']).toString().trim(),
           'source': art['source'] ?? art['Source'] ?? art['site_tier'],
           'published_at': pubDateVal,
         };

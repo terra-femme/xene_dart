@@ -1,7 +1,7 @@
 import 'package:dart_frog/dart_frog.dart';
 import 'package:logging/logging.dart';
 import 'package:xene_backend/src/services/soundcloud_service.dart';
-import 'package:xene_backend/src/utils/auth_utils.dart';
+import 'package:xene_backend/src/utils/rate_limiter.dart';
 
 final _logger = Logger('discovery.sc_search');
 
@@ -9,13 +9,17 @@ final _logger = Logger('discovery.sc_search');
 /// Searches SoundCloud users by name — the source-of-truth lookup before LLM discovery.
 /// Returns SC user profiles in the same shape as /connections/soundcloud/following candidates.
 /// Does NOT call the LLM or write to the database.
+/// Anonymous users are allowed — searching is read-only. Real-user gate is on save_discovery.
 Future<Response> onRequest(RequestContext context) async {
   if (context.request.method != HttpMethod.get) {
     return Response(statusCode: 405);
   }
 
-  final guard = requireRealUser(context);
-  if (guard != null) return guard;
+  final rateLimited = checkRateLimit(
+    discoveryRateLimiter,
+    extractClientIp(context),
+  );
+  if (rateLimited != null) return rateLimited;
 
   final query = context.request.uri.queryParameters['q']?.trim() ?? '';
   if (query.isEmpty) {

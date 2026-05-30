@@ -829,6 +829,136 @@ class DatabaseService {
     return row;
   }
 
+  Future<Map<String, dynamic>?> addYouTubeSourceToPreset(
+    String slug,
+    String displayName,
+    String youtubeUrl,
+  ) async {
+    try {
+      final template = await getPresetTemplateBySlug(slug);
+      final templateId = template?['id'] as String?;
+      if (templateId == null) return null;
+
+      // No unique index on youtube_url — look up manually before inserting.
+      final existing = await client
+          .from('artists')
+          .select()
+          .eq('youtube_url', youtubeUrl)
+          .maybeSingle();
+
+      final Map<String, dynamic> artist;
+      if (existing != null) {
+        artist = existing;
+        _logger.info(
+          '[db] addYouTubeSourceToPreset: reusing artist id=${artist['id']}',
+        );
+      } else {
+        artist = await client
+            .from('artists')
+            .insert({
+              'name': displayName,
+              'entity_type': 'artist',
+              'youtube_url': youtubeUrl,
+              'youtube_authority': 'HIGH',
+              'manually_verified': true,
+              'confidence': 1.0,
+              'identity_confidence': 'HIGH',
+              'coverage_level': 'COMPLETE',
+              'conflict_state': false,
+              'edges': <dynamic>[],
+            })
+            .select()
+            .single();
+        _logger.info(
+          '[db] addYouTubeSourceToPreset: created artist id=${artist['id']}',
+        );
+      }
+      final artistId = artist['id'] as String;
+
+      final existingSource = await client
+          .from('preset_template_sources')
+          .select()
+          .eq('template_id', templateId)
+          .eq('artist_id', artistId)
+          .maybeSingle();
+
+      if (existingSource != null) {
+        final updated = await client
+            .from('preset_template_sources')
+            .update({
+              'enabled': true,
+              'display_name': displayName,
+              'youtube_url': youtubeUrl,
+            })
+            .eq('id', existingSource['id'])
+            .select()
+            .single();
+        return {'source': updated, 'artist': artist};
+      }
+
+      final inserted = await client
+          .from('preset_template_sources')
+          .insert({
+            'template_id': templateId,
+            'artist_id': artistId,
+            'platform': 'youtube',
+            'display_name': displayName,
+            'youtube_url': youtubeUrl,
+            'enabled': true,
+            'metadata': <String, dynamic>{},
+          })
+          .select()
+          .single();
+      return {'source': inserted, 'artist': artist};
+    } catch (e) {
+      _logger.severe('Error adding YouTube source to preset $slug: $e');
+      return null;
+    }
+  }
+
+  /// Move a source from its current preset to [targetSlug] by updating the
+  /// template_id foreign key. Returns null on success or an error string.
+  Future<String?> movePresetTemplateSource(
+    String sourceId,
+    String targetSlug,
+  ) async {
+    try {
+      final target = await getPresetTemplateBySlug(targetSlug);
+      final targetTemplateId = target?['id'] as String?;
+      if (targetTemplateId == null) return 'Target preset not found';
+
+      final source = await getPresetTemplateSource(sourceId);
+      if (source == null) return 'Source not found';
+
+      // Guard against duplicate (same artist already assigned to target preset).
+      final artistId = source['artist_id'] as String?;
+      if (artistId != null) {
+        final duplicate = await client
+            .from('preset_template_sources')
+            .select('id')
+            .eq('template_id', targetTemplateId)
+            .eq('artist_id', artistId)
+            .maybeSingle();
+        if (duplicate != null) {
+          return 'Artist already exists in target preset';
+        }
+      }
+
+      await client
+          .from('preset_template_sources')
+          .update({'template_id': targetTemplateId})
+          .eq('id', sourceId);
+
+      _logger.info(
+        '[db] movePresetTemplateSource: $sourceId -> template $targetTemplateId ($targetSlug)',
+      );
+      return null;
+    } catch (e) {
+      _logger.severe('Error moving source $sourceId to $targetSlug: $e');
+      return e.toString();
+    }
+  }
+
   Future<bool> removePresetTemplateSource(String slug, String sourceId) async {
     try {
       final template = await getPresetTemplateBySlug(slug);
@@ -1446,6 +1576,36 @@ class DatabaseService {
       _logger.info('[db] updateLastPressScout: stamped $artistId');
     } catch (e) {
       _logger.severe('Error updating last_press_scout_at for $artistId: $e');
+    }
+  }
+
+  // --- Magazine Cover ---
+
+  /// Returns the single active magazine cover row, or null when none exists.
+  /// The `magazine_covers` table is expected to have columns:
+  ///   id, title, dek, aspect_ratio, background_image_url, fallback_image_url,
+  ///   alt_text, published_at, active (bool), motion_layers (jsonb), hotspots (jsonb).
+  Future<Map<String, dynamic>?> getActiveMagazineCover() async {
+    try {
+      final response = await client
+          .from('magazine_covers')
+          .select()
+          .eq('active', true)
+          .order('published_at', ascending: false)
+          .limit(1);
+
+      final rows = List<Map<String, dynamic>>.from(response);
+      if (rows.isEmpty) {
+        _logger.info('[db] getActiveMagazineCover: no active cover');
+        return null;
+      }
+      _logger.info(
+        '[db] getActiveMagazineCover: found cover id=${rows.first['id']}',
+      );
+      return rows.first;
+    } catch (e) {
+      _logger.severe('Error fetching active magazine cover: $e');
+      return null;
     }
   }
 

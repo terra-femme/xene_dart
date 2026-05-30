@@ -50,9 +50,13 @@ class _SoundCloudEmbedState extends State<SoundCloudEmbed> {
   }
 
   String _buildEmbedUrl(String trackId, bool isVisual) {
-    // Playlist IDs are stored as 'playlist-{id}' and need /playlists/.
+    // Full SoundCloud URLs are used for private playlist embeds because they
+    // can include a secret_token query parameter.
     final String resourcePath;
-    if (trackId.startsWith('playlist-')) {
+    if (trackId.startsWith('http://') || trackId.startsWith('https://')) {
+      resourcePath = Uri.encodeComponent(trackId);
+    } else if (trackId.startsWith('playlist-')) {
+      // Playlist IDs are stored as 'playlist-{id}' and need /playlists/.
       final playlistId = trackId.substring('playlist-'.length);
       resourcePath = 'https%3A//api.soundcloud.com/playlists/$playlistId';
     } else {

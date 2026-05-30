@@ -32,9 +32,10 @@ class RateLimiter {
   };
 }
 
-// Feed: generous limit — normal browsing is fine, protects against hammering.
+// Feed: 60/min per user — 3 requests per preset view × 20 preset views/min.
+// Keyed by userId (not IP) so shared NAT / localhost dev doesn't collapse into one bucket.
 final feedMergedRateLimiter = RateLimiter(
-  maxRequests: 30,
+  maxRequests: 60,
   window: Duration(minutes: 1),
 );
 

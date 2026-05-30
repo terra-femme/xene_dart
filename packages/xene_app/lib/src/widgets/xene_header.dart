@@ -9,6 +9,7 @@ import 'package:xene_app/src/providers/auth_provider.dart';
 import 'package:xene_app/src/providers/feed_provider.dart';
 import 'package:xene_app/src/widgets/auth_gate_sheet.dart';
 import '../providers/soundcloud_connection_provider.dart';
+import '../providers/nav_swipe_provider.dart';
 
 const _forceDevMenu = bool.fromEnvironment('XENE_FORCE_DEV_MENU');
 
@@ -81,8 +82,20 @@ class _XeneHeaderState extends ConsumerState<XeneHeader> {
             );
             return;
           }
+          // Sync swipe-nav state so the slide animation goes the right direction
+          // even when the user taps non-linearly (e.g. skips from HOME to ABOUT).
+          final targetIdx = kSwipeNavRoutes.indexOf(path);
+          if (targetIdx >= 0) {
+            final currentIdx = ref.read(navIndexProvider);
+            navGoingForward = targetIdx >= currentIdx;
+            ref.read(navIndexProvider.notifier).state = targetIdx;
+          }
           try {
-            context.go(path);
+            if (path == '/') {
+              context.go(path);
+            } else {
+              context.push(path);
+            }
           } catch (e) {
             // No-op in preview
           }
@@ -188,19 +201,19 @@ class _XeneHeaderState extends ConsumerState<XeneHeader> {
         offset: const Offset(0, 34),
         onSelected: (value) {
           if (value == 'artist') {
-            context.go('/artists');
+            context.push('/artists');
             return;
           }
           if (value == 'network') {
-            context.go('/network');
+            context.push('/network');
             return;
           }
           if (value == 'presets') {
-            context.go('/dev/presets');
+            context.push('/dev/presets');
             return;
           }
           if (value == 'monitor') {
-            context.go('/dev/monitor');
+            context.push('/dev/monitor');
             return;
           }
           if (value == 'test') {
@@ -269,14 +282,16 @@ class _XeneHeaderState extends ConsumerState<XeneHeader> {
                         physics: const BouncingScrollPhysics(),
                         child: Row(
                           children: [
-                            navButton('HOME', '/'),
                             if (showDevMenu) devMenuButton(),
+                            navButton('HOME', '/'),
+                            navButton('ARTICLES', '/articles'),
                             navButton('FOLLOWING', '/following'),
                             navButton('GAME', '/game'),
+                            navButton('CHANNELS', '/channels'),
                             navButton('PROFILE', '/profile'),
-                            soundcloudButton(),
                             navButton('SETTINGS', '/settings'),
                             navButton('ABOUT', '/about'),
+                            soundcloudButton(),
                           ],
                         ),
                       ),

@@ -99,16 +99,20 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
     // provider may already be warm and therefore may not emit again. Restart
     // crawl explicitly so the feed cannot stay frozen after search closes.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || _searchActive || _crawlTicker != null) return;
+      if (!mounted || _searchActive) return;
       final feed = ref.read(filteredFeedProvider);
       if (feed.hasValue && (feed.value?.isNotEmpty ?? false)) {
         debugPrint('[FeedScreen] clearSearch -> restarting crawl');
-        _startCrawl();
+        _startCrawl(); // _startCrawl disposes any existing ticker internally
       }
     });
   }
 
   void _revealFeedAfterData(String reason) {
+    debugPrint(
+      '[FeedScreen] _revealFeedAfterData reason=$reason '
+      'isPresetTransition=$_isPresetTransition feedOpacity=$_feedOpacity',
+    );
     if (!_isPresetTransition && _feedOpacity >= 1.0) return;
 
     _transitionTimeoutTimer?.cancel();
@@ -343,8 +347,9 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
   List<Widget> _buildFeedSlivers(
     List<_FeedDateSection> sections,
     Set<String> newItemIds,
-    Map<String, int> animIndexMap,
-  ) {
+    Map<String, int> animIndexMap, {
+    bool videoMode = false,
+  }) {
     final slivers = <Widget>[];
 
     for (var sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
@@ -369,6 +374,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
                   item: item,
                   onTap: () => showXeneContent(context, item),
                   animIndex: animIndex,
+                  videoMode: videoMode,
                 );
               }, childCount: section.items.length),
             ),
@@ -402,6 +408,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
     final currentArtist = ref.watch(artistFilterProvider);
     final availableArtists = ref.watch(feedArtistsProvider);
     final newItemIds = ref.watch(newFeedItemIdsProvider);
+    final activeSlug = ref.watch(activePresetSlugProvider);
 
     // Fade out cards and reset crawl when preset changes.
     ref.listen(activePresetSlugProvider, (prev, next) {
@@ -446,9 +453,18 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
     // Fade cards back in once new data arrives after a preset switch,
     // and (re)start the autoscroll crawler whenever data settles.
     ref.listen(filteredFeedProvider, (prev, next) {
+      debugPrint(
+        '[FeedScreen.listen] filteredFeed changed '
+        'hasValue=${next.hasValue} isLoading=${next.isLoading} '
+        'count=${next.valueOrNull?.length ?? "n/a"} '
+        'isPresetTransition=$_isPresetTransition feedOpacity=$_feedOpacity',
+      );
       if (_isPresetTransition && next.hasValue && !next.isLoading) {
         if (next.value?.isNotEmpty ?? false) {
           // Real items arrived — end the transition cleanly.
+          debugPrint(
+            '[FeedScreen.listen] non-empty during transition — triggering fade-in',
+          );
           _transitionTimeoutTimer?.cancel();
           Future.delayed(const Duration(milliseconds: 200), () {
             if (mounted) setState(() => _feedOpacity = 1.0);
@@ -480,6 +496,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted &&
               _crawlTicker == null &&
+              !_searchActive &&
               ref.read(revealCompleteProvider)) {
             _startCrawl();
           }
@@ -862,6 +879,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
                               loop.sections,
                               newItemIds,
                               animIndexMap,
+                              videoMode: activeSlug == 'videos',
                             ),
                           ),
                         );
@@ -909,11 +927,13 @@ class _AnimatingFeedCard extends ConsumerStatefulWidget {
     required this.item,
     required this.onTap,
     required this.animIndex,
+    this.videoMode = false,
   });
 
   final FeedItem item;
   final VoidCallback onTap;
   final int animIndex;
+  final bool videoMode;
 
   @override
   ConsumerState<_AnimatingFeedCard> createState() => _AnimatingFeedCardState();
@@ -997,14 +1017,22 @@ class _AnimatingFeedCardState extends ConsumerState<_AnimatingFeedCard>
   @override
   Widget build(BuildContext context) {
     if (!_shouldAnimate) {
-      return XeneFeedCard(item: widget.item, onTap: widget.onTap);
+      return XeneFeedCard(
+        item: widget.item,
+        onTap: widget.onTap,
+        videoMode: widget.videoMode,
+      );
     }
     return SizeTransition(
       sizeFactor: _size,
       alignment: Alignment.topCenter,
       child: FadeTransition(
         opacity: _opacity,
-        child: XeneFeedCard(item: widget.item, onTap: widget.onTap),
+        child: XeneFeedCard(
+          item: widget.item,
+          onTap: widget.onTap,
+          videoMode: widget.videoMode,
+        ),
       ),
     );
   }

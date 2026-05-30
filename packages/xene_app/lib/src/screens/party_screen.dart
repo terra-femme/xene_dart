@@ -1,13 +1,16 @@
 import 'dart:async';
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:xene_domain/xene_domain.dart';
 import '../providers/game_provider.dart';
+import '../providers/soundcloud_connection_provider.dart';
 import '../widgets/soundcloud_embed.dart';
 
 class PartyScreen extends ConsumerStatefulWidget {
@@ -266,14 +269,71 @@ class _InviteSheet extends StatelessWidget {
 
 // ── Weekly tracks tab ─────────────────────────────────────────────────────────
 
+// StateProviders so _WeeklyTracksTab stays a ConsumerWidget (avoids widget-type
+// reconciliation issues on Flutter web when switching between widget base classes).
+final _weeklyFlatViewProvider = StateProvider.family.autoDispose<bool, String>(
+  (_, __) => false,
+);
+final _weeklyExportingProvider = StateProvider.family.autoDispose<bool, String>(
+  (_, __) => false,
+);
+final _archiveExportingProvider = StateProvider.family
+    .autoDispose<bool, (String, String)>((_, __) => false);
+
+String _soundCloudExportErrorMessage(Object e) {
+  if (e is DioException) {
+    final data = e.response?.data;
+    if (data is Map) {
+      final detail = data['detail'] as String?;
+      final serverMsg = data['error'] as String?;
+      return detail ?? serverMsg ?? 'HTTP ${e.response?.statusCode}';
+    }
+    if (data != null) return data.toString();
+    return e.message ?? 'HTTP ${e.response?.statusCode}';
+  }
+  return 'Could not create playlist, try again';
+}
+
 class _WeeklyTracksTab extends ConsumerWidget {
   const _WeeklyTracksTab({required this.partyId});
   final String partyId;
+
+  Future<void> _exportToSc(
+    BuildContext context,
+    WidgetRef ref,
+    String weekStart,
+  ) async {
+    final scState = ref.read(soundcloudConnectionProvider);
+    if (!scState.connected) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Connect your SoundCloud account first')),
+      );
+      return;
+    }
+    ref.read(_weeklyExportingProvider(partyId).notifier).state = true;
+    try {
+      final url = await ref
+          .read(weeklyTracksProvider(partyId).notifier)
+          .exportToScPlaylist(weekStart);
+      if (!context.mounted) return;
+      if (url != null) {
+        await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+      }
+    } catch (e) {
+      if (!context.mounted) return;
+      final msg = _soundCloudExportErrorMessage(e);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    } finally {
+      ref.read(_weeklyExportingProvider(partyId).notifier).state = false;
+    }
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final tracksAsync = ref.watch(weeklyTracksProvider(partyId));
     final votesAsync = ref.watch(weekVotesProvider(partyId));
+    final showFlat = ref.watch(_weeklyFlatViewProvider(partyId));
+    final exporting = ref.watch(_weeklyExportingProvider(partyId));
 
     return tracksAsync.when(
       loading: () =>
@@ -287,30 +347,127 @@ class _WeeklyTracksTab extends ConsumerWidget {
       data: (state) {
         final votes = votesAsync.valueOrNull;
         final tally = votes?.tally;
+        final notifier = ref.read(weeklyTracksProvider(partyId).notifier);
+        final allTracks = state.memberTracks
+            .expand((mt) => mt.tracks.map((t) => (member: mt.member, track: t)))
+            .toList();
+
         return Column(
           children: [
             _WeekStatusBar(state: state, votes: votes),
-            Expanded(
-              child: ListView.separated(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 12,
-                ),
-                itemCount: state.memberTracks.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 16),
-                itemBuilder: (_, i) {
-                  final mt = state.memberTracks[i];
-                  return _MemberSection(
-                    partyId: partyId,
-                    memberTracks: mt,
-                    weekStart: state.weekStart,
-                    isWeekClosed: state.isWeekClosed,
-                    isResultsVisible: state.isResultsVisible,
-                    voteCount: tally?[mt.member.userId],
-                    notifier: ref.read(weeklyTracksProvider(partyId).notifier),
-                  );
-                },
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+              child: Row(
+                children: [
+                  _ViewToggleButton(
+                    label: 'BY MEMBER',
+                    active: !showFlat,
+                    onTap: () =>
+                        ref
+                                .read(_weeklyFlatViewProvider(partyId).notifier)
+                                .state =
+                            false,
+                  ),
+                  const SizedBox(width: 16),
+                  _ViewToggleButton(
+                    label: 'ALL TRACKS',
+                    active: showFlat,
+                    onTap: () =>
+                        ref
+                                .read(_weeklyFlatViewProvider(partyId).notifier)
+                                .state =
+                            true,
+                  ),
+                  const Spacer(),
+                  if (showFlat && allTracks.isNotEmpty)
+                    exporting
+                        ? const SizedBox(
+                            width: 12,
+                            height: 12,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 1.5,
+                              color: Color(0xFFFF5500),
+                            ),
+                          )
+                        : GestureDetector(
+                            onTap: () =>
+                                _exportToSc(context, ref, state.weekStart),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.queue_music,
+                                  size: 14,
+                                  color: Color(0xFFFF5500),
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'SC PLAYLIST',
+                                  style: GoogleFonts.teko(
+                                    fontSize: 13,
+                                    letterSpacing: 0.5,
+                                    color: const Color(0xFFFF5500),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                ],
               ),
+            ),
+            const SizedBox(height: 4),
+            Expanded(
+              child: showFlat
+                  ? allTracks.isEmpty
+                        ? Center(
+                            child: Text(
+                              'No tracks this week',
+                              style: GoogleFonts.dmMono(
+                                color: const Color(0xFFA3A3A3),
+                              ),
+                            ),
+                          )
+                        : ListView.separated(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 20,
+                              vertical: 12,
+                            ),
+                            itemCount: allTracks.length,
+                            separatorBuilder: (_, __) =>
+                                const SizedBox.shrink(),
+                            itemBuilder: (_, i) {
+                              final item = allTracks[i];
+                              return _TrackRow(
+                                track: item.track,
+                                isOwner: item.member.isMe,
+                                isWeekClosed: state.isWeekClosed,
+                                memberUsername: item.member.username,
+                                onDelete: () =>
+                                    notifier.deleteTrack(item.track.id),
+                              );
+                            },
+                          )
+                  : ListView.separated(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 12,
+                      ),
+                      itemCount: state.memberTracks.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 16),
+                      itemBuilder: (_, i) {
+                        final mt = state.memberTracks[i];
+                        return _MemberSection(
+                          partyId: partyId,
+                          memberTracks: mt,
+                          weekStart: state.weekStart,
+                          isWeekClosed: state.isWeekClosed,
+                          isCurrentWeek: state.isCurrentWeek,
+                          isResultsVisible: state.isResultsVisible,
+                          voteCount: tally?[mt.member.userId],
+                          notifier: notifier,
+                        );
+                      },
+                    ),
             ),
             if (!state.isWeekClosed)
               _VoteBar(
@@ -453,6 +610,7 @@ class _MemberSection extends StatelessWidget {
     required this.weekStart,
     required this.isWeekClosed,
     required this.notifier,
+    this.isCurrentWeek = false,
     this.isResultsVisible = false,
     this.voteCount,
   });
@@ -461,6 +619,7 @@ class _MemberSection extends StatelessWidget {
   final MemberTracks memberTracks;
   final String weekStart;
   final bool isWeekClosed;
+  final bool isCurrentWeek;
   final WeeklyTracksNotifier notifier;
   final bool isResultsVisible;
   final int? voteCount;
@@ -515,7 +674,7 @@ class _MemberSection extends StatelessWidget {
                 color: const Color(0xFFA3A3A3),
               ),
             ),
-            if (member.isMe && !isWeekClosed && tracks.length < 5) ...[
+            if (member.isMe && isCurrentWeek && tracks.length < 5) ...[
               const SizedBox(width: 8),
               GestureDetector(
                 onTap: () => _showSubmitSheet(context),
@@ -576,12 +735,14 @@ class _TrackRow extends StatefulWidget {
     required this.isOwner,
     required this.isWeekClosed,
     required this.onDelete,
+    this.memberUsername,
   });
 
   final PartyTrack track;
   final bool isOwner;
   final bool isWeekClosed;
   final VoidCallback onDelete;
+  final String? memberUsername;
 
   @override
   State<_TrackRow> createState() => _TrackRowState();
@@ -627,9 +788,15 @@ class _TrackRowState extends State<_TrackRow> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      if (t.scDurationSeconds != null)
+                      if (widget.memberUsername != null ||
+                          t.scDurationSeconds != null)
                         Text(
-                          _durationLabel(t.scDurationSeconds!),
+                          [
+                            if (widget.memberUsername != null)
+                              widget.memberUsername!,
+                            if (t.scDurationSeconds != null)
+                              _durationLabel(t.scDurationSeconds!),
+                          ].join(' · '),
                           style: GoogleFonts.dmMono(
                             fontSize: 10,
                             color: const Color(0xFFA3A3A3),
@@ -1360,12 +1527,41 @@ class _ArchiveWeekView extends ConsumerWidget {
   final String partyId;
   final String week;
 
+  Future<void> _exportToSc(BuildContext context, WidgetRef ref) async {
+    final scState = ref.read(soundcloudConnectionProvider);
+    if (!scState.connected) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Connect your SoundCloud account first')),
+      );
+      return;
+    }
+
+    final key = (partyId, week);
+    ref.read(_archiveExportingProvider(key).notifier).state = true;
+    try {
+      final url = await ref
+          .read(weeklyTracksProvider(partyId).notifier)
+          .exportToScPlaylist(week);
+      if (!context.mounted) return;
+      if (url != null) {
+        await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+      }
+    } catch (e) {
+      if (!context.mounted) return;
+      final msg = _soundCloudExportErrorMessage(e);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    } finally {
+      ref.read(_archiveExportingProvider(key).notifier).state = false;
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     if (week.isEmpty) return const SizedBox.shrink();
 
     final stateAsync = ref.watch(archiveTracksProvider((partyId, week)));
     final notifier = ref.read(weeklyTracksProvider(partyId).notifier);
+    final exporting = ref.watch(_archiveExportingProvider((partyId, week)));
 
     return stateAsync.when(
       loading: () =>
@@ -1376,20 +1572,120 @@ class _ArchiveWeekView extends ConsumerWidget {
           style: GoogleFonts.dmMono(color: const Color(0xFFA3A3A3)),
         ),
       ),
-      data: (state) => ListView.separated(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-        itemCount: state.memberTracks.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 16),
-        itemBuilder: (_, i) {
-          final mt = state.memberTracks[i];
-          return _MemberSection(
-            partyId: partyId,
-            memberTracks: mt,
-            weekStart: week,
-            isWeekClosed: true,
-            notifier: notifier,
-          );
-        },
+      data: (state) {
+        final allTracks = state.memberTracks
+            .expand((mt) => mt.tracks)
+            .toList(growable: false);
+
+        return Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
+              child: Row(
+                children: [
+                  Text(
+                    '${allTracks.length} TRACKS',
+                    style: GoogleFonts.dmMono(
+                      fontSize: 11,
+                      color: const Color(0xFFA3A3A3),
+                    ),
+                  ),
+                  const Spacer(),
+                  if (allTracks.isNotEmpty)
+                    exporting
+                        ? const SizedBox(
+                            width: 12,
+                            height: 12,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 1.5,
+                              color: Color(0xFFFF5500),
+                            ),
+                          )
+                        : GestureDetector(
+                            onTap: () => _exportToSc(context, ref),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.queue_music,
+                                  size: 14,
+                                  color: Color(0xFFFF5500),
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'SC PLAYLIST',
+                                  style: GoogleFonts.teko(
+                                    fontSize: 13,
+                                    letterSpacing: 0.5,
+                                    color: const Color(0xFFFF5500),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: ListView.separated(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 12,
+                ),
+                itemCount: state.memberTracks.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 16),
+                itemBuilder: (_, i) {
+                  final mt = state.memberTracks[i];
+                  return _MemberSection(
+                    partyId: partyId,
+                    memberTracks: mt,
+                    weekStart: week,
+                    isWeekClosed: true,
+                    notifier: notifier,
+                  );
+                },
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _ViewToggleButton extends StatelessWidget {
+  const _ViewToggleButton({
+    required this.label,
+    required this.active,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool active;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: active ? Colors.black : Colors.transparent,
+          borderRadius: BorderRadius.circular(2),
+          border: Border.all(
+            color: active ? Colors.black : const Color(0xFFD0D0D0),
+            width: 1,
+          ),
+        ),
+        child: Text(
+          label,
+          style: GoogleFonts.teko(
+            fontSize: 13,
+            letterSpacing: 0.8,
+            color: active ? Colors.white : const Color(0xFFA3A3A3),
+          ),
+        ),
       ),
     );
   }
