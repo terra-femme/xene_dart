@@ -1,3 +1,4 @@
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 import 'package:dio/dio.dart';
@@ -37,6 +38,7 @@ class SoundCloudService {
     : _dio = analytics?.trackDio(_createDio(), 'soundcloud') ?? _createDio();
 
   final DatabaseService _db;
+  static const _xenePlaylistTitle = 'XENE Tunes';
 
   // In-memory caches — mirrors soundcloud.py _cache (1h) and _user_id_cache (7d).
   final _trackCache = <String, _ScTrackCacheEntry>{};
@@ -600,6 +602,48 @@ class SoundCloudService {
     }
   }
 
+  /// Search SoundCloud tracks by query string.
+  /// Returns up to [limit] track objects with the fields needed for party submission.
+  Future<List<Map<String, dynamic>>> searchTracks(
+    String query, {
+    int limit = 10,
+  }) async {
+    final token = await _getToken();
+    if (token == null) return [];
+
+    try {
+      final response = await _dio.get<Map<String, dynamic>>(
+        '/tracks',
+        queryParameters: {
+          'q': query,
+          'limit': limit,
+          'linked_partitioning': true,
+        },
+        options: Options(headers: {'Authorization': 'OAuth $token'}),
+      );
+      final collection = (response.data?['collection'] as List? ?? [])
+          .cast<Map<String, dynamic>>();
+      _logger.info('[sc] searchTracks "$query": ${collection.length} results');
+
+      return collection.map((t) {
+        final artworkRaw = t['artwork_url'] as String?;
+        final artwork = artworkRaw?.replaceFirst('-large', '-t500x500');
+        final durationMs = t['duration'] as int? ?? 0;
+        return {
+          'id': t['id']?.toString() ?? '',
+          'title': t['title'] as String? ?? 'Unknown',
+          'artwork_url': artwork,
+          'duration_seconds': (durationMs / 1000).round(),
+          'permalink_url': t['permalink_url'] as String? ?? '',
+          'username': (t['user'] as Map?)?['username'] as String? ?? 'Unknown',
+        };
+      }).toList();
+    } catch (e) {
+      _logger.warning('[sc] searchTracks failed for "$query": $e');
+      return [];
+    }
+  }
+
   /// Resolve a track's stream URL using the official token.
   Future<String?> getStreamUrl(String trackId) async {
     final token = await _getToken();
@@ -623,6 +667,412 @@ class SoundCloudService {
       _logger.warning('Failed to resolve SoundCloud stream for $trackId: $e');
       return null;
     }
+  }
+
+  /// Creates a public SoundCloud playlist on behalf of a user.
+  /// [accessToken] is the user's OAuth token (not the app client token).
+  /// Returns the playlist permalink URL, or null if SC returns no URL.
+  Future<String?> createScPlaylist({
+    required String accessToken,
+    required String title,
+    required List<String> scTrackIds,
+  }) async {
+    if (scTrackIds.isEmpty) return null;
+
+    final trackIds = await _expandScTrackIds(accessToken, scTrackIds);
+    final tracks = trackIds.map((id) => {'id': id}).toList();
+
+    if (tracks.isEmpty) return null;
+
+    _logger.info(
+      '[sc] createScPlaylist title="$title" tracks=${tracks.length}',
+    );
+
+    // Explicitly encode to JSON string so Dio sends the body as-is.
+    // Passing a Map with a custom contentType can cause Dio to form-encode
+    // instead of JSON-encode, which SC rejects with 422.
+    final body = jsonEncode({
+      'playlist': {'title': title, 'sharing': 'public', 'tracks': tracks},
+    });
+
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/playlists',
+      data: body,
+      options: Options(
+        headers: {
+          'Authorization': 'OAuth $accessToken',
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+      ),
+    );
+
+    final url = response.data?['permalink_url'] as String?;
+    _logger.info('[sc] createScPlaylist success: url=$url');
+    return url;
+  }
+
+  /// Adds tracks to a user's persisted private Xene playlist.
+  ///
+  /// SoundCloud playlist updates require sending the complete track list, so we
+  /// fetch the current playlist, merge in new track IDs, then PUT the full list.
+  Future<String?> addToXenePlaylist({
+    required String accessToken,
+    required String userId,
+    required List<String> scTrackIds,
+  }) async {
+    final newTrackIds = await _expandScTrackIds(accessToken, scTrackIds);
+    if (newTrackIds.isEmpty) return null;
+
+    final playlist = await _getOrCreateXenePlaylist(
+      accessToken,
+      userId,
+      initialTrackIds: newTrackIds,
+    );
+    if (playlist == null) return null;
+
+    final playlistId = _resourceIdText(playlist['id']);
+    if (playlistId == null) return null;
+
+    final existingTrackIds = _extractPlaylistTrackIds(playlist).toList();
+    final mergedTrackIds = LinkedHashSet<String>.from(existingTrackIds)
+      ..addAll(newTrackIds);
+    final tracks = mergedTrackIds.map((id) => {'id': id}).toList();
+
+    _logger.info(
+      '[sc] addToXenePlaylist playlist=$playlistId '
+      'existing=${existingTrackIds.length} incoming=${newTrackIds.length} '
+      'merged=${tracks.length}',
+    );
+
+    final body = jsonEncode({
+      'playlist': {
+        'title': _xenePlaylistTitle,
+        'sharing': 'private',
+        'tracks': tracks,
+      },
+    });
+
+    final response = await _dio.put<Map<String, dynamic>>(
+      '/playlists/$playlistId',
+      data: body,
+      options: Options(
+        headers: {
+          'Authorization': 'OAuth $accessToken',
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+      ),
+    );
+
+    final updated = response.data;
+    await _cacheXenePlaylist(userId, updated);
+    return _playlistUrl(updated);
+  }
+
+  /// Replaces the user's private queue playback playlist with this exact track
+  /// order and returns a secret-token URL that the widget can embed.
+  Future<String?> replaceQueuePlaybackPlaylist({
+    required String accessToken,
+    required String userId,
+    required List<String> scTrackIds,
+  }) async {
+    final trackIds = await _expandScTrackIds(accessToken, scTrackIds);
+    if (trackIds.isEmpty) return null;
+
+    final playlist = await _getOrCreateCachedPlaylist(
+      accessToken: accessToken,
+      userId: userId,
+      cachePrefix: 'soundcloud:queue_playlist',
+      title: 'Xene Queue',
+      initialTrackIds: trackIds,
+    );
+    if (playlist == null) return null;
+
+    final playlistId = _resourceIdText(playlist['id']);
+    if (playlistId == null) return null;
+
+    final body = jsonEncode({
+      'playlist': {
+        'title': 'Xene Queue',
+        'sharing': 'private',
+        'tracks': trackIds.map((id) => {'id': id}).toList(),
+      },
+    });
+
+    final response = await _dio.put<Map<String, dynamic>>(
+      '/playlists/$playlistId',
+      data: body,
+      options: Options(
+        headers: {
+          'Authorization': 'OAuth $accessToken',
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+      ),
+    );
+
+    final updated = response.data;
+    await _cachePlaylist(
+      cachePrefix: 'soundcloud:queue_playlist',
+      userId: userId,
+      playlist: updated,
+      fallbackTitle: 'Xene Queue',
+    );
+    return _playlistUrl(updated);
+  }
+
+  Future<Map<String, dynamic>?> _getOrCreateXenePlaylist(
+    String accessToken,
+    String userId, {
+    required List<String> initialTrackIds,
+  }) async {
+    return _getOrCreateCachedPlaylist(
+      accessToken: accessToken,
+      userId: userId,
+      cachePrefix: 'soundcloud:xene_playlist',
+      title: _xenePlaylistTitle,
+      initialTrackIds: initialTrackIds,
+    );
+  }
+
+  Future<Map<String, dynamic>?> _getOrCreateCachedPlaylist({
+    required String accessToken,
+    required String userId,
+    required String cachePrefix,
+    required String title,
+    required List<String> initialTrackIds,
+  }) async {
+    final cached = await _getCachedPlaylist(
+      accessToken: accessToken,
+      userId: userId,
+      cachePrefix: cachePrefix,
+    );
+    if (cached != null) return cached;
+
+    final initialTracks = initialTrackIds.map((id) => {'id': id}).toList();
+    final body = jsonEncode({
+      'playlist': {
+        'title': title,
+        'sharing': 'private',
+        'tracks': initialTracks,
+      },
+    });
+
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/playlists',
+      data: body,
+      options: Options(
+        headers: {
+          'Authorization': 'OAuth $accessToken',
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+      ),
+    );
+
+    final playlist = response.data;
+    await _cachePlaylist(
+      cachePrefix: cachePrefix,
+      userId: userId,
+      playlist: playlist,
+      fallbackTitle: title,
+    );
+    _logger.info('[sc] Created private playlist "$title" for user=$userId');
+    return playlist;
+  }
+
+  Future<Map<String, dynamic>?> _getCachedPlaylist({
+    required String accessToken,
+    required String userId,
+    required String cachePrefix,
+  }) async {
+    final cached = await _db.getSystemCache(
+      _playlistCacheKey(cachePrefix, userId),
+    );
+    final playlistId = _resourceIdText(cached?['playlist_id']);
+    if (playlistId == null) return null;
+
+    try {
+      final response = await _dio.get<Map<String, dynamic>>(
+        '/playlists/$playlistId',
+        queryParameters: {'show_tracks': true},
+        options: Options(headers: {'Authorization': 'OAuth $accessToken'}),
+      );
+      final playlist = response.data;
+      if (playlist != null) {
+        await _cachePlaylist(
+          cachePrefix: cachePrefix,
+          userId: userId,
+          playlist: playlist,
+          fallbackTitle: cached?['title'] as String? ?? 'Xene Playlist',
+        );
+      }
+      return playlist;
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404) {
+        _logger.warning(
+          '[sc] Cached Xene playlist $playlistId not found; recreating',
+        );
+        return null;
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> _cacheXenePlaylist(
+    String userId,
+    Map<String, dynamic>? playlist,
+  ) => _cachePlaylist(
+    cachePrefix: 'soundcloud:xene_playlist',
+    userId: userId,
+    playlist: playlist,
+    fallbackTitle: _xenePlaylistTitle,
+  );
+
+  Future<void> _cachePlaylist({
+    required String cachePrefix,
+    required String userId,
+    required Map<String, dynamic>? playlist,
+    required String fallbackTitle,
+  }) async {
+    final playlistId = _resourceIdText(playlist?['id']);
+    if (playlistId == null) return;
+    await _db.setSystemCache(_playlistCacheKey(cachePrefix, userId), {
+      'playlist_id': playlistId,
+      'playlist_url': _playlistUrl(playlist),
+      'title': playlist?['title'] ?? fallbackTitle,
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    });
+  }
+
+  String _playlistCacheKey(String cachePrefix, String userId) =>
+      '$cachePrefix:$userId';
+
+  String? _playlistUrl(Map<String, dynamic>? playlist) {
+    final permalinkUrl = playlist?['permalink_url'] as String?;
+    if (permalinkUrl == null || permalinkUrl.isEmpty) return null;
+
+    final secretToken = playlist?['secret_token'] as String?;
+    if (secretToken == null || secretToken.isEmpty) return permalinkUrl;
+
+    final uri = Uri.parse(permalinkUrl);
+    return uri
+        .replace(
+          queryParameters: {
+            ...uri.queryParameters,
+            'secret_token': secretToken,
+          },
+        )
+        .toString();
+  }
+
+  Future<List<String>> _expandScTrackIds(
+    String accessToken,
+    List<String> rawIds,
+  ) async {
+    final ids = LinkedHashSet<String>();
+
+    for (final raw in rawIds) {
+      final value = raw.trim();
+      if (value.isEmpty) continue;
+
+      final directId = int.tryParse(value);
+      if (directId != null) {
+        ids.add(directId.toString());
+        continue;
+      }
+
+      final playlistMatch = RegExp(r'^playlist-(\d+)$').firstMatch(value);
+      if (playlistMatch != null) {
+        final playlistId = playlistMatch.group(1)!;
+        ids.addAll(await _getPlaylistTrackIds(accessToken, playlistId));
+        continue;
+      }
+
+      if (value.startsWith('http://') || value.startsWith('https://')) {
+        ids.addAll(await _resolveTrackIdsFromUrl(accessToken, value));
+      }
+    }
+
+    return ids.toList();
+  }
+
+  Future<List<String>> _resolveTrackIdsFromUrl(
+    String accessToken,
+    String url,
+  ) async {
+    try {
+      final response = await _dio.get<Map<String, dynamic>>(
+        '/resolve',
+        queryParameters: {'url': url},
+        options: Options(headers: {'Authorization': 'OAuth $accessToken'}),
+      );
+      final data = response.data;
+      if (data == null) return const [];
+
+      final kind = data['kind'] as String?;
+      final id = data['id'];
+      final idText = _resourceIdText(id);
+      if (kind == 'track' && idText != null) return [idText];
+      if (kind == 'playlist' && idText != null) {
+        final embeddedTracks = _extractPlaylistTrackIds(data).toList();
+        if (embeddedTracks.isNotEmpty) return embeddedTracks;
+        return _getPlaylistTrackIds(accessToken, idText);
+      }
+    } catch (e) {
+      _logger.warning('[sc] Failed to resolve export URL $url: $e');
+    }
+    return const [];
+  }
+
+  Future<List<String>> _getPlaylistTrackIds(
+    String accessToken,
+    String playlistId,
+  ) async {
+    try {
+      final tracksResponse = await _dio.get<dynamic>(
+        '/playlists/$playlistId/tracks',
+        options: Options(headers: {'Authorization': 'OAuth $accessToken'}),
+      );
+      final tracks = _extractTrackIds(tracksResponse.data).toList();
+      if (tracks.isNotEmpty) return tracks;
+
+      final playlistResponse = await _dio.get<Map<String, dynamic>>(
+        '/playlists/$playlistId',
+        queryParameters: {'show_tracks': true},
+        options: Options(headers: {'Authorization': 'OAuth $accessToken'}),
+      );
+      return _extractPlaylistTrackIds(playlistResponse.data).toList();
+    } catch (e) {
+      _logger.warning(
+        '[sc] Failed to expand playlist $playlistId for export: $e',
+      );
+      return const [];
+    }
+  }
+
+  Iterable<String> _extractPlaylistTrackIds(
+    Map<String, dynamic>? playlist,
+  ) sync* {
+    final tracks = playlist?['tracks'];
+    yield* _extractTrackIds(tracks);
+  }
+
+  Iterable<String> _extractTrackIds(Object? tracks) sync* {
+    if (tracks is! List) return;
+    for (final item in tracks) {
+      if (item is Map<String, dynamic>) {
+        final id = _resourceIdText(item['id']);
+        if (id != null) yield id;
+      }
+    }
+  }
+
+  String? _resourceIdText(Object? id) {
+    if (id is int) return id.toString();
+    if (id is String && id.trim().isNotEmpty) return id.trim();
+    return null;
   }
 
   void _parseScTracks(
@@ -835,6 +1285,10 @@ class SoundCloudService {
             externalUrl: pl['permalink_url'] as String,
             publishedAt: publishedAt,
             trackCount: pl['track_count'] as int?,
+            durationSeconds:
+                pl['duration'] is int && (pl['duration'] as int) > 0
+                ? (pl['duration'] as int) ~/ 1000
+                : null,
           ),
         );
 

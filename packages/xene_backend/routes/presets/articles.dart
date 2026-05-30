@@ -56,6 +56,7 @@ Future<Response> _publicationArticles(RequestContext context, int limit) async {
       'url': a['url'] ?? '',
       'snippet': a['snippet'] ?? '',
       'source': pub?['name'],
+      'image_url': a['image_url'],
       'published_at': a['published_at'],
     };
   }).toList();

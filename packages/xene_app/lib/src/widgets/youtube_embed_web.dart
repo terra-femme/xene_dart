@@ -48,7 +48,7 @@ class _YouTubeEmbedState extends State<YouTubeEmbed> {
   String _buildEmbedUrl() {
     final id = _resolveVideoId(widget.videoId, widget.externalUrl);
     if (id == null || id.isEmpty) return widget.externalUrl;
-    return 'https://www.youtube.com/embed/$id?autoplay=1&playsinline=1&rel=0';
+    return 'https://www.youtube.com/embed/$id?autoplay=1&playsinline=1&rel=0&enablejsapi=1';
   }
 
   String? _resolveVideoId(String id, String url) {

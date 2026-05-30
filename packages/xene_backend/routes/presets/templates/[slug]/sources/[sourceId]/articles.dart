@@ -41,18 +41,24 @@ Future<Response> onRequest(
     );
   }
 
+  final artistName = source?['display_name'] as String?;
+
   _logger.info(
-    '[presets.sources.id.articles] Adding article for artist=$artistId title="$title"',
+    '[presets.sources.id.articles] Adding article for artist=$artistId name=$artistName preset=$slug title="$title"',
   );
 
   final saved = await db.saveArtistArticles([
     {
       'artist_id': artistId,
+      if (artistName != null && artistName.isNotEmpty)
+        'artist_name': artistName,
       'title': title,
       'url': url,
-      'snippet': (body['snippet'] as String?)?.trim() ?? '',
+      if ((body['snippet'] as String?)?.trim().isNotEmpty == true)
+        'snippet': (body['snippet'] as String?)!.trim(),
       'source': body['source'],
       'published_at': body['published_at'],
+      'preset_slug': slug,
     },
   ]);
 

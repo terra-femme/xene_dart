@@ -149,6 +149,19 @@ class PresetSourcesNotifier extends StateNotifier<PresetSourcesState> {
     await load(slug);
   }
 
+  Future<void> addYouTubeSource(
+    String slug,
+    String displayName,
+    String youtubeUrl,
+  ) async {
+    final dio = _dio ??= _getDio();
+    await dio.post<Map<String, dynamic>>(
+      '/presets/templates/$slug/sources/youtube',
+      data: {'display_name': displayName, 'youtube_url': youtubeUrl},
+    );
+    await load(slug);
+  }
+
   Future<void> removeSource(String slug, String sourceId) async {
     final dio = _dio ??= _getDio();
     await dio.delete<void>(
@@ -156,6 +169,21 @@ class PresetSourcesNotifier extends StateNotifier<PresetSourcesState> {
       queryParameters: {'source_id': sourceId},
     );
     await load(slug);
+  }
+
+  /// Move [sourceId] from [fromSlug] to [targetSlug]. Reloads the source list
+  /// for [fromSlug] on success so the moved item disappears from the current panel.
+  Future<void> moveSource(
+    String fromSlug,
+    String sourceId,
+    String targetSlug,
+  ) async {
+    final dio = _dio ??= _getDio();
+    await dio.post<void>(
+      '/presets/templates/$fromSlug/sources/$sourceId/move',
+      data: {'target_slug': targetSlug},
+    );
+    await load(fromSlug);
   }
 
   Future<Map<String, dynamic>?> refreshSource(
@@ -274,3 +302,17 @@ class PresetSourcesNotifier extends StateNotifier<PresetSourcesState> {
     return error.toString();
   }
 }
+
+/// Read-only per-slug source list used by the Channels page.
+/// Keyed by preset slug; cached independently from the playground notifier.
+final channelSourcesProvider =
+    FutureProvider.family<List<PresetSource>, String>((ref, slug) async {
+      final dio = ref.read(authenticatedDioProvider);
+      final response = await dio.get<List<dynamic>>(
+        '/presets/templates/$slug/sources',
+      );
+      return (response.data ?? [])
+          .cast<Map<String, dynamic>>()
+          .map(PresetSource.fromJson)
+          .toList();
+    });

@@ -128,7 +128,7 @@ class _FollowingScreenState extends ConsumerState<FollowingScreen> {
   Future<void> _scSearch(String query) async {
     if (query.trim().isEmpty) return;
     ref.read(discoveryProvider.notifier).reset();
-    await ref.read(scSearchProvider.notifier).search(query);
+    ref.read(scSearchProvider.notifier).search(query);
   }
 
   void _showError(ScaffoldMessengerState messenger, String message) {

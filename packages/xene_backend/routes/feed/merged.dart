@@ -7,6 +7,7 @@ import 'package:xene_backend/src/feed_cache.dart';
 import 'package:xene_backend/src/services/soundcloud_service.dart';
 import 'package:xene_backend/src/services/youtube_service.dart';
 import 'package:xene_backend/src/services/bandcamp_service.dart';
+import 'package:xene_backend/src/utils/content_filter.dart';
 import 'package:xene_backend/src/utils/rate_limiter.dart';
 import 'package:xene_domain/xene_domain.dart';
 
@@ -15,7 +16,7 @@ final _logger = Logger('feed.merged');
 // Mirrors feed.py TTL constants per platform.
 const _platformTtls = {
   'soundcloud': Duration(hours: 6),
-  'bandcamp': Duration(hours: 2),
+  'bandcamp': Duration(hours: 24),
   'youtube': Duration(hours: 24),
 };
 
@@ -32,11 +33,12 @@ Future<Response> onRequest(RequestContext context) async {
     return Response(statusCode: 405);
   }
 
-  final ip = extractClientIp(context);
-  final rateLimited = checkRateLimit(feedMergedRateLimiter, ip);
+  // userId is available immediately — auth middleware runs before route handlers.
+  // Keying by userId (not IP) prevents shared-NAT / localhost-dev bucket collapse.
+  final userId = context.read<String>();
+  final rateLimited = checkRateLimit(feedMergedRateLimiter, userId);
   if (rateLimited != null) return rateLimited;
 
-  final userId = context.read<String>();
   final params = context.request.uri.queryParameters;
   final page = int.tryParse(params['page'] ?? '1') ?? 1;
   final limit = int.tryParse(params['limit'] ?? '30') ?? 30;
@@ -60,7 +62,7 @@ Future<Response> onRequest(RequestContext context) async {
   // Use sparingly — triggers a full live scrape for every BC artist.
   final forceRefresh = params['force_refresh'] == 'true';
   if (forceRefresh) {
-    final forceRateLimited = checkRateLimit(forceRefreshRateLimiter, ip);
+    final forceRateLimited = checkRateLimit(forceRefreshRateLimiter, userId);
     if (forceRateLimited != null) return forceRateLimited;
   }
   final searchQuery = params['q']?.trim();
@@ -335,12 +337,26 @@ Future<Response> onRequest(RequestContext context) async {
   }
   _logger.info('[feed.merged] Unique after dedup: ${uniqueItems.length}');
 
+  final filteredItems = uniqueItems.where((i) => !isContentBlocked(i)).toList();
+  final blockedCount = uniqueItems.length - filteredItems.length;
+  if (blockedCount > 0) {
+    final blockedDetails = uniqueItems
+        .where(isContentBlocked)
+        .map(
+          (i) => '"${i.title ?? i.artistName}" (${i.artistName}/${i.platform})',
+        )
+        .join(', ');
+    _logger.info(
+      '[feed.merged] Blocked $blockedCount item(s) by content filter: $blockedDetails',
+    );
+  }
+
   final recentItems = _sortNewestFirst(
-    uniqueItems
+    filteredItems
         .where((item) => !item.publishedAt.toLocal().isBefore(recentCutoff))
         .toList(),
   );
-  final archiveItems = uniqueItems
+  final archiveItems = filteredItems
       .where(
         (item) =>
             item.publishedAt.toLocal().isBefore(recentCutoff) &&

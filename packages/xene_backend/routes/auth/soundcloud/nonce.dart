@@ -61,7 +61,7 @@ Future<Response> onRequest(RequestContext context) async {
       'client_id': clientId,
       'redirect_uri': redirectUri,
       'response_type': 'code',
-      'scope': 'non-expiring offline_access',
+      'scope': '* non-expiring offline_access',
       'state': nonce,
       'code_challenge': codeChallenge,
       'code_challenge_method': 'S256',

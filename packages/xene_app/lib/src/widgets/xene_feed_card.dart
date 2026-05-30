@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/widget_previews.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:xene_domain/xene_domain.dart';
+
+import '../providers/auth_provider.dart';
+import '../providers/queue_provider.dart';
+import 'auth_gate_sheet.dart';
 
 class XeneFeedCard extends StatelessWidget {
   const XeneFeedCard({
@@ -10,14 +15,20 @@ class XeneFeedCard extends StatelessWidget {
     required this.item,
     this.onTap,
     this.dark = false,
+    this.videoMode = false,
   });
 
   final FeedItem item;
   final VoidCallback? onTap;
   final bool dark;
+  final bool videoMode;
 
   @override
   Widget build(BuildContext context) {
+    if (videoMode && item.platform.toLowerCase() == 'youtube') {
+      return _YoutubeVideoCard(item: item, onTap: onTap, dark: dark);
+    }
+
     final cardColor = dark
         ? Colors.white.withValues(alpha: 0.06)
         : Colors.white;
@@ -161,9 +172,61 @@ class XeneFeedCard extends StatelessWidget {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
+
+                      // Duration (SC) or track count (BC) — mutually exclusive
+                      if (item.durationSeconds != null &&
+                          item.durationSeconds! > 0)
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.schedule,
+                                size: 9,
+                                color: snippetColor,
+                              ),
+                              const SizedBox(width: 2),
+                              Text(
+                                _formatDuration(item.durationSeconds!),
+                                style: GoogleFonts.dmMono(
+                                  color: snippetColor,
+                                  fontSize: 9,
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                      else if (item.trackCount != null && item.trackCount! > 1)
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.queue_music,
+                                size: 9,
+                                color: snippetColor,
+                              ),
+                              const SizedBox(width: 2),
+                              Text(
+                                '${item.trackCount} tracks',
+                                style: GoogleFonts.dmMono(
+                                  color: snippetColor,
+                                  fontSize: 9,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                     ],
                   ),
                 ),
+                if ([
+                  'soundcloud',
+                  'youtube',
+                ].contains(item.platform.toLowerCase()))
+                  _SaveButton(item: item),
               ],
             ),
           ),
@@ -171,6 +234,201 @@ class XeneFeedCard extends StatelessWidget {
       },
     );
   }
+}
+
+// ---------------------------------------------------------------------------
+// YouTube video card — full-width 16:9 thumbnail with play button overlay.
+// Used when the active preset is 'videos' and the item is from YouTube.
+// ---------------------------------------------------------------------------
+class _YoutubeVideoCard extends StatelessWidget {
+  const _YoutubeVideoCard({required this.item, this.onTap, this.dark = false});
+
+  final FeedItem item;
+  final VoidCallback? onTap;
+  final bool dark;
+
+  @override
+  Widget build(BuildContext context) {
+    final cardColor = dark
+        ? Colors.white.withValues(alpha: 0.06)
+        : Colors.white;
+    final borderColor = dark
+        ? Colors.white.withValues(alpha: 0.15)
+        : const Color(0xFFE0E0E0);
+    final placeholderColor = dark
+        ? Colors.white.withValues(alpha: 0.08)
+        : const Color(0xFFF5F5F5);
+    final titleColor = dark ? Colors.white : Colors.black;
+    final snippetColor = dark ? Colors.white54 : const Color(0xFF888888);
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(6, 0, 6, 2),
+        decoration: BoxDecoration(
+          color: cardColor,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: borderColor, width: 1),
+        ),
+        foregroundDecoration: item.isNew
+            ? BoxDecoration(
+                borderRadius: BorderRadius.circular(8),
+                border: const Border(
+                  left: BorderSide(color: Color(0xFF00C5A5), width: 2.5),
+                ),
+                color: const Color(0x1100C5A5),
+              )
+            : null,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Thumbnail + play overlay
+            ClipRRect(
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(7),
+              ),
+              child: AspectRatio(
+                aspectRatio: 16 / 9,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    CachedNetworkImage(
+                      imageUrl: item.artworkUrl ?? '',
+                      fit: BoxFit.cover,
+                      placeholder: (context, url) =>
+                          Container(color: placeholderColor),
+                      errorWidget: (context, url, error) => Container(
+                        color: placeholderColor,
+                        child: const Icon(
+                          Icons.ondemand_video,
+                          size: 40,
+                          color: Colors.white54,
+                        ),
+                      ),
+                    ),
+                    // YouTube-style play button
+                    Center(
+                      child: Container(
+                        width: 52,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: const Color(0xCC000000),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(
+                          Icons.play_arrow,
+                          color: Colors.white,
+                          size: 30,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            // Info below thumbnail
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Wrap(
+                          spacing: 4,
+                          runSpacing: 3,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            _TypePill(type: item.contentType),
+                            _PlatformBadge(platform: item.platform),
+                            if (item.publishedAt.isAfter(DateTime.now()))
+                              const _PreOrderStar(),
+                          ],
+                        ),
+                      ),
+                      _SaveButton(item: item),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    item.title ?? 'Untitled',
+                    style: GoogleFonts.archivo(
+                      color: titleColor,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  Text(
+                    item.artistName,
+                    style: GoogleFonts.archivo(
+                      color: snippetColor,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Save-to-queue button
+// ---------------------------------------------------------------------------
+
+class _SaveButton extends ConsumerWidget {
+  const _SaveButton({required this.item});
+  final FeedItem item;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isAnon = ref.watch(isAnonymousProvider);
+    final isQueued = ref.watch(
+      queueProvider.select(
+        (s) => s.items.any((i) => i.externalUrl == item.externalUrl),
+      ),
+    );
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {
+        if (isAnon) {
+          showAuthGate(context, featureHint: 'to save tracks');
+          return;
+        }
+        if (!isQueued) {
+          ref.read(queueProvider.notifier).addItem(item);
+        }
+      },
+      child: Padding(
+        padding: const EdgeInsets.only(left: 6, top: 1),
+        child: Icon(
+          isQueued ? Icons.bookmark : Icons.bookmark_add_outlined,
+          size: 15,
+          color: isQueued ? const Color(0xFF8B5CF6) : const Color(0xFFCCCCCC),
+        ),
+      ),
+    );
+  }
+}
+
+String _formatDuration(int seconds) {
+  final h = seconds ~/ 3600;
+  final m = (seconds % 3600) ~/ 60;
+  final s = seconds % 60;
+  if (h > 0) {
+    return '$h:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  }
+  return '$m:${s.toString().padLeft(2, '0')}';
 }
 
 String? _repostAttribution(FeedItem item) {

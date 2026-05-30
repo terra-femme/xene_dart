@@ -14,6 +14,7 @@ final _logger = Logger('PressScoutService');
 const _kMaxArtistsPerRun = 10;
 const _kScoutIntervalDays = 60;
 const _kDefaultBatchSize = 10;
+const _kUrlCheckTimeout = Duration(seconds: 8);
 
 class PressScoutService {
   PressScoutService(
@@ -295,16 +296,20 @@ Return a JSON object keyed by artist name. Use an empty array for any artist wit
   ) async {
     if (rotator.hasKeys) {
       final articles = await scoutWithGemini(name, entityType);
-      if (articles.isNotEmpty) return articles;
+      if (articles.isNotEmpty) {
+        final verified = await _verifyUrls(articles);
+        if (verified.isNotEmpty) return verified;
+      }
       _logger.warning(
-        '[press_scout] Gemini returned empty for $name — trying OpenRouter fallback',
+        '[press_scout] Gemini returned empty/unverified for $name — trying OpenRouter fallback',
       );
     } else {
       _logger.warning(
         '[press_scout] Gemini client unavailable — trying OpenRouter directly for $name',
       );
     }
-    return _scoutWithOpenRouter(name, entityType);
+    final fallback = await _scoutWithOpenRouter(name, entityType);
+    return _verifyUrls(fallback);
   }
 
   /// Single-artist Gemini scout with key rotation. Used by scoutOnDemand.
@@ -399,10 +404,17 @@ Return as a JSON list: [{"title": "", "url": "", "snippet": "", "site_tier": "Ma
     String? presetSlug,
   }) async {
     if (articles.isNotEmpty) {
+      final verified = await _verifyUrls(articles);
+      if (verified.isEmpty) {
+        _logger.warning(
+          '[press_scout] URL check cleared all articles for $name — skipping save',
+        );
+        return;
+      }
       final dbArticles = _mapArticlesToDb(
         artistId,
         name,
-        articles,
+        verified,
         presetSlug: presetSlug,
       );
       if (await db.saveArtistArticles(dbArticles)) {
@@ -533,6 +545,64 @@ Return as a JSON list: [{"title": "", "url": "", "snippet": "", "site_tier": "Ma
     }
   }
 
+  /// Returns true when [url] resolves to a non-4xx response.
+  /// Strategy: HEAD first; if 405, retry with a range GET to avoid downloading
+  /// the body; on network/timeout errors be lenient (real sites can be slow);
+  /// only reject on explicit 4xx (404, 410, etc.).
+  Future<bool> _checkUrl(String url, Dio dio) async {
+    if (url.isEmpty || url == '#') return false;
+    try {
+      final res = await dio.head<void>(url);
+      return (res.statusCode ?? 500) < 400;
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 405) {
+        try {
+          final res = await dio.get<void>(
+            url,
+            options: Options(
+              headers: {'Range': 'bytes=0-0'},
+              responseType: ResponseType.stream,
+            ),
+          );
+          return (res.statusCode ?? 500) < 400;
+        } catch (_) {
+          return true; // server blocked both methods — treat as live
+        }
+      }
+      if (e.response == null) return true; // network/timeout — be lenient
+      return (e.response!.statusCode ?? 500) < 400;
+    } catch (_) {
+      return true; // unexpected error — be lenient
+    }
+  }
+
+  /// Filters [articles] to only those whose URLs pass [_checkUrl].
+  /// Checks are run in parallel. Dead links are logged and dropped.
+  Future<List<Map<String, dynamic>>> _verifyUrls(
+    List<Map<String, dynamic>> articles,
+  ) async {
+    if (articles.isEmpty) return [];
+    final dio = Dio()
+      ..options.connectTimeout = _kUrlCheckTimeout
+      ..options.receiveTimeout = _kUrlCheckTimeout
+      ..options.sendTimeout = _kUrlCheckTimeout;
+
+    final results = await Future.wait(
+      articles.map((art) async {
+        final url = (art['url'] ?? art['URL'] ?? '').toString();
+        final ok = await _checkUrl(url, dio);
+        if (!ok) _logger.warning('[press_scout] URL dead — dropping: $url');
+        return ok ? art : null;
+      }),
+    );
+
+    final verified = results.whereType<Map<String, dynamic>>().toList();
+    _logger.info(
+      '[press_scout] URL check: ${verified.length}/${articles.length} passed',
+    );
+    return verified;
+  }
+
   List<Map<String, dynamic>> _mapArticlesToDb(
     String artistId,
     String artistName,
@@ -554,7 +624,9 @@ Return as a JSON list: [{"title": "", "url": "", "snippet": "", "site_tier": "Ma
         'artist_name': artistName,
         'title': art['title'] ?? art['Title'] ?? 'Untitled',
         'url': art['url'] ?? art['URL'] ?? '#',
-        'snippet': art['snippet'] ?? art['Snippet'] ?? 'No snippet available',
+        if ((art['snippet'] ?? art['Snippet'])?.toString().trim().isNotEmpty ==
+            true)
+          'snippet': (art['snippet'] ?? art['Snippet']).toString().trim(),
         'source':
             art['source'] ??
             art['Source'] ??

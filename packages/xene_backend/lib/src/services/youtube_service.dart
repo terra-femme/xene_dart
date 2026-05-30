@@ -181,66 +181,89 @@ class YouTubeService {
       final uploadsPlaylist = await _getUploadsPlaylistId(channelId, key);
       if (uploadsPlaylist == null || uploadsPlaylist.isEmpty) return [];
 
-      final videosResp = await _dio.get<Map<String, dynamic>>(
-        '$_youtubeApiBase/playlistItems',
-        queryParameters: {
-          'part': 'snippet,contentDetails',
-          'playlistId': uploadsPlaylist,
-          'maxResults': 25,
-          'key': key,
-        },
-      );
-
-      final entries = videosResp.data?['items'] as List? ?? [];
+      // Paginate newest-first until every item in a page pre-dates the 31d window.
+      // Early-exit means a slow channel costs 1 API call; a daily-upload channel
+      // like COLORS costs 2-3. Safety cap: 5 pages × 50 = 250 items max.
+      final cutoff = DateTime.now().toUtc().subtract(const Duration(days: 31));
       final items = <FeedItem>[];
-      for (final raw in entries) {
-        if (raw is! Map) continue;
-        final snippet = raw['snippet'] as Map?;
-        final contentDetails = raw['contentDetails'] as Map?;
-        final resourceId = snippet?['resourceId'] as Map?;
-        final videoId =
-            contentDetails?['videoId']?.toString() ??
-            resourceId?['videoId']?.toString();
-        final title = snippet?['title']?.toString();
-        final published =
-            contentDetails?['videoPublishedAt']?.toString() ??
-            snippet?['publishedAt']?.toString();
-        if (videoId == null || title == null || published == null) continue;
+      String? pageToken;
+      var pagesFetched = 0;
+      const maxPages = 5;
 
-        final thumbnails = snippet?['thumbnails'] as Map?;
-        String? artworkUrl;
-        for (final key in ['maxres', 'standard', 'high', 'medium', 'default']) {
-          final thumb = thumbnails?[key] as Map?;
-          artworkUrl = thumb?['url']?.toString();
-          if (artworkUrl != null && artworkUrl.isNotEmpty) break;
+      do {
+        final videosResp = await _dio.get<Map<String, dynamic>>(
+          '$_youtubeApiBase/playlistItems',
+          queryParameters: {
+            'part': 'snippet,contentDetails',
+            'playlistId': uploadsPlaylist,
+            'maxResults': 50,
+            'key': key,
+            if (pageToken != null) 'pageToken': pageToken,
+          },
+        );
+
+        final entries = videosResp.data?['items'] as List? ?? [];
+        pageToken = videosResp.data?['nextPageToken'] as String?;
+        pagesFetched++;
+
+        var hitCutoff = false;
+        for (final raw in entries) {
+          if (raw is! Map) continue;
+          final snippet = raw['snippet'] as Map?;
+          final contentDetails = raw['contentDetails'] as Map?;
+          final resourceId = snippet?['resourceId'] as Map?;
+          final videoId =
+              contentDetails?['videoId']?.toString() ??
+              resourceId?['videoId']?.toString();
+          final title = snippet?['title']?.toString();
+          final published =
+              contentDetails?['videoPublishedAt']?.toString() ??
+              snippet?['publishedAt']?.toString();
+          if (videoId == null || title == null || published == null) continue;
+
+          final parsedDate = DateTime.parse(published);
+          // Items come back newest-first; once one is too old, all remaining are too.
+          if (parsedDate.toUtc().isBefore(cutoff)) {
+            hitCutoff = true;
+            break;
+          }
+
+          final thumbnails = snippet?['thumbnails'] as Map?;
+          String? artworkUrl;
+          for (final k in ['maxres', 'standard', 'high', 'medium', 'default']) {
+            final thumb = thumbnails?[k] as Map?;
+            artworkUrl = thumb?['url']?.toString();
+            if (artworkUrl != null && artworkUrl.isNotEmpty) break;
+          }
+
+          items.add(
+            FeedItem(
+              id: videoId,
+              platform: 'youtube',
+              artistName: artistName,
+              contentType: 'video',
+              title: title,
+              body: snippet?['description']?.toString(),
+              externalUrl: 'https://www.youtube.com/watch?v=$videoId',
+              artworkUrl: artworkUrl,
+              publishedAt: parsedDate,
+            ),
+          );
+          auditSink?.add({
+            'id': videoId,
+            'path': 'api',
+            'raw_videoPublishedAt': contentDetails?['videoPublishedAt']
+                ?.toString(),
+            'raw_snippetPublishedAt': snippet?['publishedAt']?.toString(),
+            'usedField': contentDetails?['videoPublishedAt'] != null
+                ? 'videoPublishedAt'
+                : 'snippet.publishedAt',
+            'resolvedDate': parsedDate.toUtc().toIso8601String(),
+          });
         }
 
-        final parsedDate = DateTime.parse(published);
-        items.add(
-          FeedItem(
-            id: videoId,
-            platform: 'youtube',
-            artistName: artistName,
-            contentType: 'video',
-            title: title,
-            body: snippet?['description']?.toString(),
-            externalUrl: 'https://www.youtube.com/watch?v=$videoId',
-            artworkUrl: artworkUrl,
-            publishedAt: parsedDate,
-          ),
-        );
-        auditSink?.add({
-          'id': videoId,
-          'path': 'api',
-          'raw_videoPublishedAt': contentDetails?['videoPublishedAt']
-              ?.toString(),
-          'raw_snippetPublishedAt': snippet?['publishedAt']?.toString(),
-          'usedField': contentDetails?['videoPublishedAt'] != null
-              ? 'videoPublishedAt'
-              : 'snippet.publishedAt',
-          'resolvedDate': parsedDate.toUtc().toIso8601String(),
-        });
-      }
+        if (hitCutoff) break;
+      } while (pageToken != null && pagesFetched < maxPages);
 
       auditSink?.add({
         'type': 'fetch_meta',
@@ -248,11 +271,13 @@ class YouTubeService {
         'channel_id': channelId,
         'uploads_playlist_id': uploadsPlaylist,
         'items_received': items.length,
+        'pages_fetched': pagesFetched,
       });
 
       if (items.isNotEmpty) {
         _logger.info(
-          '[youtube] API built ${items.length} items for $artistName',
+          '[youtube] API built ${items.length} items for $artistName '
+          '(pages=$pagesFetched)',
         );
         await _saveItems(items);
       }

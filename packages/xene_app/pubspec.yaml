@@ -37,6 +37,8 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  shaders:
+    - assets/shaders/magazine_liquid.frag
   assets:
     - assets/bandcamp-button-bc-circle-green-64.png
     - assets/soundcloud_logo.png

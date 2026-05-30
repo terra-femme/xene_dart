@@ -86,10 +86,8 @@ class _PresetPlaygroundScreenState
     ref.read(scSearchProvider.notifier).clear();
   }
 
-  Future<void> _searchSoundCloud() async {
-    await ref
-        .read(scSearchProvider.notifier)
-        .search(_sourceSearchController.text);
+  void _searchSoundCloud() {
+    ref.read(scSearchProvider.notifier).search(_sourceSearchController.text);
   }
 
   Future<void> _addSoundCloudSource(Map<String, dynamic> candidate) async {
@@ -765,6 +763,8 @@ class _SourceWorkbench extends StatelessWidget {
             );
           },
         ),
+        const SizedBox(height: 10),
+        _YouTubeSourcePanel(slug: sourcesState.slug),
         const SizedBox(height: 14),
         _PresetPreviewPanel(state: sourcesState, onPreview: onPreview),
       ],
@@ -1181,11 +1181,13 @@ class _SourceRowState extends ConsumerState<_SourceRow> {
   final _youtubeController = TextEditingController();
   final _articleTitleController = TextEditingController();
   final _articleUrlController = TextEditingController();
+  final _articleSnippetController = TextEditingController();
   final _articleSourceController = TextEditingController();
 
   bool _savingLinks = false;
   bool _addingArticle = false;
   bool _refreshingFeed = false;
+  bool _movingSource = false;
 
   @override
   void initState() {
@@ -1218,6 +1220,7 @@ class _SourceRowState extends ConsumerState<_SourceRow> {
     _youtubeController.dispose();
     _articleTitleController.dispose();
     _articleUrlController.dispose();
+    _articleSnippetController.dispose();
     _articleSourceController.dispose();
     super.dispose();
   }
@@ -1257,12 +1260,16 @@ class _SourceRowState extends ConsumerState<_SourceRow> {
             widget.source.id,
             title: title,
             url: url,
+            snippet: _articleSnippetController.text.trim().isEmpty
+                ? null
+                : _articleSnippetController.text.trim(),
             source: _articleSourceController.text.trim().isEmpty
                 ? null
                 : _articleSourceController.text.trim(),
           );
       _articleTitleController.clear();
       _articleUrlController.clear();
+      _articleSnippetController.clear();
       _articleSourceController.clear();
       if (mounted) _snack('Article saved.');
     } catch (e) {
@@ -1298,6 +1305,30 @@ class _SourceRowState extends ConsumerState<_SourceRow> {
     }
   }
 
+  Future<void> _moveSource(String targetSlug) async {
+    if (_movingSource) return;
+    setState(() => _movingSource = true);
+    try {
+      await ref
+          .read(presetSourcesProvider.notifier)
+          .moveSource(widget.slug, widget.source.id, targetSlug);
+      if (mounted) _snack('Moved to $targetSlug.');
+    } catch (e) {
+      if (mounted) _snack('Move failed: ${_friendlyMoveError(e)}');
+    } finally {
+      if (mounted) setState(() => _movingSource = false);
+    }
+  }
+
+  String _friendlyMoveError(Object error) {
+    if (error is DioException) {
+      final data = error.response?.data;
+      if (data is Map && data['error'] != null) return data['error'].toString();
+      return error.message ?? 'Request failed';
+    }
+    return error.toString();
+  }
+
   void _snack(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -1310,6 +1341,11 @@ class _SourceRowState extends ConsumerState<_SourceRow> {
   @override
   Widget build(BuildContext context) {
     final source = widget.source;
+    final templatesAsync = ref.watch(presetTemplatesProvider);
+    final otherSlugs = (templatesAsync.valueOrNull ?? [])
+        .where((t) => t.slug != widget.slug)
+        .toList();
+
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFFFAFAFA),
@@ -1362,9 +1398,11 @@ class _SourceRowState extends ConsumerState<_SourceRow> {
                           ],
                         ),
                         Text(
-                          source.soundcloudUsername == null
-                              ? 'soundcloud'
-                              : '@${source.soundcloudUsername}',
+                          source.soundcloudUsername != null
+                              ? '@${source.soundcloudUsername}'
+                              : source.youtubeUrl != null
+                              ? 'youtube'
+                              : 'no platform',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: GoogleFonts.archivo(
@@ -1381,6 +1419,55 @@ class _SourceRowState extends ConsumerState<_SourceRow> {
                         : Icons.keyboard_arrow_down,
                     size: 16,
                     color: const Color(0xFF888888),
+                  ),
+                  // Move to another preset
+                  PopupMenuButton<String>(
+                    tooltip: 'Move to preset',
+                    padding: EdgeInsets.zero,
+                    enabled: !_movingSource && otherSlugs.isNotEmpty,
+                    icon: _movingSource
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 1.5,
+                              color: _kAccent,
+                            ),
+                          )
+                        : const Icon(
+                            Icons.drive_file_move_outline,
+                            size: 16,
+                            color: Color(0xFF888888),
+                          ),
+                    constraints: const BoxConstraints(
+                      minWidth: 32,
+                      minHeight: 32,
+                    ),
+                    onSelected: _moveSource,
+                    itemBuilder: (_) => [
+                      const PopupMenuItem<String>(
+                        enabled: false,
+                        height: 28,
+                        child: Text(
+                          'MOVE TO',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.grey,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ),
+                      for (final t in otherSlugs)
+                        PopupMenuItem<String>(
+                          value: t.slug,
+                          height: 36,
+                          child: Text(
+                            t.name.toUpperCase(),
+                            style: GoogleFonts.teko(fontSize: 15),
+                          ),
+                        ),
+                    ],
                   ),
                   IconButton(
                     tooltip: 'Refresh feed',
@@ -1473,6 +1560,22 @@ class _SourceRowState extends ConsumerState<_SourceRow> {
                     ),
                   ),
                   const SizedBox(height: 6),
+                  // Read-only artist name derived from the expanded source
+                  TextField(
+                    readOnly: true,
+                    style: GoogleFonts.archivo(
+                      fontSize: 12,
+                      color: const Color(0xFF555555),
+                    ),
+                    decoration: _inputDecoration('ARTIST NAME').copyWith(
+                      hintText: source.displayName,
+                      hintStyle: GoogleFonts.archivo(
+                        fontSize: 12,
+                        color: Colors.black,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 5),
                   TextField(
                     controller: _articleTitleController,
                     style: GoogleFonts.archivo(
@@ -1489,6 +1592,16 @@ class _SourceRowState extends ConsumerState<_SourceRow> {
                       color: Colors.black,
                     ),
                     decoration: _inputDecoration('URL'),
+                  ),
+                  const SizedBox(height: 5),
+                  TextField(
+                    controller: _articleSnippetController,
+                    maxLines: 3,
+                    style: GoogleFonts.archivo(
+                      fontSize: 12,
+                      color: Colors.black,
+                    ),
+                    decoration: _inputDecoration('SNIPPET'),
                   ),
                   const SizedBox(height: 5),
                   TextField(
@@ -1857,6 +1970,128 @@ class _RetryButton extends StatelessWidget {
             letterSpacing: 0.5,
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _YouTubeSourcePanel extends ConsumerStatefulWidget {
+  const _YouTubeSourcePanel({required this.slug});
+
+  final String? slug;
+
+  @override
+  ConsumerState<_YouTubeSourcePanel> createState() =>
+      _YouTubeSourcePanelState();
+}
+
+class _YouTubeSourcePanelState extends ConsumerState<_YouTubeSourcePanel> {
+  final _nameController = TextEditingController();
+  final _urlController = TextEditingController();
+  bool _loading = false;
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _urlController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final slug = widget.slug;
+    if (slug == null || slug.isEmpty) return;
+    final name = _nameController.text.trim();
+    final url = _urlController.text.trim();
+    if (name.isEmpty || url.isEmpty) return;
+    setState(() => _loading = true);
+    try {
+      await ref
+          .read(presetSourcesProvider.notifier)
+          .addYouTubeSource(slug, name, url);
+      _nameController.clear();
+      _urlController.clear();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'YouTube source added — feed is warming up.',
+              style: GoogleFonts.archivo(fontSize: 12),
+            ),
+            backgroundColor: Colors.black,
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      final msg = e is DioException
+          ? ((e.response?.data as Map?)?['error']?.toString() ??
+                e.message ??
+                'Request failed')
+          : e.toString();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Add failed: $msg',
+            style: GoogleFonts.archivo(fontSize: 12),
+          ),
+          backgroundColor: Colors.black,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: const Color(0xFFE8E8E8)),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'ADD YOUTUBE-ONLY SOURCE',
+            style: GoogleFonts.teko(
+              fontSize: 15,
+              fontWeight: FontWeight.w500,
+              color: Colors.black,
+              letterSpacing: 0.6,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _nameController,
+                  style: GoogleFonts.archivo(fontSize: 13, color: Colors.black),
+                  decoration: _inputDecoration('DISPLAY NAME'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                flex: 2,
+                child: TextField(
+                  controller: _urlController,
+                  style: GoogleFonts.archivo(fontSize: 13, color: Colors.black),
+                  decoration: _inputDecoration('YOUTUBE CHANNEL URL'),
+                  onSubmitted: (_) => _loading ? null : _submit(),
+                ),
+              ),
+              const SizedBox(width: 10),
+              _SmallActionButton(
+                label: _loading ? '...' : 'ADD',
+                icon: Icons.smart_display_outlined,
+                onTap: _loading ? null : _submit,
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
