@@ -1,4 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+
+// Non-web stub — SC Widget API is web-only; stream never emits.
+Stream<int> get scPlayPositionStream => Stream<int>.empty();
 
 class SoundCloudEmbed extends StatelessWidget {
   const SoundCloudEmbed({

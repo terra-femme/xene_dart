@@ -73,9 +73,7 @@ class _PresetDialState extends State<PresetDial>
     _scaleAnimation = Tween<double>(begin: 1, end: _scalePeak).animate(
       CurvedAnimation(parent: _scaleController, curve: Curves.easeOutBack),
     );
-    _scaleController
-      ..addListener(_markOverlayNeedsBuild)
-      ..addStatusListener(_handleScaleStatus);
+    _scaleController.addStatusListener(_handleScaleStatus);
     _syncFromActiveSlug();
   }
 
@@ -96,9 +94,7 @@ class _PresetDialState extends State<PresetDial>
     _longPressTimer?.cancel();
     _overlayRemovalTimer?.cancel();
     _removeOverlay();
-    _scaleController
-      ..removeListener(_markOverlayNeedsBuild)
-      ..removeStatusListener(_handleScaleStatus);
+    _scaleController.removeStatusListener(_handleScaleStatus);
     _scaleController.dispose();
     super.dispose();
   }
@@ -169,6 +165,11 @@ class _PresetDialState extends State<PresetDial>
     // Interaction invariant: the expanded dial/label belongs in this overlay,
     // not in sidebar layout boxes. Moving it back into layout reintroduces
     // clipping, article overlap, and release-time label flicker.
+    //
+    // Performance invariant: do not rebuild this entry on every scale frame.
+    // The full-screen blur is expensive; ScaleTransition can animate itself.
+    // Gesture changes still call markNeedsBuild so the overlay dial tracks
+    // rotation and label preview updates.
     _overlayEntry = OverlayEntry(
       builder: (context) {
         final overlayExpanded =

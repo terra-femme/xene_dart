@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../theme/xene_theme.dart';
 
 const _kWebRedirectUrl = String.fromEnvironment(
   'AUTH_REDIRECT_URL',
@@ -16,6 +17,8 @@ void showAuthGate(BuildContext context, {required String featureHint}) {
   showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
+    isDismissible: true,
+    enableDrag: true,
     backgroundColor: Colors.transparent,
     builder: (_) => _AuthGateSheet(featureHint: featureHint),
   );
@@ -99,10 +102,7 @@ class _AuthGateSheetState extends State<_AuthGateSheet> {
         const SizedBox(height: 4),
         Text(
           widget.featureHint,
-          style: GoogleFonts.archivo(
-            fontSize: 13,
-            color: const Color(0xFF888888),
-          ),
+          style: GoogleFonts.archivo(fontSize: 13, color: XeneTheme.muted),
         ),
         const SizedBox(height: 24),
         TextField(
@@ -116,15 +116,15 @@ class _AuthGateSheetState extends State<_AuthGateSheet> {
             hintStyle: GoogleFonts.archivo(color: const Color(0xFFCCCCCC)),
             border: const OutlineInputBorder(
               borderRadius: BorderRadius.all(Radius.circular(4)),
-              borderSide: BorderSide(color: Color(0xFFE0E0E0)),
+              borderSide: const BorderSide(color: XeneTheme.border),
             ),
             enabledBorder: const OutlineInputBorder(
               borderRadius: BorderRadius.all(Radius.circular(4)),
-              borderSide: BorderSide(color: Color(0xFFE0E0E0)),
+              borderSide: const BorderSide(color: XeneTheme.border),
             ),
             focusedBorder: const OutlineInputBorder(
               borderRadius: BorderRadius.all(Radius.circular(4)),
-              borderSide: BorderSide(color: Color(0xFFFF5500)),
+              borderSide: const BorderSide(color: XeneTheme.orange),
             ),
             contentPadding: const EdgeInsets.symmetric(
               horizontal: 16,
@@ -146,7 +146,7 @@ class _AuthGateSheetState extends State<_AuthGateSheet> {
           child: ElevatedButton(
             onPressed: _loading ? null : _sendLink,
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFFF5500),
+              backgroundColor: XeneTheme.orange,
               foregroundColor: Colors.white,
               disabledBackgroundColor: const Color(0xFFFFCCB3),
               elevation: 0,
@@ -191,7 +191,7 @@ class _SentView extends StatelessWidget {
         const Icon(
           Icons.mark_email_unread_outlined,
           size: 40,
-          color: Color(0xFFFF5500),
+          color: XeneTheme.orange,
         ),
         const SizedBox(height: 16),
         Text(

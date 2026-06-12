@@ -69,6 +69,7 @@ const TEMPLATE_LABELS: Record<LayoutTemplate, string> = {
   interview: 'Interview',
   visual_essay: 'Visual Essay',
   audio_story: 'Audio Story',
+  custom: 'Custom',
 }
 
 function newBlock(type: BlockType): ArticleBlock {
@@ -92,15 +93,15 @@ function newBlock(type: BlockType): ArticleBlock {
 function blockPreview(block: ArticleBlock): string {
   switch (block.type) {
     case 'text':
-      return block.heading ?? block.body.slice(0, 60) || '(empty)'
+      return (block.heading ?? block.body.slice(0, 60)) || '(empty)'
     case 'quote':
       return block.text.slice(0, 60) || '(empty)'
     case 'image':
-      return block.caption ?? block.url.slice(0, 60) || '(no url)'
+      return (block.caption ?? block.url.slice(0, 60)) || '(no url)'
     case 'video':
       return block.url.slice(0, 60) || '(no url)'
     case 'voice_note':
-      return block.transcript?.slice(0, 60) ?? block.url.slice(0, 60) || '(no url)'
+      return (block.transcript?.slice(0, 60) ?? block.url.slice(0, 60)) || '(no url)'
     case 'spacer':
       return `Spacer — ${block.size}`
   }
@@ -471,6 +472,7 @@ export function ArticleEditorClient({ article }: Props) {
   const [dek, setDek] = useState(article.dek ?? '')
   const [author, setAuthor] = useState(article.author ?? '')
   const [template, setTemplate] = useState<LayoutTemplate>(article.layout_template)
+  const [sectionLabel, setSectionLabel] = useState(article.section_label ?? '')
   const [status, setStatus] = useState<ArticleStatus>(article.status)
   const [coverUrl, setCoverUrl] = useState(article.cover_image_url ?? '')
   const [themeColor, setThemeColor] = useState(article.theme_color ?? '')
@@ -534,20 +536,15 @@ export function ArticleEditorClient({ article }: Props) {
   }
 
   function handleSave() {
+    if (template === 'custom' && !sectionLabel.trim()) {
+      setError('Custom label is required when template is set to Custom.')
+      return
+    }
     setError(null)
     setSuccess(false)
     startTransition(async () => {
       try {
-        await saveArticle(article.id, {
-          title: title.trim(),
-          slug: slug.trim(),
-          dek: dek.trim() || null,
-          author: author.trim() || null,
-          layout_template: template,
-          cover_image_url: coverUrl.trim() || null,
-          theme_color: themeColor.trim() || null,
-          blocks,
-        })
+        await saveArticle(article.id, currentPayload())
         setSuccess(true)
         setTimeout(() => setSuccess(false), 2000)
       } catch (err) {
@@ -556,11 +553,33 @@ export function ArticleEditorClient({ article }: Props) {
     })
   }
 
+  function currentPayload() {
+    return {
+      title: title.trim(),
+      slug: slug.trim(),
+      dek: dek.trim() || null,
+      author: author.trim() || null,
+      layout_template: template,
+      section_label: template === 'custom' ? (sectionLabel.trim() || null) : null,
+      cover_image_url: coverUrl.trim() || null,
+      theme_color: themeColor.trim() || null,
+      blocks,
+    }
+  }
+
   function handlePublish() {
+    if (template === 'custom' && !sectionLabel.trim()) {
+      setError('Custom label is required when template is set to Custom.')
+      return
+    }
+    setError(null)
     startTransition(async () => {
       try {
+        await saveArticle(article.id, currentPayload())
         await publishArticle(article.id)
         setStatus('published')
+        setSuccess(true)
+        setTimeout(() => setSuccess(false), 2000)
       } catch (err) {
         setError((err as Error).message)
       }
@@ -568,8 +587,10 @@ export function ArticleEditorClient({ article }: Props) {
   }
 
   function handleUnpublish() {
+    setError(null)
     startTransition(async () => {
       try {
+        await saveArticle(article.id, currentPayload())
         await unpublishArticle(article.id)
         setStatus('draft')
       } catch (err) {
@@ -658,6 +679,26 @@ export function ArticleEditorClient({ article }: Props) {
                   </SelectContent>
                 </Select>
               </div>
+
+              {template === 'custom' && (
+                <div className="space-y-1">
+                  <Label className="text-xs">
+                    Custom Label <span className="text-destructive">*</span>
+                  </Label>
+                  <Input
+                    value={sectionLabel}
+                    onChange={(e) => setSectionLabel(e.target.value)}
+                    className={`h-8 text-xs ${!sectionLabel.trim() ? 'border-destructive' : ''}`}
+                    placeholder="e.g. XENE EXCLUSIVE INTERVIEW"
+                    autoFocus
+                  />
+                  {!sectionLabel.trim() && (
+                    <p className="text-xs text-destructive">
+                      Required — this is what appears above the title in the app.
+                    </p>
+                  )}
+                </div>
+              )}
 
               <div className="space-y-1">
                 <Label className="text-xs">Dek</Label>

@@ -5,14 +5,17 @@ import {
   LayoutDashboard,
   BookImage,
   FileText,
+  Star,
   SlidersHorizontal,
   Mic2,
   Newspaper,
   BarChart3,
+  Share2,
   Users,
   Gamepad2,
   Activity,
   LogOut,
+  Search,
 } from 'lucide-react'
 import { Separator } from '@/components/ui/separator'
 
@@ -20,12 +23,15 @@ const navItems = [
   { href: '/dashboard', label: 'Overview', Icon: LayoutDashboard },
   { href: '/dashboard/magazine', label: 'Magazine Cover', Icon: BookImage },
   { href: '/dashboard/articles', label: 'Xene Articles', Icon: FileText },
+  { href: '/dashboard/featured', label: 'Feature Strip', Icon: Star },
   { href: '/dashboard/presets', label: 'Presets', Icon: SlidersHorizontal },
   { href: '/dashboard/artists', label: 'Artists', Icon: Mic2 },
   { href: '/dashboard/publications', label: 'Publications', Icon: Newspaper },
   { href: '/dashboard/analytics', label: 'Analytics', Icon: BarChart3 },
+  { href: '/dashboard/social', label: 'Social', Icon: Share2 },
   { href: '/dashboard/users', label: 'Users', Icon: Users },
   { href: '/dashboard/game', label: 'Game', Icon: Gamepad2 },
+  { href: '/dashboard/press-scout', label: 'Press Scout', Icon: Search },
   { href: '/dashboard/monitor', label: 'Monitor', Icon: Activity },
 ]
 

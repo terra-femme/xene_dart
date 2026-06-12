@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react'
 import type { MagazineHotspot } from '@/lib/types/database'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
 import {
   Select,
@@ -100,17 +99,6 @@ export function HotspotPanel({ hotspot, onUpdate, onDelete, publishedArticles = 
             value={local.title}
             onChange={(e) => field('title', e.target.value)}
             placeholder="e.g. SATIATE HER FEED"
-          />
-        </div>
-
-        <div className="space-y-1">
-          <Label htmlFor="hs-body">Body text (optional)</Label>
-          <Textarea
-            id="hs-body"
-            value={local.body ?? ''}
-            onChange={(e) => field('body', e.target.value || null)}
-            placeholder="Shown in bottom sheet"
-            rows={2}
           />
         </div>
 

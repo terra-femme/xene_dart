@@ -1,6 +1,8 @@
 import 'package:dart_frog/dart_frog.dart';
 import 'package:logging/logging.dart';
+import 'package:xene_backend/src/database.dart';
 import 'package:xene_backend/src/services/game_service.dart';
+import 'package:xene_backend/src/utils/audit_logger.dart';
 import 'package:xene_backend/src/utils/auth_utils.dart';
 
 final _logger = Logger('game.profile.username');
@@ -53,5 +55,12 @@ Future<Response> _setUsername(RequestContext context) async {
   }
 
   _logger.info('[username] set userId=$userId username=$username');
+  final db = context.read<DatabaseService>();
+  await logSecurityEvent(
+    db.client,
+    action: 'username_set',
+    userId: userId,
+    metadata: {'username': username},
+  );
   return Response.json(body: {'username': username});
 }

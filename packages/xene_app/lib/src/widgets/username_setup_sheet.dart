@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../providers/dio_provider.dart';
 import '../providers/game_provider.dart';
+import '../theme/xene_theme.dart';
 
 /// Shows a bottom sheet prompting the user to pick a username.
 /// [onComplete] is called with the chosen username after a successful save.
@@ -12,6 +13,8 @@ Future<String?> showUsernameSetup(BuildContext context, WidgetRef ref) {
     context: context,
     backgroundColor: Colors.transparent,
     isScrollControlled: true,
+    isDismissible: true,
+    enableDrag: true,
     builder: (_) => _UsernameSetupSheet(ref: ref),
   );
 }
@@ -88,7 +91,7 @@ class _UsernameSetupSheetState extends State<_UsernameSetupSheet> {
             'Other party members will see this name.',
             style: GoogleFonts.dmMono(
               fontSize: 11,
-              color: const Color(0xFFA3A3A3),
+              color: XeneTheme.mutedLight,
             ),
           ),
           const SizedBox(height: 20),
@@ -101,11 +104,11 @@ class _UsernameSetupSheetState extends State<_UsernameSetupSheet> {
               hintText: 'e.g. musichead42',
               hintStyle: GoogleFonts.dmMono(
                 fontSize: 13,
-                color: const Color(0xFFA3A3A3),
+                color: XeneTheme.mutedLight,
               ),
               counterText: '',
               enabledBorder: const UnderlineInputBorder(
-                borderSide: BorderSide(color: Color(0xFFE5E5E5)),
+                borderSide: const BorderSide(color: XeneTheme.borderHeavy),
               ),
               focusedBorder: const UnderlineInputBorder(
                 borderSide: BorderSide(color: Colors.black),
@@ -117,10 +120,7 @@ class _UsernameSetupSheetState extends State<_UsernameSetupSheet> {
             const SizedBox(height: 8),
             Text(
               _error!,
-              style: GoogleFonts.dmMono(
-                fontSize: 11,
-                color: const Color(0xFFD32F2F),
-              ),
+              style: GoogleFonts.dmMono(fontSize: 11, color: XeneTheme.error),
             ),
           ],
           const SizedBox(height: 20),
@@ -130,7 +130,7 @@ class _UsernameSetupSheetState extends State<_UsernameSetupSheet> {
               width: double.infinity,
               padding: const EdgeInsets.symmetric(vertical: 12),
               decoration: BoxDecoration(
-                color: _loading ? const Color(0xFFA3A3A3) : Colors.black,
+                color: _loading ? XeneTheme.mutedLight : Colors.black,
                 borderRadius: BorderRadius.circular(2),
               ),
               child: Text(

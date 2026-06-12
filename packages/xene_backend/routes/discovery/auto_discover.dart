@@ -22,10 +22,8 @@ Future<Response> onRequest(RequestContext context) async {
   final guard = requireRealUser(context);
   if (guard != null) return guard;
 
-  final rateLimited = checkRateLimit(
-    discoveryRateLimiter,
-    extractClientIp(context),
-  );
+  final userId = context.read<String>();
+  final rateLimited = checkRateLimit(discoveryRateLimiter, userId);
   if (rateLimited != null) return rateLimited;
 
   final params = context.request.uri.queryParameters;
@@ -51,6 +49,20 @@ Future<Response> onRequest(RequestContext context) async {
   String? scBio;
   String? scUsername;
   if (scProfileUrl != null && scProfileUrl.isNotEmpty) {
+    // Validate host before making any upstream request.
+    final parsedScUrl = Uri.tryParse(scProfileUrl);
+    final scHost = parsedScUrl?.host.toLowerCase() ?? '';
+    if (parsedScUrl == null ||
+        parsedScUrl.scheme != 'https' ||
+        (scHost != 'soundcloud.com' && scHost != 'www.soundcloud.com')) {
+      _logger.warning(
+        '[auto_discover] Rejected sc_profile_url with invalid host: $scProfileUrl',
+      );
+      return Response.json(
+        statusCode: 400,
+        body: {'error': 'sc_profile_url must be an https://soundcloud.com URL'},
+      );
+    }
     _logger.info('[auto_discover] → resolving SC profile URL: $scProfileUrl');
     try {
       final profile = await soundcloud.resolveProfileUrl(scProfileUrl);

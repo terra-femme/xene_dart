@@ -7,8 +7,11 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:xene_app/src/layout/xene_layout_metrics.dart';
 import 'package:xene_app/src/layout/xene_responsive_debug.dart';
+import 'package:xene_app/src/providers/accessibility_provider.dart';
 import 'package:xene_app/src/providers/articles_provider.dart';
 import 'package:xene_app/src/providers/auth_provider.dart';
+import 'package:xene_app/src/providers/ui_config_provider.dart';
+import 'package:xene_app/src/theme/xene_theme.dart';
 import 'package:xene_app/src/providers/preset_provider.dart';
 import 'package:xene_app/src/widgets/auth_gate_sheet.dart';
 import 'package:xene_app/src/widgets/preset_dial.dart';
@@ -62,7 +65,10 @@ class _XeneSidebarState extends ConsumerState<XeneSidebar>
   double _contentCycleHeight = 700.0;
   bool _isDialOverlayActive = false;
 
-  static const double _crawlPixelsPerMillisecond = 0.043;
+  static const double _kBaseCrawlPixelsPerMs = 0.043;
+
+  // Updated from uiConfigProvider on each build — allows remote speed tuning.
+  double _scrollSpeedMultiplier = 1.0;
 
   @override
   void initState() {
@@ -99,7 +105,10 @@ class _XeneSidebarState extends ConsumerState<XeneSidebar>
         _lastTickTime = elapsed;
 
         final pixels =
-            delta.inMicroseconds / 1000.0 * _crawlPixelsPerMillisecond;
+            delta.inMicroseconds /
+            1000.0 *
+            _kBaseCrawlPixelsPerMs *
+            _scrollSpeedMultiplier;
         final singleExtent = _contentCycleHeight;
         final current = _scrollController.offset;
 
@@ -226,6 +235,10 @@ class _XeneSidebarState extends ConsumerState<XeneSidebar>
 
   @override
   Widget build(BuildContext context) {
+    // Update scroll speed from remote config (non-blocking).
+    _scrollSpeedMultiplier =
+        ref.watch(uiConfigProvider).valueOrNull?.feedScrollSpeed ?? 1.0;
+
     final layoutMetrics = widget.metrics ?? XeneLayoutScope.maybeOf(context);
     if (layoutMetrics != null) {
       XeneResponsiveDebug.values('Sidebar.receivedMetrics', {
@@ -252,7 +265,9 @@ class _XeneSidebarState extends ConsumerState<XeneSidebar>
       height: double.infinity,
       decoration: const BoxDecoration(
         color: Colors.white,
-        border: Border(right: BorderSide(color: Color(0xFFE0E0E0), width: 1)),
+        border: const Border(
+          right: BorderSide(color: XeneTheme.border, width: 1),
+        ),
       ),
       padding: EdgeInsets.symmetric(horizontal: sidebarPadding),
       child: LayoutBuilder(
@@ -419,11 +434,13 @@ class _ArticlesSlider extends StatefulWidget {
     required this.alignRight,
     required this.compactPortrait,
     required this.articles,
+    required this.reduceMotion,
   });
   final bool isLandscape;
   final bool alignRight;
   final bool compactPortrait;
   final List<ArticleItem> articles;
+  final bool reduceMotion;
 
   @override
   State<_ArticlesSlider> createState() => _ArticlesSliderState();
@@ -453,6 +470,7 @@ class _ArticlesSliderState extends State<_ArticlesSlider> {
   void _startTimer() {
     _timer?.cancel();
     if (widget.articles.length <= 1) return;
+    if (widget.reduceMotion) return;
     _timer = Timer.periodic(const Duration(seconds: 5), (timer) {
       if (!mounted || !_pageController.hasClients) return;
       _currentPage = (_currentPage + 1) % widget.articles.length;
@@ -755,6 +773,7 @@ class _ArticlesDock extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final articlesAsync = ref.watch(presetArticlesProvider);
     final slug = ref.watch(activePresetSlugProvider);
+    final reduceMotion = ref.watch(accessibilityProvider).reduceMotion;
     final sliderHeight = isLandscape
         ? _articlesSliderHeightLandscape
         : compactPortrait
@@ -833,7 +852,7 @@ class _ArticlesDock extends ConsumerWidget {
                       style: const TextStyle(
                         fontFamily: 'Teko',
                         fontSize: 11,
-                        color: Color(0xFFFF5500),
+                        color: XeneTheme.orange,
                         letterSpacing: 1.2,
                       ),
                     ),
@@ -844,7 +863,7 @@ class _ArticlesDock extends ConsumerWidget {
                       style: const TextStyle(
                         fontFamily: 'Archivo',
                         fontSize: 10,
-                        color: Color(0xFFAAAAAA),
+                        color: XeneTheme.mutedLight,
                       ),
                     ),
                   ],
@@ -870,7 +889,7 @@ class _ArticlesDock extends ConsumerWidget {
                     style: TextStyle(
                       fontFamily: 'Archivo',
                       fontSize: 11,
-                      color: Color(0xFFAAAAAA),
+                      color: XeneTheme.mutedLight,
                     ),
                   ),
                 ),
@@ -880,6 +899,7 @@ class _ArticlesDock extends ConsumerWidget {
                 alignRight: alignRight,
                 compactPortrait: compactPortrait,
                 articles: articles,
+                reduceMotion: reduceMotion,
               );
 
         // The ARTICLES title is intentionally inside the reveal child. Do not

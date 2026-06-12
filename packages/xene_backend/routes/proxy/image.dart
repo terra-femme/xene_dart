@@ -1,6 +1,7 @@
 import 'package:dart_frog/dart_frog.dart';
 import 'package:logging/logging.dart';
 import 'package:dio/dio.dart' hide Response;
+import 'package:xene_backend/src/utils/rate_limiter.dart';
 
 final _logger = Logger('proxy.image');
 
@@ -11,6 +12,10 @@ Future<Response> onRequest(RequestContext context) async {
   if (context.request.method != HttpMethod.get) {
     return Response(statusCode: 405);
   }
+
+  final clientIp = extractClientIp(context);
+  final rateLimited = checkRateLimit(imageProxyRateLimiter, clientIp);
+  if (rateLimited != null) return rateLimited;
 
   final params = context.request.uri.queryParameters;
   final encodedUrl = params['url'];

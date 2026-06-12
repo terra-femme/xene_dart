@@ -5,6 +5,7 @@ import 'package:xene_domain/xene_domain.dart';
 
 import '../providers/artists_provider.dart';
 import '../providers/auth_provider.dart';
+import '../theme/xene_theme.dart';
 import '../providers/discovery_provider.dart';
 import '../providers/feed_provider.dart';
 import '../providers/following_provider.dart';
@@ -191,7 +192,7 @@ class _FollowingScreenState extends ConsumerState<FollowingScreen> {
                 'to link your SoundCloud and import your following list',
           ),
         ),
-        const Divider(color: Color(0xFFE0E0E0), height: 1),
+        const Divider(color: XeneTheme.border, height: 1),
         Expanded(
           child: LayoutBuilder(
             builder: (context, constraints) {
@@ -273,7 +274,10 @@ class _FollowingScreenState extends ConsumerState<FollowingScreen> {
                   for (var i = 0; i < panels.length; i++) ...[
                     Expanded(child: panels[i]),
                     if (i != panels.length - 1)
-                      const VerticalDivider(color: Color(0xFFE8E8E8), width: 1),
+                      const VerticalDivider(
+                        color: XeneTheme.borderLight,
+                        width: 1,
+                      ),
                   ],
                 ],
               );
@@ -297,20 +301,14 @@ class _FollowingScreenState extends ConsumerState<FollowingScreen> {
         ),
         content: Text(
           'Remove ${artist.name.toUpperCase()} from your following? This also removes their feed items.',
-          style: GoogleFonts.archivo(
-            fontSize: 13,
-            color: const Color(0xFF444444),
-          ),
+          style: GoogleFonts.archivo(fontSize: 13, color: XeneTheme.textDark),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
             child: Text(
               'CANCEL',
-              style: GoogleFonts.teko(
-                fontSize: 14,
-                color: const Color(0xFF888888),
-              ),
+              style: GoogleFonts.teko(fontSize: 14, color: XeneTheme.muted),
             ),
           ),
           TextButton(
@@ -384,7 +382,7 @@ class _ScConnectionCard extends StatelessWidget {
             width: 34,
             height: 34,
             decoration: BoxDecoration(
-              color: const Color(0xFFFF5500),
+              color: XeneTheme.orange,
               borderRadius: BorderRadius.circular(4),
             ),
             alignment: Alignment.center,
@@ -422,8 +420,8 @@ class _ScConnectionCard extends StatelessWidget {
                   style: GoogleFonts.archivo(
                     fontSize: 10,
                     color: scState.connected
-                        ? const Color(0xFF4CAF50)
-                        : const Color(0xFF888888),
+                        ? XeneTheme.success
+                        : XeneTheme.muted,
                   ),
                 ),
               ],
@@ -534,7 +532,7 @@ class _FollowingImportPanel extends StatelessWidget {
               '${state.totalCount} IMPORTED',
               style: GoogleFonts.teko(
                 fontSize: 13,
-                color: const Color(0xFFFF5500),
+                color: XeneTheme.orange,
                 letterSpacing: 0.6,
               ),
             ),
@@ -547,7 +545,7 @@ class _FollowingImportPanel extends StatelessWidget {
             'Synced ${state.syncedAt}',
             style: GoogleFonts.archivo(
               fontSize: 9,
-              color: const Color(0xFFAAAAAA),
+              color: XeneTheme.mutedLight,
             ),
           ),
         const SizedBox(height: 8),
@@ -649,7 +647,7 @@ class _ScSearchPanel extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: GoogleFonts.teko(
                   fontSize: 12,
-                  color: const Color(0xFF888888),
+                  color: XeneTheme.muted,
                   letterSpacing: 0.5,
                 ),
               ),
@@ -864,10 +862,7 @@ class _PanelShell extends StatelessWidget {
             subtitle,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: GoogleFonts.archivo(
-              fontSize: 10,
-              color: const Color(0xFF888888),
-            ),
+            style: GoogleFonts.archivo(fontSize: 10, color: XeneTheme.muted),
           ),
           const SizedBox(height: 10),
           Expanded(child: child),
@@ -894,7 +889,7 @@ class _ArtistCard extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: Colors.white,
-        border: Border.all(color: const Color(0xFFE8E8E8)),
+        border: Border.all(color: XeneTheme.borderLight),
         borderRadius: BorderRadius.circular(6),
       ),
       child: Row(
@@ -920,7 +915,7 @@ class _ArtistCard extends StatelessWidget {
                       : artist.entityType.toUpperCase(),
                   style: GoogleFonts.archivo(
                     fontSize: 10,
-                    color: const Color(0xFF888888),
+                    color: XeneTheme.muted,
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -975,7 +970,7 @@ class _CandidateCard extends StatelessWidget {
     return Container(
       height: 64,
       decoration: BoxDecoration(
-        border: Border.all(color: const Color(0xFFE8E8E8)),
+        border: Border.all(color: XeneTheme.borderLight),
         borderRadius: BorderRadius.circular(6),
         color: Colors.white,
       ),
@@ -985,7 +980,7 @@ class _CandidateCard extends StatelessWidget {
             padding: const EdgeInsets.all(7),
             child: CircleAvatar(
               radius: 21,
-              backgroundColor: const Color(0xFFF0F0F0),
+              backgroundColor: XeneTheme.surfaceLight,
               backgroundImage: avatarUrl != null
                   ? NetworkImage(avatarUrl)
                   : null,
@@ -994,7 +989,7 @@ class _CandidateCard extends StatelessWidget {
                       name.isNotEmpty ? name[0].toUpperCase() : '?',
                       style: GoogleFonts.teko(
                         fontSize: 16,
-                        color: const Color(0xFF888888),
+                        color: XeneTheme.muted,
                       ),
                     )
                   : null,
@@ -1017,7 +1012,7 @@ class _CandidateCard extends StatelessWidget {
                       : '@$username · $followersStr followers',
                   style: GoogleFonts.archivo(
                     fontSize: 10,
-                    color: const Color(0xFF888888),
+                    color: XeneTheme.muted,
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -1139,7 +1134,7 @@ class _OutlinedAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = color ?? const Color(0xFF888888);
+    final c = color ?? XeneTheme.muted;
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -1237,7 +1232,7 @@ class _ActionEmptyState extends StatelessWidget {
               textAlign: TextAlign.center,
               style: GoogleFonts.teko(
                 fontSize: 16,
-                color: const Color(0xFF888888),
+                color: XeneTheme.muted,
                 letterSpacing: 0.4,
               ),
             ),
@@ -1247,13 +1242,13 @@ class _ActionEmptyState extends StatelessWidget {
               textAlign: TextAlign.center,
               style: GoogleFonts.archivo(
                 fontSize: 11,
-                color: const Color(0xFFAAAAAA),
+                color: XeneTheme.mutedLight,
               ),
             ),
             const SizedBox(height: 12),
             _OutlinedAction(
               label: actionLabel,
-              color: const Color(0xFFFF5500),
+              color: XeneTheme.orange,
               onTap: onAction,
             ),
           ],
@@ -1291,7 +1286,7 @@ class _EmptyPanelMessage extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: GoogleFonts.teko(
                 fontSize: 16,
-                color: const Color(0xFF888888),
+                color: XeneTheme.muted,
                 letterSpacing: 0.4,
               ),
             ),
@@ -1303,7 +1298,7 @@ class _EmptyPanelMessage extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: GoogleFonts.archivo(
                 fontSize: 11,
-                color: const Color(0xFFAAAAAA),
+                color: XeneTheme.mutedLight,
               ),
             ),
           ],
@@ -1319,10 +1314,10 @@ InputDecoration _inputDecoration({
 }) {
   return InputDecoration(
     hintText: hint,
-    hintStyle: GoogleFonts.teko(fontSize: 14, color: const Color(0xFF888888)),
-    prefixIcon: Icon(icon, color: const Color(0xFF888888), size: 18),
+    hintStyle: GoogleFonts.teko(fontSize: 14, color: XeneTheme.muted),
+    prefixIcon: Icon(icon, color: XeneTheme.muted, size: 18),
     filled: true,
-    fillColor: const Color(0xFFF5F5F5),
+    fillColor: XeneTheme.surface,
     contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
     border: OutlineInputBorder(
       borderRadius: BorderRadius.circular(4),

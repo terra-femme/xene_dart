@@ -19,14 +19,18 @@ import 'package:xene_backend/src/services/token_store.dart';
 import 'package:xene_backend/src/services/twitch_service.dart';
 import 'package:xene_backend/src/services/youtube_service.dart';
 import 'package:xene_backend/src/services/discogs_service.dart';
+import 'package:xene_backend/src/services/analysis_service.dart';
 import 'package:xene_backend/src/services/game_service.dart';
+import 'package:xene_backend/src/services/daily_inbox_service.dart';
 
 // Wire up the logging package — must run before any route handler.
 // Top-level vars in Dart are lazily initialized, so we reference _loggingReady
 // inside _debugMiddleware (which runs on every request) to guarantee it fires first.
 // The IIFE returns bool so it can be stored as a final variable.
 final bool _loggingReady = () {
-  Logger.root.level = Level.ALL;
+  final isDev =
+      (Platform.environment['XENE_ENV'] ?? 'development') == 'development';
+  Logger.root.level = isDev ? Level.ALL : Level.INFO;
   Logger.root.onRecord.listen((r) {
     final prefix = '[${r.level.name}][${r.loggerName}]';
     print('$prefix ${r.message}');
@@ -34,6 +38,17 @@ final bool _loggingReady = () {
     if (r.stackTrace != null) print('$prefix STACK: ${r.stackTrace}');
   });
   return true;
+}();
+
+final _logger = Logger('middleware');
+
+// Allowed CORS origins loaded once at startup from ALLOWED_ORIGINS env var.
+// Format: comma-separated list, e.g. "https://xene.app,http://localhost:5173"
+// If the env var is absent the server falls back to permissive mode (dev-safe).
+final _allowedOrigins = () {
+  final raw = Platform.environment['ALLOWED_ORIGINS'] ?? '';
+  if (raw.trim().isEmpty) return <String>{};
+  return raw.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toSet();
 }();
 
 // Global singleton instances
@@ -46,7 +61,9 @@ final _bandcamp = BandcampService(_db, analytics: _apiAnalytics);
 final _tokenStore = TokenStore();
 final _twitch = TwitchService(analytics: _apiAnalytics);
 final _discogs = DiscogsService(analytics: _apiAnalytics);
+final _analysis = AnalysisService(_db, analytics: _apiAnalytics);
 final _game = GameService(_db);
+final _dailyInbox = DailyInboxService(_db);
 
 // Shared Gemini key rotator — one instance for all services so key state is global.
 final _geminiRotator = GeminiKeyRotator(analytics: _apiAnalytics);
@@ -89,6 +106,19 @@ final bool _envReady = () {
     '  PRESS_SCOUT_BATCH_SIZE: ${Platform.environment['PRESS_SCOUT_BATCH_SIZE'] ?? '10 (default)'}',
   );
   print('══════════════════════════════════════════════════════');
+
+  // SECURITY: Warn loudly when production CORS is misconfigured.
+  final xeneEnv = Platform.environment['XENE_ENV'] ?? 'development';
+  if (xeneEnv == 'production' && _allowedOrigins.isEmpty) {
+    print('');
+    print('╔══════════════════════════════════════════════════════╗');
+    print('║ SECURITY WARNING: ALLOWED_ORIGINS is not set!        ║');
+    print('║ Running in production with permissive CORS (*)       ║');
+    print('║ Any web page can make authenticated API requests.    ║');
+    print('║ Set ALLOWED_ORIGINS=https://your-domain.com to fix.  ║');
+    print('╚══════════════════════════════════════════════════════╝');
+  }
+
   print('');
   return true;
 }();
@@ -124,59 +154,55 @@ final middleware = (Handler handler) {
       .use(provider<ApiAnalyticsService>((_) => _apiAnalytics))
       .use(provider<PublicationRepository>((_) => _publicationRepo))
       .use(provider<PublicationPollerService>((_) => _publicationPoller))
-      .use(provider<GameService>((_) => _game));
+      .use(provider<AnalysisService>((_) => _analysis))
+      .use(provider<GameService>((_) => _game))
+      .use(provider<DailyInboxService>((_) => _dailyInbox));
 };
 
 Handler _corsMiddleware(Handler handler) {
   return (context) async {
-    final origin = context.request.headers['origin'] ?? '*';
+    final requestOrigin = context.request.headers['origin'];
+
+    // Resolve the effective CORS origin to send back.
+    // If ALLOWED_ORIGINS is configured, only echo origins on the allowlist.
+    // If ALLOWED_ORIGINS is empty (dev / not configured), echo the request origin
+    // or fall back to '*' so localhost dev still works without any env setup.
+    String effectiveOrigin;
+    if (_allowedOrigins.isEmpty) {
+      effectiveOrigin = requestOrigin ?? '*';
+    } else if (requestOrigin != null &&
+        _allowedOrigins.contains(requestOrigin)) {
+      effectiveOrigin = requestOrigin;
+    } else {
+      effectiveOrigin = _allowedOrigins.first;
+    }
+
+    final corsHeaders = {
+      'Access-Control-Allow-Origin': effectiveOrigin,
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, X-User-Id, Authorization',
+    };
 
     // 1. Handle Preflight (OPTIONS)
     if (context.request.method == HttpMethod.options) {
       return Response(
         statusCode: HttpStatus.noContent,
-        headers: {
-          'Access-Control-Allow-Origin': origin,
-          'Access-Control-Allow-Methods':
-              'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-          'Access-Control-Allow-Headers':
-              'Content-Type, X-User-Id, Authorization',
-          'Access-Control-Max-Age': '86400',
-        },
+        headers: {...corsHeaders, 'Access-Control-Max-Age': '86400'},
       );
     }
 
     try {
-      // 2. Process request
+      // 2. Process request then attach CORS headers to response
       final response = await handler(context);
-
-      // 3. Add CORS to success/expected responses
-      return response.copyWith(
-        headers: {
-          ...response.headers,
-          'Access-Control-Allow-Origin': origin,
-          'Access-Control-Allow-Headers':
-              'Content-Type, X-User-Id, Authorization',
-          'Access-Control-Allow-Methods':
-              'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-        },
-      );
+      return response.copyWith(headers: {...response.headers, ...corsHeaders});
     } catch (e, stack) {
-      // 4. ELI5: If the server "explodes", we still need to send CORS headers.
-      // Otherwise, the browser hides the real error behind a "CORS Blocked" message.
-      print('[SERVER ERROR] $e');
-      print(stack);
-
+      // If the server throws, still send CORS headers so the browser surfaces
+      // the real error instead of a misleading "CORS Blocked" message.
+      _logger.severe('[middleware] Unhandled exception', e, stack);
       return Response.json(
         statusCode: HttpStatus.internalServerError,
         body: {'error': 'Internal server error'},
-        headers: {
-          'Access-Control-Allow-Origin': origin,
-          'Access-Control-Allow-Headers':
-              'Content-Type, X-User-Id, Authorization',
-          'Access-Control-Allow-Methods':
-              'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-        },
+        headers: corsHeaders,
       );
     }
   };
@@ -186,7 +212,7 @@ Handler _debugMiddleware(Handler handler) {
   return (context) async {
     _loggingReady; // triggers lazy init of the logging listener on first request
     _envReady; // triggers env print on first request if startup didn't fire it
-    print('DEBUG: Request path: ${context.request.uri.path}');
+    _logger.fine('${context.request.method.value} ${context.request.uri.path}');
     return handler(context);
   };
 }
@@ -246,8 +272,10 @@ bool _isJwtExempt(String path, HttpMethod method) {
   if (path == '/auth/soundcloud/done') return true;
   // Public infrastructure — no user identity needed.
   if (path.startsWith('/proxy/')) return true;
-  if (path.startsWith('/soundcloud/stream')) return true;
   if (path.startsWith('/twitch/')) return true;
+  // /soundcloud/stream requires at least an anonymous session — removed from
+  // exempt list so bare API callers without a Xene session are blocked.
+  // The Flutter app auto-creates anon JWTs on startup so real users are unaffected.
   if (path == '/discovery/status') return true;
   // /admin/poll is protected by X-Admin-Secret, not JWT.
   if (path == '/admin/poll') return true;
@@ -255,5 +283,7 @@ bool _isJwtExempt(String path, HttpMethod method) {
   // All mutations (POST, PATCH on templates; POST/DELETE on sources) require JWT
   // and are further guarded by requireRealUser() in each handler.
   if (path == '/presets/templates' && method == HttpMethod.get) return true;
+  // App UI config is read-only design tokens — no user identity needed.
+  if (path == '/config' && method == HttpMethod.get) return true;
   return false;
 }

@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart' show kIsWeb, kDebugMode;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../theme/xene_theme.dart';
 
 // Web: Supabase redirects back to this URL after the magic link is clicked.
 // The browser loads it and supabase_flutter picks up the session from the
@@ -128,7 +129,7 @@ class _EmailForm extends StatelessWidget {
           style: GoogleFonts.teko(
             fontSize: 48,
             fontWeight: FontWeight.w600,
-            color: const Color(0xFFFF5500),
+            color: XeneTheme.orange,
             letterSpacing: 4,
           ),
         ),
@@ -136,10 +137,7 @@ class _EmailForm extends StatelessWidget {
         Text(
           'Enter your email to sign in or create an account.',
           textAlign: TextAlign.center,
-          style: GoogleFonts.archivo(
-            fontSize: 14,
-            color: const Color(0xFF888888),
-          ),
+          style: GoogleFonts.archivo(fontSize: 14, color: XeneTheme.muted),
         ),
         const SizedBox(height: 32),
         TextField(
@@ -153,15 +151,15 @@ class _EmailForm extends StatelessWidget {
             hintStyle: GoogleFonts.archivo(color: const Color(0xFFCCCCCC)),
             border: const OutlineInputBorder(
               borderRadius: BorderRadius.all(Radius.circular(4)),
-              borderSide: BorderSide(color: Color(0xFFE0E0E0)),
+              borderSide: const BorderSide(color: XeneTheme.border),
             ),
             enabledBorder: const OutlineInputBorder(
               borderRadius: BorderRadius.all(Radius.circular(4)),
-              borderSide: BorderSide(color: Color(0xFFE0E0E0)),
+              borderSide: const BorderSide(color: XeneTheme.border),
             ),
             focusedBorder: const OutlineInputBorder(
               borderRadius: BorderRadius.all(Radius.circular(4)),
-              borderSide: BorderSide(color: Color(0xFFFF5500)),
+              borderSide: const BorderSide(color: XeneTheme.orange),
             ),
             contentPadding: const EdgeInsets.symmetric(
               horizontal: 16,
@@ -183,7 +181,7 @@ class _EmailForm extends StatelessWidget {
           child: ElevatedButton(
             onPressed: loading ? null : onSubmit,
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFFF5500),
+              backgroundColor: XeneTheme.orange,
               foregroundColor: Colors.white,
               disabledBackgroundColor: const Color(0xFFFFCCB3),
               elevation: 0,
@@ -247,7 +245,7 @@ class _ConfirmationView extends StatelessWidget {
         const Icon(
           Icons.mark_email_unread_outlined,
           size: 48,
-          color: Color(0xFFFF5500),
+          color: XeneTheme.orange,
         ),
         const SizedBox(height: 24),
         Text(

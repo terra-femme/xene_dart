@@ -5,7 +5,9 @@ import 'package:xene_backend/src/database.dart';
 import 'package:xene_backend/src/feed_cache.dart';
 import 'package:xene_backend/src/services/bandcamp_service.dart';
 import 'package:xene_backend/src/services/youtube_service.dart';
+import 'package:xene_backend/src/utils/auth_utils.dart';
 import 'package:xene_backend/src/utils/json_utils.dart';
+import 'package:xene_backend/src/utils/url_utils.dart';
 
 final _logger = Logger('presets.sources.id');
 
@@ -28,11 +30,43 @@ Future<Response> _patchSource(
   String slug,
   String sourceId,
 ) async {
+  final guard = requireRealUser(context);
+  if (guard != null) return guard;
+
+  final userId = context.read<String>();
+  final db = context.read<DatabaseService>();
+
+  final profileRes = await db.client
+      .from('profiles')
+      .select('role')
+      .eq('id', userId)
+      .maybeSingle();
+  if ((profileRes?['role'] as String?) != 'admin') {
+    _logger.warning(
+      '[presets.sources.id] Non-admin PATCH attempt userId=$userId sourceId=$sourceId',
+    );
+    return Response.json(statusCode: 403, body: {'error': 'Admin only'});
+  }
+
   Map<String, dynamic> body;
   try {
     body = await context.request.json() as Map<String, dynamic>;
   } catch (_) {
     return Response.json(statusCode: 400, body: {'error': 'Invalid JSON body'});
+  }
+
+  final urlViolations = invalidPlatformUrls(body);
+  if (urlViolations.isNotEmpty) {
+    _logger.warning(
+      '[presets.sources.id] Rejected disallowed URLs: $urlViolations userId=$userId',
+    );
+    return Response.json(
+      statusCode: 422,
+      body: {
+        'error': 'One or more URLs point to a disallowed domain',
+        'fields': urlViolations.keys.toList(),
+      },
+    );
   }
 
   const allowed = {
@@ -53,7 +87,6 @@ Future<Response> _patchSource(
     );
   }
 
-  final db = context.read<DatabaseService>();
   final source = await db.getPresetTemplateSource(sourceId);
   final artistId = source?['artist_id'] as String?;
 

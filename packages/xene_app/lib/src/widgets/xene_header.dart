@@ -6,8 +6,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:xene_app/src/providers/auth_provider.dart';
+import 'package:xene_app/src/providers/daily_inbox_provider.dart';
+import 'package:xene_app/src/widgets/bug_report_sheet.dart';
 import 'package:xene_app/src/providers/feed_provider.dart';
+import 'package:xene_app/src/theme/xene_theme.dart';
 import 'package:xene_app/src/widgets/auth_gate_sheet.dart';
+import 'package:xene_app/src/widgets/daily_inbox_sheet.dart';
 import '../providers/soundcloud_connection_provider.dart';
 import '../providers/nav_swipe_provider.dart';
 
@@ -33,6 +37,7 @@ class _XeneHeaderState extends ConsumerState<XeneHeader> {
   }
 
   void _onScroll() {
+    if (!_navScrollController.position.hasContentDimensions) return;
     final atEnd =
         _navScrollController.offset >=
         _navScrollController.position.maxScrollExtent - 4;
@@ -40,7 +45,12 @@ class _XeneHeaderState extends ConsumerState<XeneHeader> {
   }
 
   void _checkScrollable() {
-    if (!_navScrollController.hasClients) return;
+    if (!mounted) return;
+    if (!_navScrollController.hasClients ||
+        !_navScrollController.position.hasContentDimensions) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _checkScrollable());
+      return;
+    }
     final isScrollable = _navScrollController.position.maxScrollExtent > 0;
     setState(() => _isAtEnd = !isScrollable);
   }
@@ -113,7 +123,7 @@ class _XeneHeaderState extends ConsumerState<XeneHeader> {
               Text(
                 'SOUNDCLOUD',
                 style: GoogleFonts.teko(
-                  color: const Color(0xFF4CAF50),
+                  color: XeneTheme.success,
                   fontSize: 18,
                   fontWeight: FontWeight.w400,
                   letterSpacing: 0.7,
@@ -123,7 +133,7 @@ class _XeneHeaderState extends ConsumerState<XeneHeader> {
               const Icon(
                 Icons.check_circle,
                 size: 16,
-                color: Color(0xFF4CAF50),
+                color: XeneTheme.success,
               ),
             ],
           ),
@@ -139,7 +149,7 @@ class _XeneHeaderState extends ConsumerState<XeneHeader> {
               Text(
                 'CONNECTING',
                 style: GoogleFonts.teko(
-                  color: const Color(0xFFA3A3A3),
+                  color: XeneTheme.mutedLight,
                   fontSize: 18,
                   fontWeight: FontWeight.w400,
                   letterSpacing: 0.7,
@@ -151,7 +161,7 @@ class _XeneHeaderState extends ConsumerState<XeneHeader> {
                 height: 12,
                 child: CircularProgressIndicator(
                   strokeWidth: 1.5,
-                  color: Color(0xFFA3A3A3),
+                  color: XeneTheme.mutedLight,
                 ),
               ),
             ],
@@ -179,7 +189,7 @@ class _XeneHeaderState extends ConsumerState<XeneHeader> {
               Text(
                 'CONNECT SOUNDCLOUD',
                 style: GoogleFonts.teko(
-                  color: const Color(0xFFA3A3A3),
+                  color: XeneTheme.mutedLight,
                   fontSize: 18,
                   fontWeight: FontWeight.w400,
                   letterSpacing: 0.7,
@@ -238,7 +248,7 @@ class _XeneHeaderState extends ConsumerState<XeneHeader> {
               Text(
                 'DEV',
                 style: GoogleFonts.teko(
-                  color: const Color(0xFF00A88F),
+                  color: XeneTheme.tealDark,
                   fontSize: 18,
                   fontWeight: FontWeight.w400,
                   letterSpacing: 0.7,
@@ -248,7 +258,7 @@ class _XeneHeaderState extends ConsumerState<XeneHeader> {
               const Icon(
                 Icons.keyboard_arrow_down,
                 size: 18,
-                color: Color(0xFF00A88F),
+                color: XeneTheme.tealDark,
               ),
             ],
           ),
@@ -272,71 +282,62 @@ class _XeneHeaderState extends ConsumerState<XeneHeader> {
                 height: 56,
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 24),
-                  child: Stack(
-                    alignment: Alignment.centerLeft,
+                  child: Row(
                     children: [
-                      // Scrollable nav row
-                      SingleChildScrollView(
-                        controller: _navScrollController,
-                        scrollDirection: Axis.horizontal,
-                        physics: const BouncingScrollPhysics(),
-                        child: Row(
+                      // Scrollable nav + fade overlay
+                      Expanded(
+                        child: Stack(
+                          alignment: Alignment.centerLeft,
                           children: [
-                            if (showDevMenu) devMenuButton(),
-                            navButton('HOME', '/'),
-                            navButton('ARTICLES', '/articles'),
-                            navButton('FOLLOWING', '/following'),
-                            navButton('GAME', '/game'),
-                            navButton('CHANNELS', '/channels'),
-                            navButton('PROFILE', '/profile'),
-                            navButton('SETTINGS', '/settings'),
-                            navButton('ABOUT', '/about'),
-                            soundcloudButton(),
+                            // Scrollable nav row
+                            SingleChildScrollView(
+                              controller: _navScrollController,
+                              scrollDirection: Axis.horizontal,
+                              physics: const BouncingScrollPhysics(),
+                              child: Row(
+                                children: [
+                                  if (showDevMenu) devMenuButton(),
+                                  navButton('HOME', '/'),
+                                  navButton('FEATURE', '/articles'),
+                                  navButton('FOLLOWING', '/following'),
+                                  navButton('GAME', '/game'),
+                                  navButton('CHANNELS', '/channels'),
+                                  navButton('PROFILE', '/profile'),
+                                  navButton('SETTINGS', '/settings'),
+                                  navButton('ABOUT', '/about'),
+                                  _SubmitBugButton(),
+                                  soundcloudButton(),
+                                ],
+                              ),
+                            ),
+
+                            // Fade + chevron — decorative scroll indicator
+                            if (!_isAtEnd)
+                              ExcludeSemantics(
+                                child: Positioned(
+                                  right: 0,
+                                  top: 0,
+                                  bottom: 0,
+                                  child: Container(
+                                    width: 48,
+                                    decoration: const BoxDecoration(
+                                      gradient: LinearGradient(
+                                        colors: [
+                                          Color(0x00FFFFFF),
+                                          Colors.white,
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
                           ],
                         ),
                       ),
 
-                      // Fade + chevron — hides when scrolled to end
-                      if (!_isAtEnd)
-                        Positioned(
-                          right: 0,
-                          top: 0,
-                          bottom: 0,
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Container(
-                                width: 48,
-                                decoration: const BoxDecoration(
-                                  gradient: LinearGradient(
-                                    colors: [Color(0x00FFFFFF), Colors.white],
-                                  ),
-                                ),
-                              ),
-                              Container(
-                                color: Colors.white,
-                                padding: const EdgeInsets.only(left: 4),
-                                alignment: Alignment.center,
-                                child: Container(
-                                  width: 22,
-                                  height: 22,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                      color: const Color(0xFF888888),
-                                      width: 1.5,
-                                    ),
-                                  ),
-                                  child: const Icon(
-                                    Icons.chevron_right,
-                                    size: 14,
-                                    color: Color(0xFF888888),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
+                      // Fixed inbox badge — always visible, not in scroll
+                      if (!_isAtEnd) const _NavOverflowChevron(),
+                      _InboxBadgeButton(onTap: () => showDailyInbox(context)),
                     ],
                   ),
                 ),
@@ -364,6 +365,49 @@ PopupMenuItem<String> _devMenuItem(String value, String label) {
   );
 }
 
+// ── Submit Bug nav button ──────────────────────────────────────────────────────
+
+class _SubmitBugButton extends StatefulWidget {
+  const _SubmitBugButton();
+
+  @override
+  State<_SubmitBugButton> createState() => _SubmitBugButtonState();
+}
+
+class _SubmitBugButtonState extends State<_SubmitBugButton> {
+  bool _isHovered = false;
+
+  void _open() => showBugReportSheet(context);
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: () => _open(),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          child: AnimatedDefaultTextStyle(
+            duration: const Duration(milliseconds: 200),
+            style: GoogleFonts.teko(
+              color: _isHovered ? XeneTheme.orange : XeneTheme.mutedLight,
+              fontSize: 18,
+              fontWeight: FontWeight.w400,
+              letterSpacing: 0.7,
+            ),
+            maxLines: 1,
+            child: const Text('SUBMIT BUG'),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Nav button ─────────────────────────────────────────────────────────────────
+
 class _HeaderNavButton extends StatefulWidget {
   const _HeaderNavButton({
     required this.label,
@@ -386,26 +430,121 @@ class _HeaderNavButtonState extends State<_HeaderNavButton> {
 
   @override
   Widget build(BuildContext context) {
-    return MouseRegion(
-      onEnter: (_) => setState(() => _isHovered = true),
-      onExit: (_) => setState(() => _isHovered = false),
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          child: AnimatedDefaultTextStyle(
-            duration: const Duration(milliseconds: 200),
-            style: GoogleFonts.teko(
-              color: _isHovered || widget.isActive
-                  ? Colors.black
-                  : const Color(0xFFA3A3A3),
-              fontSize: 18,
-              fontWeight: FontWeight.w400,
-              letterSpacing: 0.7,
+    return Semantics(
+      label: '${widget.label} navigation',
+      selected: widget.isActive,
+      button: true,
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _isHovered = true),
+        onExit: (_) => setState(() => _isHovered = false),
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          onTap: widget.onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: AnimatedDefaultTextStyle(
+              duration: const Duration(milliseconds: 200),
+              style: GoogleFonts.teko(
+                color: _isHovered || widget.isActive
+                    ? Colors.black
+                    : XeneTheme.mutedLight,
+                fontSize: 18,
+                fontWeight: FontWeight.w400,
+                letterSpacing: 0.7,
+              ),
+              maxLines: 1,
+              child: ExcludeSemantics(child: Text(widget.label)),
             ),
-            maxLines: 1,
-            child: Text(widget.label),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Inbox badge button ────────────────────────────────────────────────────────
+
+class _NavOverflowChevron extends StatelessWidget {
+  const _NavOverflowChevron();
+
+  @override
+  Widget build(BuildContext context) {
+    return ExcludeSemantics(
+      child: SizedBox(
+        width: 28,
+        height: 44,
+        child: Center(
+          child: Container(
+            width: 22,
+            height: 22,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: XeneTheme.muted,
+                width: 1.5,
+              ),
+            ),
+            child: const Icon(
+              Icons.chevron_right,
+              size: 14,
+              color: XeneTheme.muted,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _InboxBadgeButton extends ConsumerWidget {
+  const _InboxBadgeButton({required this.onTap});
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final inboxAsync = ref.watch(dailyInboxProvider);
+    final hasInbox = inboxAsync.valueOrNull != null;
+    final isRead = ref.watch(inboxReadProvider);
+
+    final inboxLabel = hasInbox && !isRead
+        ? 'Daily inbox, unread'
+        : 'Daily inbox';
+    return Semantics(
+      label: inboxLabel,
+      button: true,
+      child: GestureDetector(
+        onTap: () {
+          ref.read(inboxReadProvider.notifier).state = true;
+          onTap();
+        },
+        child: SizedBox(
+          width: 44,
+          height: 44,
+          child: Stack(
+            clipBehavior: Clip.none,
+            alignment: Alignment.center,
+            children: [
+              Icon(
+                Icons.mail_outline,
+                size: 22,
+                color: hasInbox ? Colors.black : XeneTheme.mutedLight,
+              ),
+              if (hasInbox && !isRead)
+                Positioned(
+                  top: 7,
+                  right: 7,
+                  child: ExcludeSemantics(
+                    child: Container(
+                      width: 8,
+                      height: 8,
+                      decoration: const BoxDecoration(
+                        color: XeneTheme.orange,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           ),
         ),
       ),

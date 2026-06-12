@@ -7,6 +7,8 @@ import 'package:dart_frog/dart_frog.dart';
 
 
 import '../routes/monitor.dart' as monitor;
+import '../routes/bug_report.dart' as bug_report;
+import '../routes/user/account.dart' as user_account;
 import '../routes/user/saved/index.dart' as user_saved_index;
 import '../routes/user/saved/export_sc.dart' as user_saved_export_sc;
 import '../routes/user/saved/[id].dart' as user_saved_$id;
@@ -15,6 +17,7 @@ import '../routes/user/queue/index.dart' as user_queue_index;
 import '../routes/user/queue/[id].dart' as user_queue_$id;
 import '../routes/user/history/index.dart' as user_history_index;
 import '../routes/twitch/live.dart' as twitch_live;
+import '../routes/track/analysis/[platform]/[trackId].dart' as track_analysis_$platform_$track_id;
 import '../routes/soundcloud/track_search.dart' as soundcloud_track_search;
 import '../routes/soundcloud/stream/[id].dart' as soundcloud_stream_$id;
 import '../routes/publications/matches.dart' as publications_matches;
@@ -33,14 +36,19 @@ import '../routes/presets/templates/[slug]/sources/[sourceId]/refresh_feed.dart'
 import '../routes/presets/templates/[slug]/sources/[sourceId]/move.dart' as presets_templates_$slug_sources_$source_id_move;
 import '../routes/presets/templates/[slug]/sources/[sourceId]/index.dart' as presets_templates_$slug_sources_$source_id_index;
 import '../routes/presets/templates/[slug]/sources/[sourceId]/articles.dart' as presets_templates_$slug_sources_$source_id_articles;
+import '../routes/inbox/daily.dart' as inbox_daily;
+import '../routes/game/scene.dart' as game_scene;
 import '../routes/game/profile/username.dart' as game_profile_username;
 import '../routes/game/parties/index.dart' as game_parties_index;
+import '../routes/game/parties/[partyId]/weeks.dart' as game_parties_$party_id_weeks;
+import '../routes/game/parties/[partyId]/weekly_winners.dart' as game_parties_$party_id_weekly_winners;
 import '../routes/game/parties/[partyId]/scores.dart' as game_parties_$party_id_scores;
 import '../routes/game/parties/[partyId]/leave.dart' as game_parties_$party_id_leave;
 import '../routes/game/parties/[partyId]/index.dart' as game_parties_$party_id_index;
 import '../routes/game/parties/[partyId]/export_sc.dart' as game_parties_$party_id_export_sc;
 import '../routes/game/parties/[partyId]/votes/index.dart' as game_parties_$party_id_votes_index;
 import '../routes/game/parties/[partyId]/tracks/index.dart' as game_parties_$party_id_tracks_index;
+import '../routes/game/parties/[partyId]/tracks/check.dart' as game_parties_$party_id_tracks_check;
 import '../routes/game/parties/[partyId]/tracks/[trackId].dart' as game_parties_$party_id_tracks_$track_id;
 import '../routes/game/join/[inviteCode].dart' as game_join_$invite_code;
 import '../routes/feed/merged.dart' as feed_merged;
@@ -52,6 +60,7 @@ import '../routes/discovery/auto_discover.dart' as discovery_auto_discover;
 import '../routes/connections/status.dart' as connections_status;
 import '../routes/connections/soundcloud/following.dart' as connections_soundcloud_following;
 import '../routes/connections/soundcloud/disconnect.dart' as connections_soundcloud_disconnect;
+import '../routes/config/index.dart' as config_index;
 import '../routes/auth/soundcloud/nonce.dart' as auth_soundcloud_nonce;
 import '../routes/auth/soundcloud/index.dart' as auth_soundcloud_index;
 import '../routes/auth/soundcloud/done.dart' as auth_soundcloud_done;
@@ -79,10 +88,12 @@ Handler buildRootHandler() {
   final pipeline = const Pipeline().addMiddleware(middleware.middleware);
   final router = Router()
     ..mount('/', (context) => buildHandler()(context))
+    ..mount('/user', (context) => buildUserHandler()(context))
     ..mount('/user/saved', (context) => buildUserSavedHandler()(context))
     ..mount('/user/queue', (context) => buildUserQueueHandler()(context))
     ..mount('/user/history', (context) => buildUserHistoryHandler()(context))
     ..mount('/twitch', (context) => buildTwitchHandler()(context))
+    ..mount('/track/analysis/<platform>', (context,platform,) => buildTrackAnalysis$platformHandler(platform,)(context))
     ..mount('/soundcloud', (context) => buildSoundcloudHandler()(context))
     ..mount('/soundcloud/stream', (context) => buildSoundcloudStreamHandler()(context))
     ..mount('/publications', (context) => buildPublicationsHandler()(context))
@@ -93,6 +104,8 @@ Handler buildRootHandler() {
     ..mount('/presets/templates/<slug>', (context,slug,) => buildPresetsTemplates$slugHandler(slug,)(context))
     ..mount('/presets/templates/<slug>/sources', (context,slug,) => buildPresetsTemplates$slugSourcesHandler(slug,)(context))
     ..mount('/presets/templates/<slug>/sources/<sourceId>', (context,slug,sourceId,) => buildPresetsTemplates$slugSources$sourceIdHandler(slug,sourceId,)(context))
+    ..mount('/inbox', (context) => buildInboxHandler()(context))
+    ..mount('/game', (context) => buildGameHandler()(context))
     ..mount('/game/profile', (context) => buildGameProfileHandler()(context))
     ..mount('/game/parties', (context) => buildGamePartiesHandler()(context))
     ..mount('/game/parties/<partyId>', (context,partyId,) => buildGameParties$partyIdHandler(partyId,)(context))
@@ -103,6 +116,7 @@ Handler buildRootHandler() {
     ..mount('/discovery', (context) => buildDiscoveryHandler()(context))
     ..mount('/connections', (context) => buildConnectionsHandler()(context))
     ..mount('/connections/soundcloud', (context) => buildConnectionsSoundcloudHandler()(context))
+    ..mount('/config', (context) => buildConfigHandler()(context))
     ..mount('/auth/soundcloud', (context) => buildAuthSoundcloudHandler()(context))
     ..mount('/artists', (context) => buildArtistsHandler()(context))
     ..mount('/artists/<id>', (context,id,) => buildArtists$idHandler(id,)(context))
@@ -113,7 +127,14 @@ Handler buildRootHandler() {
 Handler buildHandler() {
   final pipeline = const Pipeline();
   final router = Router()
-    ..all('/monitor', (context) => monitor.onRequest(context,));
+    ..all('/bug_report', (context) => bug_report.onRequest(context,))..all('/monitor', (context) => monitor.onRequest(context,));
+  return pipeline.addHandler(router);
+}
+
+Handler buildUserHandler() {
+  final pipeline = const Pipeline();
+  final router = Router()
+    ..all('/account', (context) => user_account.onRequest(context,));
   return pipeline.addHandler(router);
 }
 
@@ -142,6 +163,13 @@ Handler buildTwitchHandler() {
   final pipeline = const Pipeline();
   final router = Router()
     ..all('/live', (context) => twitch_live.onRequest(context,));
+  return pipeline.addHandler(router);
+}
+
+Handler buildTrackAnalysis$platformHandler(String platform,) {
+  final pipeline = const Pipeline();
+  final router = Router()
+    ..all('/<trackId>', (context,trackId,) => track_analysis_$platform_$track_id.onRequest(context,platform,trackId,));
   return pipeline.addHandler(router);
 }
 
@@ -215,6 +243,20 @@ Handler buildPresetsTemplates$slugSources$sourceIdHandler(String slug,String sou
   return pipeline.addHandler(router);
 }
 
+Handler buildInboxHandler() {
+  final pipeline = const Pipeline();
+  final router = Router()
+    ..all('/daily', (context) => inbox_daily.onRequest(context,));
+  return pipeline.addHandler(router);
+}
+
+Handler buildGameHandler() {
+  final pipeline = const Pipeline();
+  final router = Router()
+    ..all('/scene', (context) => game_scene.onRequest(context,));
+  return pipeline.addHandler(router);
+}
+
 Handler buildGameProfileHandler() {
   final pipeline = const Pipeline();
   final router = Router()
@@ -232,7 +274,7 @@ Handler buildGamePartiesHandler() {
 Handler buildGameParties$partyIdHandler(String partyId,) {
   final pipeline = const Pipeline();
   final router = Router()
-    ..all('/export_sc', (context) => game_parties_$party_id_export_sc.onRequest(context,partyId,))..all('/leave', (context) => game_parties_$party_id_leave.onRequest(context,partyId,))..all('/scores', (context) => game_parties_$party_id_scores.onRequest(context,partyId,))..all('/', (context) => game_parties_$party_id_index.onRequest(context,partyId,));
+    ..all('/export_sc', (context) => game_parties_$party_id_export_sc.onRequest(context,partyId,))..all('/leave', (context) => game_parties_$party_id_leave.onRequest(context,partyId,))..all('/scores', (context) => game_parties_$party_id_scores.onRequest(context,partyId,))..all('/weekly_winners', (context) => game_parties_$party_id_weekly_winners.onRequest(context,partyId,))..all('/weeks', (context) => game_parties_$party_id_weeks.onRequest(context,partyId,))..all('/', (context) => game_parties_$party_id_index.onRequest(context,partyId,));
   return pipeline.addHandler(router);
 }
 
@@ -246,7 +288,7 @@ Handler buildGameParties$partyIdVotesHandler(String partyId,) {
 Handler buildGameParties$partyIdTracksHandler(String partyId,) {
   final pipeline = const Pipeline();
   final router = Router()
-    ..all('/<trackId>', (context,trackId,) => game_parties_$party_id_tracks_$track_id.onRequest(context,partyId,trackId,))..all('/', (context) => game_parties_$party_id_tracks_index.onRequest(context,partyId,));
+    ..all('/check', (context) => game_parties_$party_id_tracks_check.onRequest(context,partyId,))..all('/<trackId>', (context,trackId,) => game_parties_$party_id_tracks_$track_id.onRequest(context,partyId,trackId,))..all('/', (context) => game_parties_$party_id_tracks_index.onRequest(context,partyId,));
   return pipeline.addHandler(router);
 }
 
@@ -282,6 +324,13 @@ Handler buildConnectionsSoundcloudHandler() {
   final pipeline = const Pipeline();
   final router = Router()
     ..all('/disconnect', (context) => connections_soundcloud_disconnect.onRequest(context,))..all('/following', (context) => connections_soundcloud_following.onRequest(context,));
+  return pipeline.addHandler(router);
+}
+
+Handler buildConfigHandler() {
+  final pipeline = const Pipeline();
+  final router = Router()
+    ..all('/', (context) => config_index.onRequest(context,));
   return pipeline.addHandler(router);
 }
 

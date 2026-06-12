@@ -12,6 +12,8 @@ import 'package:xene_domain/xene_domain.dart';
 import '../providers/app_state_provider.dart';
 import '../providers/feed_provider.dart';
 import '../providers/preset_provider.dart';
+import '../providers/ui_config_provider.dart';
+import '../theme/xene_theme.dart';
 import '../widgets/xene_feed_card.dart';
 import '../widgets/xene_content_modal.dart';
 
@@ -29,6 +31,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
   late ScrollController _scrollController;
   Ticker? _crawlTicker;
   Duration _lastTickTime = Duration.zero;
+
   bool _isPaused = false;
   Timer? _resumeTimer;
   int _crawlCopyCount = 2;
@@ -43,6 +46,17 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
   bool _searchActive = false;
   Timer? _transitionTimeoutTimer;
   bool _transitionRetried = false;
+
+  // Scroll speed multiplier, updated from uiConfigProvider on each build.
+  double _scrollSpeedMultiplier = 1.0;
+
+  // Sub-pixel accumulator — banks fractional advance so jumpTo only fires on
+  // whole-pixel boundaries, keeping text on the same pixel row every frame.
+  double _subPixelAccum = 0.0;
+
+  // Crawl debug counters — reset on each _startCrawl.
+  int _dbgFrame = 0;
+  double _dbgLastReportedPos = 0.0;
 
   // Memoized section/loop data — recomputed only when the items list reference changes.
   List<FeedItem>? _cachedItems;
@@ -103,7 +117,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
       final feed = ref.read(filteredFeedProvider);
       if (feed.hasValue && (feed.value?.isNotEmpty ?? false)) {
         debugPrint('[FeedScreen] clearSearch -> restarting crawl');
-        _startCrawl(); // _startCrawl disposes any existing ticker internally
+        _startCrawl();
       }
     });
   }
@@ -133,17 +147,32 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
   }
 
   // ------------------------------------------------------------
-  // AUTO-SCROLL TICKER (correct wrap logic)
+  // AUTO-SCROLL TICKER
+  // setPixels drives per-frame position — unlike jumpTo it never calls
+  // goBallistic(0), so scroll physics are never reset mid-crawl and
+  // SliverPersistentHeader gets no spurious layout passes per frame.
+  // jumpTo is only used for the seamless loop-wrap (once per ~100 s).
   // ------------------------------------------------------------
   void _startCrawl() {
     _crawlTicker?.dispose();
     _crawlTicker = null;
     _lastTickTime = Duration.zero;
+    _subPixelAccum = 0.0;
+    _dbgFrame = 0;
+    _dbgLastReportedPos = 0.0;
+
+    // Snap to whole pixel before crawl starts so all subsequent whole-pixel
+    // advances stay on integer boundaries.
+    if (_scrollController.hasClients) {
+      final snapped = _scrollController.position.pixels.roundToDouble();
+      if (snapped != _scrollController.position.pixels) {
+        _scrollController.jumpTo(snapped);
+      }
+    }
 
     SchedulerBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       if (!_scrollController.hasClients) {
-        // CustomScrollView detached during loading state — retry next frame.
         SchedulerBinding.instance.addPostFrameCallback((_) {
           if (mounted && _crawlTicker == null) _startCrawl();
         });
@@ -170,9 +199,6 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
         return;
       }
 
-      // singleExtent must be >= viewport for the wrap to be seamless.
-      // Schedule a retry so we recover if more content arrives without a
-      // filteredFeedProvider change (e.g. background BC fetch completes silently).
       if (singleExtent < viewport) {
         debugPrint(
           '[FeedScreen] startCrawl ABORTED — singleExtent=${singleExtent.toStringAsFixed(1)} '
@@ -185,32 +211,77 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
       }
 
       _crawlTicker = createTicker((elapsed) {
-        if (!_isPaused && _scrollController.hasClients) {
-          final delta = _lastTickTime == Duration.zero
-              ? Duration.zero
-              : elapsed - _lastTickTime;
+        _dbgFrame++;
+
+        if (_isPaused || !_scrollController.hasClients) {
           _lastTickTime = elapsed;
+          return;
+        }
 
-          final pixels = delta.inMicroseconds / 1000.0 * 0.043;
+        final delta = _lastTickTime == Duration.zero
+            ? Duration.zero
+            : elapsed - _lastTickTime;
+        _lastTickTime = elapsed;
 
-          final position = _scrollController.position;
-          final maxScroll = position.maxScrollExtent;
-          final viewport = position.viewportDimension;
-          final current = position.pixels;
+        final deltaMs = delta.inMicroseconds / 1000.0;
 
-          if (maxScroll <= 0) return;
+        // Clamp advance to 2px max per frame — prevents a 1133ms browser
+        // freeze from lurching the content by 49px all at once.
+        final rawAdvance = deltaMs * 0.043 * _scrollSpeedMultiplier;
+        final clampedAdvance = rawAdvance.clamp(0.0, 2.0);
 
-          final contentExtent = maxScroll + viewport - 100;
-          final singleExtent = contentExtent / _crawlCopyCount;
+        // Accumulate sub-pixel movement; only call jumpTo on whole-pixel
+        // boundaries so text stays on the same pixel row every frame.
+        _subPixelAccum += clampedAdvance;
+        final wholePixels = _subPixelAccum.floorToDouble();
+        _subPixelAccum -= wholePixels;
+        if (wholePixels < 1.0) return;
 
-          double next = current + pixels;
-          if (singleExtent > 0 && next >= singleExtent) {
-            next -= singleExtent;
-          }
+        final position = _scrollController.position;
+        final maxScroll = position.maxScrollExtent;
+        final viewport = position.viewportDimension;
+        final current = position.pixels;
 
-          _scrollController.jumpTo(next);
+        if (maxScroll <= 0) return;
+
+        final contentExtent = maxScroll + viewport - 100;
+        final singleExtent = contentExtent / _crawlCopyCount;
+        final next = current + wholePixels;
+
+        // ── Anomaly flags ──────────────────────────────────────────
+        final flags = <String>[];
+        if (_dbgFrame > 1 && deltaMs > 50)
+          flags.add('DROPPED_FRAME(${deltaMs.toStringAsFixed(1)}ms)');
+        if (_dbgFrame > 1 && deltaMs < 4 && deltaMs > 0)
+          flags.add('SUSPICIOUSLY_FAST(${deltaMs.toStringAsFixed(1)}ms)');
+        if (current < _dbgLastReportedPos - 1.0)
+          flags.add(
+            'REGRESSION(was=${_dbgLastReportedPos.toStringAsFixed(2)} now=${current.toStringAsFixed(2)})',
+          );
+        // ──────────────────────────────────────────────────────────
+
+        String action;
+        if (singleExtent > 0 && next >= singleExtent) {
+          final wrapped = (next - singleExtent).roundToDouble();
+          _scrollController.jumpTo(wrapped);
+          action = 'WRAP→${wrapped.toStringAsFixed(1)}';
         } else {
-          _lastTickTime = elapsed;
+          _scrollController.jumpTo(next.roundToDouble());
+          action = 'jumpTo→${next.toStringAsFixed(1)}';
+        }
+
+        _dbgLastReportedPos = position.pixels;
+
+        // Log every 30 frames (~0.5s at 60fps) or whenever anomalies occur.
+        if (_dbgFrame % 30 == 0 || flags.isNotEmpty) {
+          final flagStr = flags.isEmpty ? '' : ' ⚠ ${flags.join(' ')}';
+          debugPrint(
+            '[CRAWL f=$_dbgFrame] δ=${deltaMs.toStringAsFixed(2)}ms '
+            'advance=${clampedAdvance.toStringAsFixed(3)}px '
+            'pos=${current.toStringAsFixed(3)}→${position.pixels.toStringAsFixed(3)} '
+            'single=${singleExtent.toStringAsFixed(1)} '
+            'action=$action$flagStr',
+          );
         }
       });
 
@@ -219,7 +290,12 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
   }
 
   void _pauseCrawl() {
-    if (!_isPaused) setState(() => _isPaused = true);
+    if (!_isPaused) {
+      debugPrint(
+        '[CRAWL f=$_dbgFrame] PAUSED pos=${_scrollController.hasClients ? _scrollController.position.pixels.toStringAsFixed(2) : "no-client"}',
+      );
+      setState(() => _isPaused = true);
+    }
     _resumeTimer?.cancel();
   }
 
@@ -227,7 +303,18 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
     if (_searchActive) return;
     _resumeTimer?.cancel();
     _resumeTimer = Timer(const Duration(milliseconds: 1500), () {
-      if (mounted) setState(() => _isPaused = false);
+      if (!mounted) return;
+      _subPixelAccum = 0.0;
+      if (_scrollController.hasClients) {
+        final snapped = _scrollController.position.pixels.roundToDouble();
+        if (snapped != _scrollController.position.pixels) {
+          _scrollController.jumpTo(snapped);
+        }
+      }
+      debugPrint(
+        '[CRAWL f=$_dbgFrame] RESUMED pos=${_scrollController.hasClients ? _scrollController.position.pixels.toStringAsFixed(2) : "no-client"}',
+      );
+      setState(() => _isPaused = false);
     });
   }
 
@@ -354,31 +441,26 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
 
     for (var sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
       final section = sections[sectionIndex];
+      // Non-pinned header: scrolls with content. Avoids SliverPersistentHeader
+      // recalculating pinned-vs-scrolling geometry on every jumpTo call, which
+      // was causing the renderer to run at 30fps instead of 60fps.
+      slivers.add(SliverToBoxAdapter(child: _DateDivider(date: section.date)));
       slivers.add(
-        SliverMainAxisGroup(
-          slivers: [
-            SliverPersistentHeader(
-              pinned: true,
-              delegate: _DateHeaderDelegate(
-                child: _DateDivider(date: section.date),
-                backgroundColor: Colors.white,
+        SliverList(
+          delegate: SliverChildBuilderDelegate((context, itemIndex) {
+            final item = section.items[itemIndex];
+            final compositeId = '${item.platform}_${item.id}';
+            final animIndex = animIndexMap[compositeId] ?? -1;
+            return _AnimatingFeedCard(
+              key: ValueKey(
+                'feed_card_${sectionIndex}_${itemIndex}_${item.platform}_${item.id}',
               ),
-            ),
-            SliverList(
-              delegate: SliverChildBuilderDelegate((context, itemIndex) {
-                final item = section.items[itemIndex];
-                final compositeId = '${item.platform}_${item.id}';
-                final animIndex = animIndexMap[compositeId] ?? -1;
-                return _AnimatingFeedCard(
-                  key: ValueKey('feed_card_${item.platform}_${item.id}'),
-                  item: item,
-                  onTap: () => showXeneContent(context, item),
-                  animIndex: animIndex,
-                  videoMode: videoMode,
-                );
-              }, childCount: section.items.length),
-            ),
-          ],
+              item: item,
+              onTap: () => showXeneContent(context, item),
+              animIndex: animIndex,
+              videoMode: videoMode,
+            );
+          }, childCount: section.items.length),
         ),
       );
     }
@@ -398,6 +480,11 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
         'cardThumbnailSize': layoutMetrics.cardThumbnailSize,
       });
     }
+
+    // Update scroll speed from remote config (non-blocking — defaults to 1.0).
+    final uiConfig = ref.watch(uiConfigProvider).valueOrNull;
+    _scrollSpeedMultiplier = uiConfig?.feedScrollSpeed ?? 1.0;
+    final feedHeading = uiConfig?.feedHeading ?? 'JUST DROPPED';
 
     final searchQuery = ref.watch(searchQueryProvider);
     final isSearching = searchQuery != null;
@@ -572,7 +659,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
                       transform: Matrix4.diagonal3Values(1.0, titleYScale, 1.0),
                       alignment: Alignment.topRight,
                       child: Text(
-                        'JUST DROPPED',
+                        feedHeading,
                         textAlign: TextAlign.right,
                         maxLines: 1,
                         overflow: TextOverflow.visible,
@@ -618,7 +705,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
                           softWrap: false,
                           style: GoogleFonts.teko(
                             fontSize: 18,
-                            color: const Color(0xFFFF5500),
+                            color: XeneTheme.orange,
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -635,7 +722,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
                               hintText: 'SEARCH...',
                               hintStyle: GoogleFonts.teko(
                                 fontSize: 16,
-                                color: const Color(0xFF555555),
+                                color: XeneTheme.textDarker,
                               ),
                               isDense: true,
                               contentPadding: EdgeInsets.zero,
@@ -648,7 +735,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
                           child: const Icon(
                             Icons.close,
                             size: 16,
-                            color: Color(0xFF888888),
+                            color: XeneTheme.muted,
                           ),
                         ),
                       ],
@@ -663,7 +750,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
                             softWrap: false,
                             style: GoogleFonts.teko(
                               fontSize: 18,
-                              color: const Color(0xFF888888),
+                              color: XeneTheme.muted,
                             ),
                           ),
                         ),
@@ -704,8 +791,8 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
                                         color:
                                             (currentPlatform != null ||
                                                 currentArtist != null)
-                                            ? const Color(0xFFFF5500)
-                                            : const Color(0xFF888888),
+                                            ? XeneTheme.orange
+                                            : XeneTheme.muted,
                                       )
                                     : Text(
                                         'FILTER BY -',
@@ -717,8 +804,8 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
                                           color:
                                               (currentPlatform != null ||
                                                   currentArtist != null)
-                                              ? const Color(0xFFFF5500)
-                                              : const Color(0xFF888888),
+                                              ? XeneTheme.orange
+                                              : XeneTheme.muted,
                                         ),
                                       ),
                                 itemBuilder: (context) => [
@@ -779,7 +866,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
                                 child: const Icon(
                                   Icons.search,
                                   size: 18,
-                                  color: Color(0xFF888888),
+                                  color: XeneTheme.muted,
                                 ),
                               ),
                             ],
@@ -811,7 +898,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
                           isSearching ? 'No results' : 'Empty feed',
                           style: GoogleFonts.teko(
                             fontSize: 18,
-                            color: const Color(0xFF555555),
+                            color: XeneTheme.textDarker,
                           ),
                         ),
                       );
@@ -874,7 +961,11 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
                           onPointerCancel: (_) => _resumeCrawl(),
                           child: CustomScrollView(
                             controller: _scrollController,
-                            physics: const ClampingScrollPhysics(),
+                            // ignore: deprecated_member_use
+                            cacheExtent: 600,
+                            physics: const BouncingScrollPhysics(
+                              parent: AlwaysScrollableScrollPhysics(),
+                            ),
                             slivers: _buildFeedSlivers(
                               loop.sections,
                               newItemIds,
@@ -1057,7 +1148,7 @@ class _DateDivider extends StatelessWidget {
               DateFormat('MM.dd.yy').format(date),
               style: GoogleFonts.teko(
                 fontSize: 20,
-                color: const Color(0xFFFF5500),
+                color: XeneTheme.orange,
                 letterSpacing: 2.0,
               ),
             ),
@@ -1083,38 +1174,4 @@ class _FeedCrawlLoop {
 
   final List<_FeedDateSection> sections;
   final int copyCount;
-}
-
-class _DateHeaderDelegate extends SliverPersistentHeaderDelegate {
-  const _DateHeaderDelegate({
-    required this.child,
-    required this.backgroundColor,
-  });
-
-  final Widget child;
-  final Color backgroundColor;
-
-  @override
-  double get minExtent => 34;
-
-  @override
-  double get maxExtent => 34;
-
-  @override
-  Widget build(
-    BuildContext context,
-    double shrinkOffset,
-    bool overlapsContent,
-  ) {
-    return DecoratedBox(
-      decoration: BoxDecoration(color: backgroundColor),
-      child: child,
-    );
-  }
-
-  @override
-  bool shouldRebuild(covariant _DateHeaderDelegate oldDelegate) {
-    return child != oldDelegate.child ||
-        backgroundColor != oldDelegate.backgroundColor;
-  }
 }

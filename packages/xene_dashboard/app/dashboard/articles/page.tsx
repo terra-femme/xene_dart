@@ -11,8 +11,9 @@ import {
 import Link from 'next/link'
 import { buttonVariants } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { Pencil, Plus } from 'lucide-react'
-import { deleteArticle, publishArticle, unpublishArticle } from './actions'
+import { Plus } from 'lucide-react'
+
+import { ArticleRowActions } from '@/components/articles/article-row-actions'
 
 export const dynamic = 'force-dynamic'
 
@@ -109,59 +110,7 @@ export default async function ArticlesPage() {
                       : '—'}
                   </TableCell>
                   <TableCell className="text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      {a.status === 'published' ? (
-                        <form
-                          action={async () => {
-                            'use server'
-                            await unpublishArticle(a.id)
-                          }}
-                        >
-                          <button
-                            type="submit"
-                            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                          >
-                            Unpublish
-                          </button>
-                        </form>
-                      ) : (
-                        <form
-                          action={async () => {
-                            'use server'
-                            await publishArticle(a.id)
-                          }}
-                        >
-                          <button
-                            type="submit"
-                            className="text-xs text-emerald-400 hover:text-emerald-300 transition-colors"
-                          >
-                            Publish
-                          </button>
-                        </form>
-                      )}
-                      <form
-                        action={async () => {
-                          'use server'
-                          await deleteArticle(a.id)
-                        }}
-                      >
-                        <button
-                          type="submit"
-                          className="text-xs text-destructive hover:text-destructive/80 transition-colors"
-                          onClick={(e) => {
-                            if (!confirm(`Delete "${a.title}"?`)) e.preventDefault()
-                          }}
-                        >
-                          Delete
-                        </button>
-                      </form>
-                      <Link
-                        href={`/dashboard/articles/${a.id}`}
-                        className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }))}
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Link>
-                    </div>
+                    <ArticleRowActions id={a.id} title={a.title} status={a.status} />
                   </TableCell>
                 </TableRow>
               ))}

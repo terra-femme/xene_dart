@@ -8,6 +8,7 @@ import 'package:xene_backend/src/database.dart';
 import 'package:xene_backend/src/feed_cache.dart';
 import 'package:xene_backend/src/services/discovery_service.dart';
 import 'package:xene_backend/src/utils/auth_utils.dart';
+import 'package:xene_backend/src/utils/url_utils.dart';
 import 'package:xene_backend/src/services/bandcamp_service.dart';
 import 'package:xene_backend/src/services/press_scout_service.dart';
 import 'package:xene_backend/src/services/soundcloud_service.dart';
@@ -157,6 +158,42 @@ Future<Response> onRequest(RequestContext context) async {
     '[save_discovery] row name=${row['name']} soundcloud_username=${row['soundcloud_username']}',
   );
   _logger.info('[save_discovery] Saving artist: $name userId=$userId');
+
+  // Refuse to overwrite a curated (manually_verified) artist record.
+  // Protects global artist data from being poisoned by any real user account.
+  final scUsername = row['soundcloud_username'] as String?;
+  if (scUsername != null && scUsername.isNotEmpty) {
+    final existing = await db.client
+        .from('artists')
+        .select('manually_verified')
+        .eq('soundcloud_username', scUsername)
+        .maybeSingle();
+    if (existing != null && existing['manually_verified'] == true) {
+      _logger.warning(
+        '[save_discovery] Blocked overwrite of verified artist "$scUsername" by userId=$userId',
+      );
+      return Response.json(
+        statusCode: 403,
+        body: {'error': 'Cannot overwrite a verified artist record'},
+      );
+    }
+  }
+
+  // Validate user-supplied platform URLs against domain allowlists before
+  // any write — the feed warmup fires outbound HTTP to these URLs.
+  final urlViolations = invalidPlatformUrls(row);
+  if (urlViolations.isNotEmpty) {
+    _logger.warning(
+      '[save_discovery] Rejected disallowed URLs: $urlViolations userId=$userId',
+    );
+    return Response.json(
+      statusCode: 422,
+      body: {
+        'error': 'One or more URLs point to a disallowed domain',
+        'fields': urlViolations.keys.toList(),
+      },
+    );
+  }
 
   try {
     _logger.info(

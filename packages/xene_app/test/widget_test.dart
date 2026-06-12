@@ -18,6 +18,7 @@ import 'package:xene_app/src/providers/sc_search_provider.dart';
 import 'package:xene_app/src/providers/soundcloud_connection_provider.dart';
 import 'package:xene_app/src/screens/artist_detail_screen.dart';
 import 'package:xene_app/src/screens/artists_screen.dart';
+import 'package:xene_app/src/screens/articles_screen.dart';
 import 'package:xene_app/src/screens/feed_screen.dart';
 import 'package:xene_app/src/screens/monitor_screen.dart';
 import 'package:xene_app/src/screens/network_screen.dart';
@@ -774,6 +775,40 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
+    testWidgets(
+      'features landscape cover lift still reaches bottom at scroll end',
+      (WidgetTester tester) async {
+        await _setViewport(tester, const Size(844, 390));
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        await tester.pumpWidget(
+          _testApp(
+            const ArticlesScreen(),
+            overrides: [
+              featuredArticlesProvider.overrideWith((ref) async => _articles),
+              magazineCoverProvider.overrideWith((ref) async => _magazineCover),
+            ],
+          ),
+        );
+        await tester.pump();
+        await tester.pump();
+
+        final scrollable = tester.state<ScrollableState>(
+          find.byType(Scrollable).first,
+        );
+        scrollable.position.jumpTo(scrollable.position.maxScrollExtent);
+        await tester.pump();
+
+        final stripBottom = tester
+            .getBottomLeft(find.byKey(const ValueKey('landscapeArticleStrip')))
+            .dy;
+
+        expect(stripBottom, greaterThanOrEqualTo(390));
+        expect(tester.takeException(), isNull);
+      },
+    );
+
     for (final viewport in _mobileReadinessViewportMatrix) {
       for (final screen in _secondaryScreenSmokeCases) {
         testWidgets(
@@ -1256,6 +1291,13 @@ final _articles = [
     publishedAt: DateTime(2026, 5, 18),
   ),
 ];
+
+const _magazineCover = MagazineCover(
+  id: 'cover-layout-regression',
+  title: 'Layout Regression Cover',
+  backgroundImageUrl: '',
+  aspectRatio: '3:4',
+);
 
 final _artists = [
   Artist(

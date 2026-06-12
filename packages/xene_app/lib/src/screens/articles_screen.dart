@@ -9,123 +9,257 @@ import 'package:lottie/lottie.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../providers/articles_provider.dart';
+import '../theme/xene_theme.dart';
 import 'xene_article_sheet.dart';
 
 class ArticlesScreen extends ConsumerWidget {
   const ArticlesScreen({super.key});
 
-  static const _teal = Color(0xFF00A88F);
-  static const _muted = Color(0xFF888888);
-  static const _orange = Color(0xFFFF5500);
+  static const _teal = XeneTheme.tealDark;
+  static const _muted = XeneTheme.muted;
+  static const _orange = XeneTheme.orange;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final coverAsync = ref.watch(magazineCoverProvider);
-    final articlesAsync = ref.watch(presetArticlesProvider);
+    final articlesAsync = ref.watch(featuredArticlesProvider);
 
     // SizedBox.expand forces this widget to fill the Expanded slot in
     // _InnerPageLayout exactly, so LayoutBuilder inside _MagazineLayout
     // always receives finite, tight constraints — never double.infinity.
     return SizedBox.expand(
-      child: ColoredBox(
-        color: Colors.white,
-        child: articlesAsync.when(
-          loading: () => const Center(
+      child: articlesAsync.when(
+        loading: () => const ColoredBox(
+          color: Colors.white,
+          child: Center(
             child: CircularProgressIndicator(strokeWidth: 2, color: _teal),
           ),
-          error: (_, __) => const _EmptyState(),
-          data: (articles) {
-            final visible = articles.where((a) => a.url.isNotEmpty).toList();
-
-            final cover = coverAsync.when(
-              loading: () => null,
-              error: (_, __) => null,
-              data: (c) => c,
-            );
-
-            return _ContainedMagazineLayout(cover: cover, articles: visible);
-          },
         ),
+        error: (_, __) =>
+            const ColoredBox(color: Colors.white, child: _EmptyState()),
+        data: (articles) {
+          final visible = articles.where((a) => a.url.isNotEmpty).toList();
+
+          final cover = coverAsync.when(
+            loading: () => null,
+            error: (_, __) => null,
+            data: (c) => c,
+          );
+
+          return _ContainedMagazineLayout(cover: cover, articles: visible);
+        },
       ),
     );
   }
 }
 
-class _ContainedMagazineLayout extends StatelessWidget {
+class _ContainedMagazineLayout extends StatefulWidget {
   const _ContainedMagazineLayout({required this.cover, required this.articles});
 
   final MagazineCover? cover;
   final List<ArticleItem> articles;
 
+  @override
+  State<_ContainedMagazineLayout> createState() =>
+      _ContainedMagazineLayoutState();
+}
+
+class _ContainedMagazineLayoutState extends State<_ContainedMagazineLayout> {
   static const _stripHeight = 200.0;
+  bool _landscapeAtBottom = false;
+
+  bool _handleLandscapeScroll(ScrollNotification notification) {
+    final metrics = notification.metrics;
+    final atBottom = metrics.pixels >= metrics.maxScrollExtent - 8;
+    if (atBottom != _landscapeAtBottom) {
+      setState(() => _landscapeAtBottom = atBottom);
+    }
+    return false;
+  }
+
+  // Shared cover Stack — hotspot and motion layer coords are fractions of
+  // coverW/coverH, so they scale correctly regardless of which layout branch
+  // places this stack.
+  Stack _coverStack(
+    double coverW,
+    double coverH, {
+    BoxFit backgroundFit = BoxFit.contain,
+    bool showScrollCue = false,
+    double? scrollCueTop,
+    double? scrollCueBottom,
+  }) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        _CoverBackground(cover: widget.cover, fit: backgroundFit),
+        if (widget.cover != null)
+          for (final layer in widget.cover!.motionLayers)
+            _MotionLayerOverlay(
+              layer: layer,
+              coverLeft: 0,
+              coverTop: 0,
+              coverW: coverW,
+              coverH: coverH,
+            ),
+        if (widget.cover != null)
+          for (final spot in widget.cover!.hotspots)
+            _HotspotZone(
+              hotspot: spot,
+              coverLeft: 0,
+              coverTop: 0,
+              coverW: coverW,
+              coverH: coverH,
+            ),
+        if (showScrollCue)
+          Positioned(
+            left: 0,
+            right: 0,
+            top: scrollCueTop,
+            bottom: scrollCueBottom,
+            child: const IgnorePointer(child: _JumpingChevron()),
+          ),
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final bottomPad = MediaQuery.of(context).padding.bottom;
+    final mediaPadding = MediaQuery.of(context).padding;
+    final bottomPad = mediaPadding.bottom;
 
     return LayoutBuilder(
       builder: (context, constraints) {
         final w = constraints.maxWidth;
-        final rawAspect = cover?.aspectRatioValue ?? 3 / 4;
+        final h = constraints.maxHeight;
+        final rawAspect = widget.cover?.aspectRatioValue ?? 3 / 4;
         final coverAspect = rawAspect > 0 ? rawAspect : 3 / 4;
-
-        // Cover fills the full width at its native aspect ratio, pinned to top.
-        // Clamp so the strip always has room below on very small screens.
-        final maxCoverH = constraints.maxHeight - _stripHeight - bottomPad;
-        final imgW = w;
-        final imgH = (w / coverAspect).clamp(0.0, maxCoverH).toDouble();
+        final isLandscape = w > h;
 
         debugPrint(
-          '[ContainedMagazineLayout] screen=${w}x${constraints.maxHeight} '
-          'coverAspect=$coverAspect cover=${cover?.id ?? "none"} '
-          'imgH=${imgH.toStringAsFixed(1)}',
+          '[ContainedMagazineLayout] screen=${w}x${h} '
+          'coverAspect=$coverAspect cover=${widget.cover?.id ?? "none"} '
+          'landscape=$isLandscape safeL=${mediaPadding.left}',
         );
 
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // Cover pinned to top — SizedBox exactly matches 3:4 so
-            // BoxFit.contain fills it with zero bars or distortion.
-            SizedBox(
-              width: imgW,
-              height: imgH,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  _CoverBackground(cover: cover),
-                  if (cover != null)
-                    for (final layer in cover!.motionLayers)
-                      _MotionLayerOverlay(
-                        layer: layer,
-                        coverLeft: 0,
-                        coverTop: 0,
-                        coverW: imgW,
-                        coverH: imgH,
-                      ),
-                  if (cover != null)
-                    for (final spot in cover!.hotspots)
-                      _HotspotZone(
-                        hotspot: spot,
-                        coverLeft: 0,
-                        coverTop: 0,
-                        coverW: imgW,
-                        coverH: imgH,
-                      ),
-                ],
-              ),
+        // Shift the entire content block up by 5 px so the cover sits flush
+        // against the nav bar with no visible seam. Content paints last in
+        // the parent Column so it renders on top of the divider cleanly.
+        const landscapeLift = 20.0;
+        const portraitLift = 5.0;
+
+        if (isLandscape) {
+          // Cover fills full width at its natural (portrait) aspect ratio —
+          // much taller than the screen. User scrolls down through the cover,
+          // then reaches the article strip at the bottom.
+          // Keep the authored cover fully visible in landscape; the source
+          // art is positioned carefully and should not be horizontally cropped.
+          final coverH = w / coverAspect;
+
+          // ClipRect prevents the translated scrollable from painting over the
+          // nav bar. The trade-off is the top landscapeLift px of the cover are
+          // clipped, but the cover is ~1000 px tall so it is imperceptible.
+          return ClipRect(
+            child: Stack(
+              children: [
+                NotificationListener<ScrollNotification>(
+                  onNotification: _handleLandscapeScroll,
+                  child: SingleChildScrollView(
+                    padding: EdgeInsets.only(left: mediaPadding.left),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        SizedBox(
+                          width: w,
+                          height: coverH - landscapeLift,
+                          child: ClipRect(
+                            child: Transform.translate(
+                              offset: const Offset(0, -landscapeLift),
+                              child: SizedBox(
+                                width: w,
+                                height: coverH,
+                                child: _coverStack(w, coverH),
+                              ),
+                            ),
+                          ),
+                        ),
+                        SizedBox(
+                          key: const ValueKey('landscapeArticleStrip'),
+                          height: _stripHeight + bottomPad,
+                          child: ColoredBox(
+                            color: Colors.white,
+                            child: _ArticleStrip(
+                              articles: widget.articles,
+                              bottomPad: bottomPad,
+                              landscape: false,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                if (!_landscapeAtBottom)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 32 + bottomPad,
+                    child: const IgnorePointer(child: _JumpingChevron()),
+                  ),
+              ],
             ),
-            // Articles strip with gradient background below the cover.
-            SizedBox(
-              height: _stripHeight + bottomPad,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  const _BottomGradient(),
-                  _ArticleStrip(articles: articles, bottomPad: bottomPad),
-                ],
-              ),
+          );
+        }
+
+        // Portrait: Stack layout so the article strip overlaps the cover's
+        // lower portion. The transparent gradient top sits over the cover
+        // image — not below it — producing a correct photo-to-black fade.
+        // ClipRect + portraitLift flush the cover against the nav bar.
+        const overlapPx = 120.0;
+        final maxCoverH = (h - _stripHeight - bottomPad).clamp(0.0, h);
+        final imgH = (w / coverAspect).clamp(0.0, maxCoverH);
+
+        return ClipRect(
+          child: Transform.translate(
+            offset: const Offset(0, -portraitLift),
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                // Cover pinned to top.
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  height: imgH,
+                  child: _coverStack(w, imgH),
+                ),
+                // Strip anchored to bottom, overlapping the cover by overlapPx
+                // so the transparent gradient top sees the cover image.
+                // bottom: -portraitLift extends the strip past the Stack's
+                // layout edge so the -5px translate lands it flush at the
+                // screen bottom, closing the white gap.
+                Positioned(
+                  bottom: -portraitLift,
+                  left: 0,
+                  right: 0,
+                  height: _stripHeight + bottomPad + overlapPx,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      const _BottomGradient(),
+                      Padding(
+                        padding: const EdgeInsets.only(top: overlapPx),
+                        child: _ArticleStrip(
+                          articles: widget.articles,
+                          bottomPad: bottomPad,
+                          landscape: false,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         );
       },
     );
@@ -135,9 +269,10 @@ class _ContainedMagazineLayout extends StatelessWidget {
 // ─── Cover background ─────────────────────────────────────────────────────────
 
 class _CoverBackground extends StatelessWidget {
-  const _CoverBackground({required this.cover});
+  const _CoverBackground({required this.cover, this.fit = BoxFit.contain});
 
   final MagazineCover? cover;
+  final BoxFit fit;
 
   // URLs recorded as fully displayed this app session.
   // Prevents the loading placeholder from flashing on every tab revisit
@@ -147,13 +282,13 @@ class _CoverBackground extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final url = cover?.backgroundImageUrl ?? '';
-    if (url.isEmpty) return const _DarkFallbackPattern();
+    if (url.isEmpty) return const _LightFallbackPattern();
 
     final alreadySeen = _seenUrls.contains(url);
 
     return CachedNetworkImage(
       imageUrl: url,
-      fit: BoxFit.contain,
+      fit: fit,
       fadeInDuration: alreadySeen
           ? Duration.zero
           : const Duration(milliseconds: 700),
@@ -164,16 +299,18 @@ class _CoverBackground extends StatelessWidget {
       fadeOutCurve: Curves.easeOut,
       imageBuilder: (_, imageProvider) {
         _seenUrls.add(url);
-        return Image(image: imageProvider, fit: BoxFit.contain);
+        return Image(image: imageProvider, fit: fit);
       },
-      placeholder: alreadySeen ? null : (_, __) => const _DarkFallbackPattern(),
-      errorWidget: (_, __, ___) => const _DarkFallbackPattern(),
+      placeholder: alreadySeen
+          ? null
+          : (_, __) => const _LightFallbackPattern(),
+      errorWidget: (_, __, ___) => const _LightFallbackPattern(),
     );
   }
 }
 
-class _DarkFallbackPattern extends StatelessWidget {
-  const _DarkFallbackPattern();
+class _LightFallbackPattern extends StatelessWidget {
+  const _LightFallbackPattern();
 
   @override
   Widget build(BuildContext context) {
@@ -196,6 +333,76 @@ class _DarkFallbackPattern extends StatelessWidget {
 }
 
 // ─── Bottom gradient ──────────────────────────────────────────────────────────
+
+class _JumpingChevron extends StatefulWidget {
+  const _JumpingChevron();
+
+  @override
+  State<_JumpingChevron> createState() => _JumpingChevronState();
+}
+
+class _JumpingChevronState extends State<_JumpingChevron>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _offset;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat(reverse: true);
+    _offset = Tween<double>(
+      begin: -2,
+      end: 9,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _offset,
+      builder: (context, child) {
+        return Transform.translate(
+          offset: Offset(0, _offset.value),
+          child: child,
+        );
+      },
+      child: Center(
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: const Color(0xFF8B5CF6).withValues(alpha: 0.88),
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white.withValues(alpha: 0.72)),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF8B5CF6).withValues(alpha: 0.45),
+                blurRadius: 18,
+                spreadRadius: 2,
+              ),
+            ],
+          ),
+          child: const SizedBox(
+            width: 38,
+            height: 38,
+            child: Icon(
+              Icons.keyboard_arrow_down_rounded,
+              color: Colors.white,
+              size: 30,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 class _BottomGradient extends StatelessWidget {
   const _BottomGradient();
@@ -483,13 +690,32 @@ class _HotspotZone extends StatelessWidget {
   final double coverW;
   final double coverH;
 
-  void _onTap(BuildContext context) {
-    debugPrint('[HotspotZone] tapped id=${hotspot.id} title=${hotspot.title}');
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (_) => _HotspotSheet(hotspot: hotspot),
+  Future<void> _onTap(BuildContext context) async {
+    final url = hotspot.articleUrl;
+    debugPrint(
+      '[HotspotZone] tapped id=${hotspot.id} title=${hotspot.title} url=$url',
     );
+
+    if (url != null && url.startsWith('xene://article/')) {
+      final slug = url.replaceFirst('xene://article/', '');
+      debugPrint('[HotspotZone] Opening Xene article slug=$slug');
+      if (!context.mounted) return;
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        isDismissible: true,
+        enableDrag: true,
+        backgroundColor: Colors.transparent,
+        builder: (_) => XeneArticleSheet(slug: slug),
+      );
+      return;
+    }
+
+    if (url != null && url.isNotEmpty) {
+      final uri = Uri.tryParse(url);
+      if (uri != null)
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
   }
 
   @override
@@ -508,100 +734,18 @@ class _HotspotZone extends StatelessWidget {
   }
 }
 
-class _HotspotSheet extends StatelessWidget {
-  const _HotspotSheet({required this.hotspot});
-
-  final MagazineHotspot hotspot;
-
-  Future<void> _openLink(BuildContext context) async {
-    final url = hotspot.articleUrl;
-    if (url == null || url.isEmpty) return;
-
-    // Xene native article — open in-app reader
-    if (url.startsWith('xene://article/')) {
-      final slug = url.replaceFirst('xene://article/', '');
-      debugPrint('[HotspotSheet] Opening Xene article slug=$slug');
-      if (!context.mounted) return;
-      await showModalBottomSheet<void>(
-        context: context,
-        isScrollControlled: true,
-        backgroundColor: Colors.transparent,
-        builder: (_) => XeneArticleSheet(slug: slug),
-      );
-      return;
-    }
-
-    // External URL — open in browser
-    final uri = Uri.tryParse(url);
-    if (uri == null) return;
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF111111),
-        borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: const Color(0xFF333333)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(24, 28, 24, 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              hotspot.title,
-              style: GoogleFonts.teko(
-                fontSize: 32,
-                height: 0.95,
-                fontWeight: FontWeight.w600,
-                color: Colors.white,
-              ),
-            ),
-            if (hotspot.body != null && hotspot.body!.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Text(
-                hotspot.body!,
-                style: GoogleFonts.archivo(
-                  fontSize: 13,
-                  height: 1.5,
-                  color: const Color(0xFFAAAAAA),
-                ),
-              ),
-            ],
-            if (hotspot.articleUrl != null &&
-                hotspot.articleUrl!.isNotEmpty) ...[
-              const SizedBox(height: 20),
-              GestureDetector(
-                onTap: () => _openLink(context),
-                child: Text(
-                  'READ →',
-                  style: GoogleFonts.dmMono(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: ArticlesScreen._teal,
-                    letterSpacing: 1.2,
-                  ),
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 // ─── Article strip ────────────────────────────────────────────────────────────
 
 class _ArticleStrip extends StatefulWidget {
-  const _ArticleStrip({required this.articles, required this.bottomPad});
+  const _ArticleStrip({
+    required this.articles,
+    required this.bottomPad,
+    this.landscape = false,
+  });
 
   final List<ArticleItem> articles;
   final double bottomPad;
+  final bool landscape;
 
   @override
   State<_ArticleStrip> createState() => _ArticleStripState();
@@ -624,10 +768,16 @@ class _ArticleStripState extends State<_ArticleStrip> {
   }
 
   Future<void> _open(ArticleItem article) async {
-    debugPrint('[ArticleStrip] opening url=${article.url}');
-    final uri = Uri.tryParse(article.url);
-    if (uri == null) return;
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
+    debugPrint('[ArticleStrip] opening pip for url=${article.url}');
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      isDismissible: true,
+      enableDrag: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _ArticlePreviewSheet(article: article),
+    );
   }
 
   @override
@@ -649,13 +799,15 @@ class _ArticleStripState extends State<_ArticleStrip> {
       controller: _ctrl,
       scrollDirection: Axis.horizontal,
       physics: const BouncingScrollPhysics(),
-      // Bottom padding lifts cards above the home indicator / system nav bar.
-      padding: EdgeInsets.fromLTRB(20, 12, 20, 12 + widget.bottomPad),
+      padding: widget.landscape
+          ? EdgeInsets.fromLTRB(16, 10, 16, 10 + widget.bottomPad)
+          : EdgeInsets.fromLTRB(20, 12, 20, 12 + widget.bottomPad),
       itemCount: widget.articles.length,
-      separatorBuilder: (_, __) => const SizedBox(width: 12),
+      separatorBuilder: (_, __) => const SizedBox(width: 10),
       itemBuilder: (context, i) => _DarkCard(
         article: widget.articles[i],
         onTap: () => _open(widget.articles[i]),
+        landscape: widget.landscape,
       ),
     );
   }
@@ -664,10 +816,15 @@ class _ArticleStripState extends State<_ArticleStrip> {
 // ─── Dark article card ────────────────────────────────────────────────────────
 
 class _DarkCard extends StatefulWidget {
-  const _DarkCard({required this.article, required this.onTap});
+  const _DarkCard({
+    required this.article,
+    required this.onTap,
+    this.landscape = false,
+  });
 
   final ArticleItem article;
   final VoidCallback onTap;
+  final bool landscape;
 
   @override
   State<_DarkCard> createState() => _DarkCardState();
@@ -681,6 +838,68 @@ class _DarkCardState extends State<_DarkCard> {
     final source = widget.article.source?.trim();
     final date = widget.article.publishedAt;
 
+    if (widget.landscape) {
+      // Compact fixed-width card for the landscape overlay strip.
+      return MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: GestureDetector(
+          onTap: widget.onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 140),
+            curve: Curves.easeOut,
+            width: 148,
+            decoration: BoxDecoration(
+              color: _hovered
+                  ? const Color(0xCC1A1A1A)
+                  : const Color(0xBB111111),
+              border: Border.all(color: const Color(0xFF2A2A2A), width: 1),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(child: _CardThumb(article: widget.article)),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 5, 8, 6),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (source != null && source.isNotEmpty)
+                        Text(
+                          source.toUpperCase(),
+                          style: GoogleFonts.dmMono(
+                            fontSize: 7,
+                            fontWeight: FontWeight.w700,
+                            color: ArticlesScreen._teal,
+                            letterSpacing: 0.5,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      const SizedBox(height: 2),
+                      Text(
+                        widget.article.title,
+                        style: GoogleFonts.teko(
+                          fontSize: 13,
+                          height: 0.97,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    // Portrait card: vertical layout, fixed 158px wide
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovered = true),
@@ -703,10 +922,7 @@ class _DarkCardState extends State<_DarkCard> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Thumbnail
               SizedBox(height: 96, child: _CardThumb(article: widget.article)),
-
-              // Meta
               Expanded(
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
@@ -814,6 +1030,180 @@ class _CardThumb extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+// ─── Article preview sheet (PiP overlay) ─────────────────────────────────────
+
+class _ArticlePreviewSheet extends StatelessWidget {
+  const _ArticlePreviewSheet({required this.article});
+
+  final ArticleItem article;
+
+  static const _bg = Color(0xFF0D0D0D);
+  static const _teal = ArticlesScreen._teal;
+
+  Future<void> _readFull(BuildContext context) async {
+    final uri = Uri.tryParse(article.url);
+    if (uri == null) return;
+    debugPrint('[ArticlePreviewSheet] opening in-app url=${article.url}');
+    final launched = await launchUrl(uri, mode: LaunchMode.inAppWebView);
+    if (!launched) {
+      debugPrint(
+        '[ArticlePreviewSheet] inAppWebView failed, fallback to external',
+      );
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.62,
+      minChildSize: 0.38,
+      maxChildSize: 0.88,
+      builder: (context, scrollController) {
+        return ClipRRect(
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          child: ColoredBox(
+            color: _bg,
+            child: SingleChildScrollView(
+              controller: scrollController,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Drag handle
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    child: Center(
+                      child: Container(
+                        width: 36,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF444444),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                  ),
+                  // Cover image
+                  if (article.imageUrl != null && article.imageUrl!.isNotEmpty)
+                    CachedNetworkImage(
+                      imageUrl: article.imageUrl!,
+                      width: double.infinity,
+                      height: 200,
+                      fit: BoxFit.cover,
+                      fadeInDuration: const Duration(milliseconds: 220),
+                      placeholder: (_, __) => const SizedBox(
+                        height: 200,
+                        child: ColoredBox(color: Color(0xFF111111)),
+                      ),
+                      errorWidget: (_, __, ___) => const SizedBox.shrink(),
+                    ),
+                  // Content
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Source + date row
+                        Row(
+                          children: [
+                            if (article.source != null &&
+                                article.source!.trim().isNotEmpty)
+                              Text(
+                                article.source!.trim().toUpperCase(),
+                                style: GoogleFonts.dmMono(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w700,
+                                  color: _teal,
+                                  letterSpacing: 1.4,
+                                ),
+                              ),
+                            const Spacer(),
+                            if (article.publishedAt != null)
+                              Text(
+                                DateFormat(
+                                  'MMM d, yyyy',
+                                ).format(article.publishedAt!),
+                                style: GoogleFonts.dmMono(
+                                  fontSize: 9,
+                                  color: const Color(0xFF666666),
+                                ),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        // Title
+                        Text(
+                          article.title,
+                          style: GoogleFonts.teko(
+                            fontSize: 30,
+                            height: 0.97,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                          ),
+                        ),
+                        // Snippet
+                        if (article.snippet.isNotEmpty) ...[
+                          const SizedBox(height: 12),
+                          Text(
+                            article.snippet,
+                            style: GoogleFonts.archivo(
+                              fontSize: 14,
+                              height: 1.55,
+                              color: const Color(0xFF999999),
+                            ),
+                            maxLines: 6,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                        const SizedBox(height: 24),
+                        // CTA button
+                        GestureDetector(
+                          onTap: () => _readFull(context),
+                          child: Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            decoration: BoxDecoration(
+                              border: Border.all(color: _teal, width: 1),
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text(
+                                  article.source != null &&
+                                          article.source!.trim().isNotEmpty
+                                      ? 'READ ON ${article.source!.trim().toUpperCase()}'
+                                      : 'READ FULL ARTICLE',
+                                  style: GoogleFonts.teko(
+                                    fontSize: 15,
+                                    letterSpacing: 1.2,
+                                    color: _teal,
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                const Icon(
+                                  Icons.arrow_forward_rounded,
+                                  color: _teal,
+                                  size: 16,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 32),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }

@@ -1,6 +1,7 @@
 import 'package:dart_frog/dart_frog.dart';
 import 'package:logging/logging.dart';
 import 'package:xene_backend/src/database.dart';
+import 'package:xene_backend/src/utils/audit_logger.dart';
 
 final _logger = Logger('connections.soundcloud.disconnect');
 
@@ -28,6 +29,11 @@ Future<Response> onRequest(RequestContext context) async {
     _logger.info('[disconnect] SC following cache cleared for userId=$userId');
 
     _logger.info('[disconnect] SC connection removed for userId=$userId');
+    await logSecurityEvent(
+      db.client,
+      action: 'sc_token_revoke',
+      userId: userId,
+    );
     return Response.json(body: {'disconnected': true});
   } catch (e) {
     _logger.severe('[disconnect] Error removing connection: $e');
