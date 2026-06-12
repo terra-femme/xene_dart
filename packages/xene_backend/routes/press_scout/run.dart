@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'package:dart_frog/dart_frog.dart';
 import 'package:logging/logging.dart';
+import 'package:xene_backend/src/database.dart';
 import 'package:xene_backend/src/services/press_scout_service.dart';
+import 'package:xene_backend/src/utils/audit_logger.dart';
 import 'package:xene_backend/src/utils/auth_utils.dart';
 import 'package:xene_backend/src/utils/rate_limiter.dart';
 
@@ -18,11 +20,43 @@ Future<Response> onRequest(RequestContext context) async {
   final guard = requireRealUser(context);
   if (guard != null) return guard;
 
+  final userId = context.read<String>();
+
+  // Press scout triggers Gemini API calls — admin only to prevent credit drain.
+  // Same pattern as routes/monitor.dart.
+  final db = context.read<DatabaseService>();
+  final profileRes = await db.client
+      .from('profiles')
+      .select('role')
+      .eq('id', userId)
+      .maybeSingle();
+  final role = profileRes?['role'] as String? ?? 'user';
+  if (role != 'admin') {
+    _logger.warning('[press_scout/run] Non-admin attempt userId=$userId');
+    return Response.json(
+      statusCode: 403,
+      body: {'error': 'Admin access required'},
+    );
+  }
+
   final rateLimited = checkRateLimit(
     pressScoutRateLimiter,
     extractClientIp(context),
   );
   if (rateLimited != null) return rateLimited;
+
+  unawaited(
+    logSecurityEvent(
+      db.client,
+      action: 'press_scout_run',
+      userId: userId,
+      ip: extractClientIp(context),
+      metadata: {
+        if (context.request.uri.queryParameters['preset_id'] != null)
+          'preset_id': context.request.uri.queryParameters['preset_id'],
+      },
+    ),
+  );
 
   final scout = context.read<PressScoutService>();
   final presetId = context.request.uri.queryParameters['preset_id']?.trim();

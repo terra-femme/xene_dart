@@ -1,7 +1,8 @@
 import 'package:dart_frog/dart_frog.dart';
 
-/// In-memory sliding-window rate limiter — one bucket per client IP.
-/// Not distributed: limits are per-process. Suitable for single-instance deploy.
+/// In-memory sliding-window rate limiter, one bucket per key.
+///
+/// Not distributed: limits are per process. Suitable for single-instance deploy.
 class RateLimiter {
   RateLimiter({required this.maxRequests, required this.window});
 
@@ -32,14 +33,13 @@ class RateLimiter {
   };
 }
 
-// Feed: 60/min per user — 3 requests per preset view × 20 preset views/min.
-// Keyed by userId (not IP) so shared NAT / localhost dev doesn't collapse into one bucket.
+// Feed: 60/min per user. Keyed by userId so shared NAT does not collapse.
 final feedMergedRateLimiter = RateLimiter(
   maxRequests: 60,
   window: Duration(minutes: 1),
 );
 
-// force_refresh=true triggers a full live scrape — much tighter limit.
+// force_refresh=true triggers a full live scrape, so it gets a tighter limit.
 final forceRefreshRateLimiter = RateLimiter(
   maxRequests: 3,
   window: Duration(minutes: 5),
@@ -51,10 +51,53 @@ final discoveryRateLimiter = RateLimiter(
   window: Duration(minutes: 1),
 );
 
-// Press scout is the most expensive operation (~seconds per artist, multiple artists).
+// Press scout is expensive: seconds per artist across multiple artists.
 final pressScoutRateLimiter = RateLimiter(
   maxRequests: 2,
   window: Duration(minutes: 5),
+);
+
+// Bug reports are cheap, but public-ish intake endpoints attract spam.
+// Layer limits by user and IP so one account cannot flood reports, while a
+// shared network still has enough room for legitimate beta feedback.
+final bugReportUserRateLimiter = RateLimiter(
+  maxRequests: 5,
+  window: Duration(minutes: 10),
+);
+
+final bugReportIpRateLimiter = RateLimiter(
+  maxRequests: 20,
+  window: Duration(minutes: 10),
+);
+
+final bugReportCooldownRateLimiter = RateLimiter(
+  maxRequests: 1,
+  window: Duration(seconds: 15),
+);
+
+// Admin poll is keyed globally to cap brute-force attempts on X-Admin-Secret.
+final adminPollRateLimiter = RateLimiter(
+  maxRequests: 5,
+  window: Duration(minutes: 1),
+);
+
+// Game join is keyed by userId to prevent invite code enumeration.
+final gameJoinRateLimiter = RateLimiter(
+  maxRequests: 10,
+  window: Duration(minutes: 1),
+);
+
+// SoundCloud stream proxy is keyed by userId to prevent credential abuse.
+final streamRateLimiter = RateLimiter(
+  maxRequests: 120,
+  window: Duration(hours: 1),
+);
+
+// Image proxy is JWT-exempt so it's keyed by IP instead of userId.
+// 200/min is generous for legitimate feed browsing; blocks bulk scraping.
+final imageProxyRateLimiter = RateLimiter(
+  maxRequests: 200,
+  window: Duration(minutes: 1),
 );
 
 /// Extract the originating IP from the request, respecting proxy headers.
@@ -71,7 +114,7 @@ Response? checkRateLimit(RateLimiter limiter, String key) {
   if (!limiter.allow(key)) {
     return Response.json(
       statusCode: 429,
-      body: {'error': 'Rate limit exceeded — please slow down'},
+      body: {'error': 'Rate limit exceeded - please slow down'},
     );
   }
   return null;

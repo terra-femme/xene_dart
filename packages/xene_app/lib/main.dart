@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:developer' as dev;
+import 'dart:ui';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_web_plugins/url_strategy.dart';
@@ -28,6 +30,7 @@ import 'package:xene_app/src/screens/about_screen.dart';
 import 'package:xene_app/src/screens/channels_screen.dart';
 import 'package:xene_app/src/screens/game_screen.dart';
 import 'package:xene_app/src/screens/party_screen.dart';
+import 'package:xene_app/src/screens/settings_screen.dart';
 import 'package:xene_app/src/widgets/xene_header.dart';
 import 'package:xene_app/src/widgets/xene_sidebar.dart';
 import 'package:xene_app/src/widgets/xene_draggable_sheet.dart';
@@ -36,9 +39,28 @@ import 'package:xene_app/src/sandbox/sandbox_preview.dart';
 import 'package:xene_app/src/widgets/admin_guard.dart';
 import 'package:xene_app/src/widgets/loading_overlay.dart';
 import 'package:xene_app/src/providers/nav_swipe_provider.dart';
+import 'package:xene_app/src/providers/ui_config_provider.dart';
+import 'package:xene_app/src/theme/xene_theme.dart';
+import 'package:xene_app/src/providers/accessibility_provider.dart';
+
+// Compile-time flag that bypasses AdminGuard in debug builds.
+// NEVER pass --dart-define=XENE_FORCE_DEV_MENU=true to distribution builds.
+const _forceDevMenu = bool.fromEnvironment('XENE_FORCE_DEV_MENU');
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  _forwardFlutterErrorsToConsole();
+
+  // Warn loudly when a debug build ships with the admin bypass active.
+  // This won't fire in release/profile builds (kDebugMode is false), but it
+  // makes the flag visible in every debug session so it's never quietly enabled.
+  if (kDebugMode && _forceDevMenu) {
+    dev.log(
+      '⚠️  XENE_FORCE_DEV_MENU=true — AdminGuard is BYPASSED. '
+      'DO NOT distribute this build.',
+      name: 'xene.security',
+    );
+  }
 
   // Switch to path-based URLs so the #access_token=... fragment from Supabase
   // magic links is treated as a true URL fragment, not a route path. Without
@@ -97,10 +119,14 @@ Future<void> main() async {
     await Supabase.instance.client.auth.signInAnonymously();
   }
 
-  // Await font loading so the first frame always renders in the correct fonts.
-  if (kIsWeb) {
-    await GoogleFonts.pendingFonts([GoogleFonts.archivo(), GoogleFonts.teko()]);
-  }
+  // Await font loading on all platforms so the first frame always renders in
+  // the correct fonts. The LoadingOverlay (min 2500ms) covers this window —
+  // by the time it fades out, all fonts are cached and no flash is possible.
+  await GoogleFonts.pendingFonts([
+    GoogleFonts.archivo(),
+    GoogleFonts.teko(),
+    GoogleFonts.dmMono(),
+  ]);
 
   // Cross-tab session sync: when another browser window processes a magic link
   // it writes the real session to localStorage. The storage event fires in all
@@ -148,6 +174,34 @@ Future<void> main() async {
   );
 }
 
+void _forwardFlutterErrorsToConsole() {
+  final defaultFlutterErrorHandler = FlutterError.onError;
+
+  FlutterError.onError = (FlutterErrorDetails details) {
+    defaultFlutterErrorHandler?.call(details);
+    final errorDump = details.toString();
+    debugPrint(errorDump);
+    dev.log(
+      errorDump,
+      name: 'xene.flutter_error',
+      error: details.exception,
+      stackTrace: details.stack,
+    );
+  };
+
+  PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
+    final errorDump = 'Uncaught platform error: $error\n$stack';
+    debugPrint(errorDump);
+    dev.log(
+      errorDump,
+      name: 'xene.platform_error',
+      error: error,
+      stackTrace: stack,
+    );
+    return false;
+  };
+}
+
 class _SessionRecoveryObserver extends WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -168,11 +222,13 @@ class _InnerPageLayout extends StatelessWidget {
     required this.title,
     required this.child,
     this.showFullNav = false,
+    this.trailing,
   });
 
   final String title;
   final Widget child;
   final bool showFullNav;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -183,7 +239,7 @@ class _InnerPageLayout extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const XeneHeader(),
-            const Divider(color: Color(0xFFE0E0E0), height: 1),
+            const Divider(color: XeneTheme.border, height: 1),
             Expanded(child: _SwipeNavWrapper(child: child)),
           ],
         ),
@@ -250,14 +306,22 @@ class _InnerPageLayout extends StatelessWidget {
                           ),
                         ),
                       ),
-                      const SizedBox(width: 72),
+                      SizedBox(
+                        width: 72,
+                        child: trailing != null
+                            ? Align(
+                                alignment: Alignment.centerRight,
+                                child: trailing,
+                              )
+                            : null,
+                      ),
                     ],
                   ),
                 ),
               ],
             ),
           ),
-          const Divider(color: Color(0xFFE0E0E0), height: 1),
+          const Divider(color: XeneTheme.border, height: 1),
           Expanded(child: _SwipeNavWrapper(child: child)),
         ],
       ),
@@ -352,19 +416,25 @@ class PageLayout extends StatelessWidget {
 CustomTransitionPage<void> _slidePage({
   required LocalKey key,
   required Widget child,
+  required BuildContext pageContext,
 }) {
   final forward = navGoingForward;
   final skip = skipNextTransition;
   skipNextTransition = false;
+  final reduceMotion = ProviderScope.containerOf(
+    pageContext,
+  ).read(accessibilityProvider).reduceMotion;
 
   return CustomTransitionPage<void>(
     key: key,
     child: child,
-    transitionDuration: skip
+    transitionDuration: (skip || reduceMotion)
         ? Duration.zero
         : const Duration(milliseconds: 260),
-    reverseTransitionDuration: const Duration(milliseconds: 200),
-    transitionsBuilder: skip
+    reverseTransitionDuration: reduceMotion
+        ? Duration.zero
+        : const Duration(milliseconds: 200),
+    transitionsBuilder: (skip || reduceMotion)
         ? (_, __, ___, child) => child
         : (context, animation, secondaryAnimation, child) {
             final begin = forward
@@ -522,6 +592,7 @@ final _router = GoRouter(
       pageBuilder: (context, state, child) => _slidePage(
         key: state.pageKey,
         child: PageLayout(child: child),
+        pageContext: context,
       ),
       routes: [
         GoRoute(path: '/', builder: (context, state) => const FeedScreen()),
@@ -536,6 +607,7 @@ final _router = GoRouter(
           showFullNav: true,
           child: ArticlesScreen(),
         ),
+        pageContext: context,
       ),
     ),
     GoRoute(
@@ -557,6 +629,7 @@ final _router = GoRouter(
           showFullNav: true,
           child: FollowingScreen(),
         ),
+        pageContext: context,
       ),
     ),
     GoRoute(
@@ -568,6 +641,7 @@ final _router = GoRouter(
           showFullNav: true,
           child: GameScreen(),
         ),
+        pageContext: context,
       ),
     ),
     GoRoute(
@@ -579,12 +653,14 @@ final _router = GoRouter(
           showFullNav: true,
           child: ChannelsScreen(),
         ),
+        pageContext: context,
       ),
     ),
     GoRoute(
       path: '/game/party/:partyId',
       builder: (context, state) => _InnerPageLayout(
         title: 'PARTY',
+        trailing: const PartyMenuBtn(),
         child: PartyScreen(partyId: state.pathParameters['partyId']!),
       ),
     ),
@@ -597,6 +673,19 @@ final _router = GoRouter(
           showFullNav: true,
           child: ProfileScreen(),
         ),
+        pageContext: context,
+      ),
+    ),
+    GoRoute(
+      path: '/settings',
+      pageBuilder: (context, state) => _slidePage(
+        key: state.pageKey,
+        child: const _InnerPageLayout(
+          title: 'SETTINGS',
+          showFullNav: true,
+          child: SettingsScreen(),
+        ),
+        pageContext: context,
       ),
     ),
     GoRoute(
@@ -623,6 +712,7 @@ final _router = GoRouter(
           showFullNav: true,
           child: AboutScreen(),
         ),
+        pageContext: context,
       ),
     ),
     GoRoute(
@@ -632,27 +722,76 @@ final _router = GoRouter(
   ],
 );
 
-class XeneApp extends StatelessWidget {
+/// Enables smooth scrolling on all platforms including web.
+/// - Adds mouse + trackpad to dragDevices so web users can drag-scroll
+///   (Flutter web blocks mouse drag by default).
+/// - Uses BouncingScrollPhysics for momentum deceleration instead of the
+///   hard-stop ClampingScrollPhysics default.
+class XeneScrollBehavior extends MaterialScrollBehavior {
+  @override
+  Set<PointerDeviceKind> get dragDevices => {
+    PointerDeviceKind.touch,
+    PointerDeviceKind.mouse,
+    PointerDeviceKind.trackpad,
+    PointerDeviceKind.stylus,
+  };
+
+  @override
+  ScrollPhysics getScrollPhysics(BuildContext context) =>
+      const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics());
+}
+
+const _showSemantics = bool.fromEnvironment('XENE_SHOW_SEMANTICS');
+
+class XeneApp extends ConsumerWidget {
   const XeneApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final config = ref.watch(uiConfigProvider).valueOrNull;
+    final primaryColor = config?.primaryColor ?? XeneTheme.orange;
+    final a11y = ref.watch(accessibilityProvider);
+
     return MaterialApp.router(
       title: 'Xene',
       debugShowCheckedModeBanner: false,
       locale: DevicePreview.locale(context),
-      builder: DevicePreview.appBuilder,
-      theme: ThemeData(
-        useMaterial3: false,
-        primaryColor: const Color(0xFFFF5500),
-        scaffoldBackgroundColor: Colors.white,
-        textTheme: GoogleFonts.archivoTextTheme(
-          ThemeData.light().textTheme.copyWith(
-            bodyLarge: const TextStyle(color: Colors.black),
-            bodyMedium: const TextStyle(color: Colors.black),
-          ),
-        ),
-      ),
+      builder: (context, child) {
+        Widget content = MediaQuery(
+          data: MediaQuery.of(
+            context,
+          ).copyWith(textScaler: TextScaler.linear(a11y.textScaleOverride)),
+          child: child ?? const SizedBox.shrink(),
+        );
+        if (_showSemantics) content = SemanticsDebugger(child: content);
+        return DevicePreview.appBuilder(context, content);
+      },
+      scrollBehavior: XeneScrollBehavior(),
+      theme: a11y.highContrast
+          ? ThemeData(
+              useMaterial3: false,
+              primaryColor: Colors.black,
+              scaffoldBackgroundColor: Colors.white,
+              iconTheme: const IconThemeData(color: Colors.black),
+              dividerColor: Colors.black,
+              textTheme: GoogleFonts.archivoTextTheme(
+                ThemeData.light().textTheme.copyWith(
+                  bodyLarge: const TextStyle(color: Colors.black),
+                  bodyMedium: const TextStyle(color: Colors.black),
+                ),
+              ),
+            )
+          : ThemeData(
+              useMaterial3: false,
+              primaryColor: primaryColor,
+              scaffoldBackgroundColor: Colors.white,
+              textTheme: GoogleFonts.archivoTextTheme(
+                ThemeData.light().textTheme.copyWith(
+                  bodyLarge: const TextStyle(color: Colors.black),
+                  bodyMedium: const TextStyle(color: Colors.black),
+                ),
+              ),
+            ),
       routerConfig: _router,
     );
   }

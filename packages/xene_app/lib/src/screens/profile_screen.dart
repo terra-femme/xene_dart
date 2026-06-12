@@ -10,6 +10,7 @@ import 'package:xene_app/src/widgets/auth_gate_sheet.dart';
 
 import '../models/user_media_item.dart';
 import '../providers/history_provider.dart';
+import '../theme/xene_theme.dart';
 import '../providers/saved_provider.dart';
 import '../providers/soundcloud_connection_provider.dart';
 import '../widgets/winamp_player.dart';
@@ -66,7 +67,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               onSignOut: _signOut,
               signingOut: _signingOut,
             ),
-            const Divider(color: Color(0xFFE0E0E0), height: 1),
+            const Divider(color: XeneTheme.border, height: 1),
             const SizedBox(height: 16),
             const WinampPlayer(),
             const SizedBox(height: 24),
@@ -109,7 +110,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             onPressed: () =>
                 showAuthGate(context, featureHint: 'to unlock all features'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFFF5500),
+              backgroundColor: XeneTheme.orange,
               foregroundColor: Colors.white,
               elevation: 0,
               shape: const RoundedRectangleBorder(
@@ -166,7 +167,7 @@ class _AccountHeader extends StatelessWidget {
                   email,
                   style: GoogleFonts.dmMono(
                     fontSize: 11,
-                    color: const Color(0xFF888888),
+                    color: XeneTheme.muted,
                   ),
                 ),
               ],
@@ -178,7 +179,7 @@ class _AccountHeader extends StatelessWidget {
               onPressed: signingOut ? null : onSignOut,
               style: OutlinedButton.styleFrom(
                 foregroundColor: Colors.black,
-                side: const BorderSide(color: Color(0xFFE0E0E0)),
+                side: const BorderSide(color: XeneTheme.border),
                 padding: const EdgeInsets.symmetric(horizontal: 14),
                 shape: const RoundedRectangleBorder(
                   borderRadius: BorderRadius.all(Radius.circular(4)),
@@ -270,17 +271,14 @@ class _SavedSection extends ConsumerWidget {
               style: GoogleFonts.dmMono(
                 fontSize: 9,
                 fontWeight: FontWeight.w600,
-                color: const Color(0xFFBBBBBB),
+                color: XeneTheme.mutedXLight,
                 letterSpacing: 1.2,
               ),
             ),
             const SizedBox(height: 6),
             Text(
               'Bookmark tracks from your queue with ★',
-              style: GoogleFonts.dmMono(
-                fontSize: 11,
-                color: const Color(0xFF888888),
-              ),
+              style: GoogleFonts.dmMono(fontSize: 11, color: XeneTheme.muted),
             ),
           ],
         ),
@@ -337,7 +335,7 @@ class _SavedPlatformSection extends StatelessWidget {
                 style: GoogleFonts.dmMono(
                   fontSize: 9,
                   fontWeight: FontWeight.w600,
-                  color: const Color(0xFFBBBBBB),
+                  color: XeneTheme.mutedXLight,
                   letterSpacing: 1.2,
                 ),
               ),
@@ -346,7 +344,7 @@ class _SavedPlatformSection extends StatelessWidget {
                 '(${items.length})',
                 style: GoogleFonts.dmMono(
                   fontSize: 9,
-                  color: const Color(0xFFCCCCCC),
+                  color: XeneTheme.mutedXLight,
                 ),
               ),
               if (onExport != null) ...[
@@ -404,8 +402,8 @@ class _SavedCard extends ConsumerWidget {
   const _SavedCard({required this.item});
   final SavedItem item;
 
-  static const _scOrange = Color(0xFFFF5500);
-  static const _ytRed = Color(0xFFFF4444);
+  static const _scOrange = XeneTheme.scOrange;
+  static const _ytRed = XeneTheme.ytRed;
   static const _bcBlue = Color(0xFF1DA0C3);
 
   @override
@@ -423,7 +421,7 @@ class _SavedCard extends ConsumerWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFE0E0E0)),
+        border: Border.all(color: XeneTheme.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -457,10 +455,7 @@ class _SavedCard extends ConsumerWidget {
           ),
           Text(
             item.artistName ?? '',
-            style: GoogleFonts.dmMono(
-              fontSize: 9,
-              color: const Color(0xFF888888),
-            ),
+            style: GoogleFonts.dmMono(fontSize: 9, color: XeneTheme.muted),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
@@ -471,7 +466,7 @@ class _SavedCard extends ConsumerWidget {
                 '${item.daysRemaining}d',
                 style: GoogleFonts.dmMono(
                   fontSize: 8,
-                  color: const Color(0xFFAAAAAA),
+                  color: XeneTheme.mutedLight,
                 ),
               ),
               const Spacer(),
@@ -522,10 +517,7 @@ class _HistorySection extends ConsumerWidget {
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Text(
               'Tracks you play will appear here',
-              style: GoogleFonts.dmMono(
-                fontSize: 11,
-                color: const Color(0xFF888888),
-              ),
+              style: GoogleFonts.dmMono(fontSize: 11, color: XeneTheme.muted),
             ),
           )
         else
@@ -547,8 +539,8 @@ class _HistoryCard extends StatelessWidget {
   const _HistoryCard({required this.item});
   final HistoryItem item;
 
-  static const _scOrange = Color(0xFFFF5500);
-  static const _ytRed = Color(0xFFFF4444);
+  static const _scOrange = XeneTheme.scOrange;
+  static const _ytRed = XeneTheme.ytRed;
 
   @override
   Widget build(BuildContext context) {
@@ -566,7 +558,7 @@ class _HistoryCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: const Color(0xFFE0E0E0)),
+          border: Border.all(color: XeneTheme.border),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -606,10 +598,7 @@ class _HistoryCard extends StatelessWidget {
             const Spacer(),
             Text(
               item.artistName ?? '',
-              style: GoogleFonts.dmMono(
-                fontSize: 9,
-                color: const Color(0xFF888888),
-              ),
+              style: GoogleFonts.dmMono(fontSize: 9, color: XeneTheme.muted),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
@@ -643,7 +632,7 @@ class _SectionLabel extends StatelessWidget {
             style: GoogleFonts.dmMono(
               fontSize: 9,
               fontWeight: FontWeight.w600,
-              color: const Color(0xFFBBBBBB),
+              color: XeneTheme.mutedXLight,
               letterSpacing: 1.2,
             ),
           ),
@@ -653,7 +642,7 @@ class _SectionLabel extends StatelessWidget {
               '($count)',
               style: GoogleFonts.dmMono(
                 fontSize: 9,
-                color: const Color(0xFFCCCCCC),
+                color: XeneTheme.mutedXLight,
               ),
             ),
           ],

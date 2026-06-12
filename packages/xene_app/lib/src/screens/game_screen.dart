@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:xene_domain/xene_domain.dart';
 import '../providers/auth_provider.dart';
 import '../providers/game_provider.dart';
+import '../theme/xene_theme.dart';
 import '../widgets/auth_gate_sheet.dart';
 import '../widgets/username_setup_sheet.dart';
 
@@ -65,7 +66,7 @@ class _AnonGate extends StatelessWidget {
             'Sign in to create or join a party',
             style: GoogleFonts.dmMono(
               fontSize: 12,
-              color: const Color(0xFFA3A3A3),
+              color: XeneTheme.mutedLight,
             ),
           ),
           const SizedBox(height: 24),
@@ -133,6 +134,8 @@ class _GameBody extends ConsumerWidget {
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
+      isDismissible: true,
+      enableDrag: true,
       builder: (_) =>
           _CreatePartySheet(notifier: ref.read(gamePartiesProvider.notifier)),
     );
@@ -150,6 +153,8 @@ class _GameBody extends ConsumerWidget {
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
+      isDismissible: true,
+      enableDrag: true,
       builder: (_) =>
           _JoinPartySheet(notifier: ref.read(gamePartiesProvider.notifier)),
     );
@@ -170,56 +175,30 @@ class _PartyCard extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           color: Colors.white,
-          border: Border.all(color: const Color(0xFFE5E5E5)),
+          border: Border.all(color: XeneTheme.borderHeavy),
           borderRadius: BorderRadius.circular(4),
         ),
         child: Row(
           children: [
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    party.name.toUpperCase(),
-                    style: GoogleFonts.teko(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w500,
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '${party.memberCount} member${party.memberCount == 1 ? '' : 's'}',
-                    style: GoogleFonts.dmMono(
-                      fontSize: 11,
-                      color: const Color(0xFFA3A3A3),
-                    ),
-                  ),
-                ],
+              child: Text(
+                party.name.toUpperCase(),
+                style: GoogleFonts.teko(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w500,
+                  letterSpacing: 0.5,
+                ),
+                overflow: TextOverflow.ellipsis,
               ),
             ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(
-                  '${party.myTrackCountThisWeek}/5',
-                  style: GoogleFonts.teko(
-                    fontSize: 22,
-                    color: party.myTrackCountThisWeek >= 5
-                        ? const Color(0xFF4CAF50)
-                        : Colors.black,
-                  ),
-                ),
-                Text(
-                  'tracks this week',
-                  style: GoogleFonts.dmMono(
-                    fontSize: 10,
-                    color: const Color(0xFFA3A3A3),
-                  ),
-                ),
-              ],
+            Text(
+              '${party.memberCount} member${party.memberCount == 1 ? '' : 's'}',
+              style: GoogleFonts.dmMono(
+                fontSize: 11,
+                color: XeneTheme.mutedLight,
+              ),
             ),
-            const SizedBox(width: 4),
+            const SizedBox(width: 6),
             const Icon(Icons.chevron_right, size: 18, color: Color(0xFFA3A3A3)),
           ],
         ),
@@ -245,7 +224,7 @@ class _EmptyState extends StatelessWidget {
             'NO PARTIES YET',
             style: GoogleFonts.teko(
               fontSize: 22,
-              color: const Color(0xFFA3A3A3),
+              color: XeneTheme.mutedLight,
               letterSpacing: 2,
             ),
           ),
@@ -254,7 +233,7 @@ class _EmptyState extends StatelessWidget {
             'Start a crew or enter a code from a friend',
             style: GoogleFonts.dmMono(
               fontSize: 11,
-              color: const Color(0xFFA3A3A3),
+              color: XeneTheme.mutedLight,
             ),
             textAlign: TextAlign.center,
           ),
@@ -439,7 +418,7 @@ class _SectionHeader extends StatelessWidget {
           style: GoogleFonts.teko(
             fontSize: 14,
             letterSpacing: 1.5,
-            color: const Color(0xFFA3A3A3),
+            color: XeneTheme.mutedLight,
           ),
         ),
         if (trailing != null) ...[const Spacer(), trailing!],
@@ -507,7 +486,7 @@ class _GameTextField extends StatelessWidget {
         ),
         counterText: '',
         enabledBorder: const UnderlineInputBorder(
-          borderSide: BorderSide(color: Color(0xFFE5E5E5)),
+          borderSide: const BorderSide(color: XeneTheme.borderHeavy),
         ),
         focusedBorder: const UnderlineInputBorder(
           borderSide: BorderSide(color: Colors.black),
@@ -590,7 +569,7 @@ class _ErrorText extends StatelessWidget {
   Widget build(BuildContext context) {
     return Text(
       message,
-      style: GoogleFonts.dmMono(fontSize: 11, color: const Color(0xFFD32F2F)),
+      style: GoogleFonts.dmMono(fontSize: 11, color: XeneTheme.error),
     );
   }
 }

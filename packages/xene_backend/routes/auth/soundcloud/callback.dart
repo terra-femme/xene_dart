@@ -5,6 +5,7 @@ import 'package:dio/dio.dart' hide Response;
 import 'package:logging/logging.dart';
 import 'package:xene_backend/src/database.dart';
 import 'package:xene_backend/src/services/token_store.dart';
+import 'package:xene_backend/src/utils/audit_logger.dart';
 import 'package:xene_backend/src/utils/sc_nonce_store.dart';
 
 final _logger = Logger('auth.soundcloud.callback');
@@ -103,6 +104,7 @@ Future<Response> onRequest(RequestContext context) async {
     });
 
     _logger.info('[callback] SC connection saved for user=$userId');
+    await logSecurityEvent(db.client, action: 'sc_token_save', userId: userId);
 
     return Response(
       statusCode: 302,

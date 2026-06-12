@@ -48,6 +48,9 @@ Future<Response> onRequest(RequestContext context) async {
         'forceRefresh': forceRefreshRateLimiter.stats,
         'discovery': discoveryRateLimiter.stats,
         'pressScout': pressScoutRateLimiter.stats,
+        'bugReportUser': bugReportUserRateLimiter.stats,
+        'bugReportIp': bugReportIpRateLimiter.stats,
+        'bugReportCooldown': bugReportCooldownRateLimiter.stats,
       },
     },
   );

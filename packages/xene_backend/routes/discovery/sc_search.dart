@@ -15,10 +15,8 @@ Future<Response> onRequest(RequestContext context) async {
     return Response(statusCode: 405);
   }
 
-  final rateLimited = checkRateLimit(
-    discoveryRateLimiter,
-    extractClientIp(context),
-  );
+  final userId = context.read<String>();
+  final rateLimited = checkRateLimit(discoveryRateLimiter, userId);
   if (rateLimited != null) return rateLimited;
 
   final query = context.request.uri.queryParameters['q']?.trim() ?? '';

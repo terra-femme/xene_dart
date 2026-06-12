@@ -9,6 +9,7 @@ class PartyPreview {
     required this.inviteCode,
     required this.memberCount,
     required this.myTrackCountThisWeek,
+    required this.myScenarioSubmitted,
     required this.weekStart,
   });
 
@@ -17,7 +18,13 @@ class PartyPreview {
   final String inviteCode;
   final int memberCount;
   final int myTrackCountThisWeek;
+
+  /// True when the user has submitted their scene track for this week.
+  final bool myScenarioSubmitted;
   final String weekStart;
+
+  int get myDiscoveryCount =>
+      (myTrackCountThisWeek - (myScenarioSubmitted ? 1 : 0)).clamp(0, 4);
 
   factory PartyPreview.fromJson(Map<String, dynamic> j) => PartyPreview(
     id: j['id'] as String,
@@ -25,6 +32,7 @@ class PartyPreview {
     inviteCode: j['invite_code'] as String,
     memberCount: (j['member_count'] as num?)?.toInt() ?? 0,
     myTrackCountThisWeek: (j['my_track_count_this_week'] as num?)?.toInt() ?? 0,
+    myScenarioSubmitted: j['my_scenario_submitted'] as bool? ?? false,
     weekStart: j['week_start'] as String? ?? '',
   );
 }
@@ -88,6 +96,7 @@ class PartyTrack {
     this.scDurationSeconds,
     required this.weekStart,
     required this.submittedAt,
+    this.trackType = 'discovery',
   });
 
   final String id;
@@ -100,6 +109,13 @@ class PartyTrack {
   final String weekStart;
   final String submittedAt;
 
+  /// 'scenario' = the week's competitive track (voted on).
+  /// 'discovery' = social share, no vote.
+  final String trackType;
+
+  bool get isScenario => trackType == 'scenario';
+  bool get isDiscovery => trackType == 'discovery';
+
   factory PartyTrack.fromJson(Map<String, dynamic> j) => PartyTrack(
     id: j['id'] as String,
     userId: j['user_id'] as String,
@@ -110,6 +126,7 @@ class PartyTrack {
     scDurationSeconds: (j['sc_duration_seconds'] as num?)?.toInt(),
     weekStart: j['week_start'] as String,
     submittedAt: j['submitted_at'] as String,
+    trackType: j['track_type'] as String? ?? 'discovery',
   );
 }
 
@@ -184,6 +201,24 @@ class LeaderboardEntry {
     member: PartyMember.fromJson(j),
     totalVotes: (j['total_votes'] as num?)?.toInt() ?? 0,
     weekWins: (j['week_wins'] as num?)?.toInt() ?? 0,
+  );
+}
+
+class WeekWinner {
+  const WeekWinner({
+    required this.weekStart,
+    required this.winnerUserId,
+    required this.winnerUsername,
+  });
+
+  final String weekStart;
+  final String winnerUserId;
+  final String winnerUsername;
+
+  factory WeekWinner.fromJson(Map<String, dynamic> j) => WeekWinner(
+    weekStart: j['week_start'] as String,
+    winnerUserId: j['winner_user_id'] as String,
+    winnerUsername: j['winner_username'] as String,
   );
 }
 

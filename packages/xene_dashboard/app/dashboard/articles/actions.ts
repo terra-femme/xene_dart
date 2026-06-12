@@ -32,6 +32,7 @@ interface SaveArticlePayload {
   dek: string | null
   author: string | null
   layout_template: LayoutTemplate
+  section_label: string | null
   cover_image_url: string | null
   theme_color: string | null
   blocks: ArticleBlock[]

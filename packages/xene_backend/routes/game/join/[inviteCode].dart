@@ -2,14 +2,12 @@ import 'package:dart_frog/dart_frog.dart';
 import 'package:logging/logging.dart';
 import 'package:xene_backend/src/services/game_service.dart';
 import 'package:xene_backend/src/utils/auth_utils.dart';
+import 'package:xene_backend/src/utils/rate_limiter.dart';
 
 final _logger = Logger('game.join');
 
 /// POST /game/join/:inviteCode
-Future<Response> onRequest(
-  RequestContext context,
-  String inviteCode,
-) async {
+Future<Response> onRequest(RequestContext context, String inviteCode) async {
   if (context.request.method != HttpMethod.post) {
     return Response(statusCode: 405);
   }
@@ -18,6 +16,10 @@ Future<Response> onRequest(
   if (guard != null) return guard;
 
   final userId = context.read<String>();
+
+  final rateLimited = checkRateLimit(gameJoinRateLimiter, userId);
+  if (rateLimited != null) return rateLimited;
+
   final game = context.read<GameService>();
 
   _logger.info('[join] userId=$userId code=$inviteCode');

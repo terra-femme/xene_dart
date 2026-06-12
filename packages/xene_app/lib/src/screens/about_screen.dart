@@ -1,54 +1,60 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:lottie/lottie.dart';
+import '../providers/accessibility_provider.dart';
+import '../theme/xene_theme.dart';
 
-class AboutScreen extends StatelessWidget {
+class AboutScreen extends ConsumerWidget {
   const AboutScreen({super.key});
 
-  static const _orange = Color(0xFFFF5500);
-  static const _teal = Color(0xFF00C5A5);
-  static const _ink = Color(0xFF111111);
-  static const _muted = Color(0xFF777777);
-  static const _paper = Color(0xFFFAFAF7);
+  static const _orange = XeneTheme.orange;
+  static const _teal = XeneTheme.teal;
+  static const _ink = XeneTheme.ink;
+  static const _muted = XeneTheme.muted;
+  static const _paper = Colors.white;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final reduceMotion = ref.watch(accessibilityProvider).reduceMotion;
     return ColoredBox(
       color: _paper,
       child: Stack(
         children: [
-          const Positioned.fill(child: _AboutBackground()),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final isWide = constraints.maxWidth >= 860;
-              return SingleChildScrollView(
-                padding: EdgeInsets.fromLTRB(
-                  isWide ? 40 : 20,
-                  isWide ? 30 : 22,
-                  isWide ? 40 : 20,
-                  72,
-                ),
-                child: Center(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 1080),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        const _IssueBar(),
-                        const SizedBox(height: 24),
-                        _HeroBlock(isWide: isWide),
-                        const SizedBox(height: 28),
-                        _MissionBody(isWide: isWide),
-                        const SizedBox(height: 28),
-                        const _DividerRule(),
-                        const SizedBox(height: 22),
-                        const _ClosingLine(),
-                      ],
+          Positioned.fill(child: _AboutBackground(animate: !reduceMotion)),
+          SafeArea(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final isWide = constraints.maxWidth >= 860;
+                return SingleChildScrollView(
+                  padding: EdgeInsets.fromLTRB(
+                    isWide ? 40 : 20,
+                    isWide ? 30 : 22,
+                    isWide ? 40 : 20,
+                    72,
+                  ),
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 1080),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          const _IssueBar(),
+                          const SizedBox(height: 24),
+                          _HeroBlock(isWide: isWide),
+                          const SizedBox(height: 28),
+                          _MissionBody(isWide: isWide),
+                          const SizedBox(height: 28),
+                          const _DividerRule(),
+                          const SizedBox(height: 22),
+                          const _ClosingLine(),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-              );
-            },
+                );
+              },
+            ),
           ),
         ],
       ),
@@ -57,18 +63,19 @@ class AboutScreen extends StatelessWidget {
 }
 
 class _AboutBackground extends StatelessWidget {
-  const _AboutBackground();
+  const _AboutBackground({required this.animate});
+  final bool animate;
 
   @override
   Widget build(BuildContext context) {
     return IgnorePointer(
-      child: Opacity(
-        opacity: 0.16,
-        child: Lottie.asset(
-          'assets/animations/aboutBG.lottie',
-          fit: BoxFit.cover,
-          repeat: true,
-        ),
+      child: Lottie.asset(
+        'assets/animations/aboutBG.json',
+        width: double.infinity,
+        height: double.infinity,
+        fit: BoxFit.fill,
+        repeat: false,
+        animate: animate,
       ),
     );
   }
@@ -147,100 +154,15 @@ class _HeroBlock extends StatelessWidget {
     if (!isWide) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          masthead,
-          const SizedBox(height: 18),
-          const _AnimationWindow(),
-          const SizedBox(height: 18),
-          deck,
-        ],
+        children: [masthead, const SizedBox(height: 18), deck],
       );
     }
 
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          flex: 6,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [masthead, const SizedBox(height: 18), deck],
-          ),
-        ),
-        const SizedBox(width: 30),
-        const Expanded(flex: 3, child: _AnimationWindow()),
-      ],
-    );
-  }
-}
-
-class _AnimationWindow extends StatelessWidget {
-  const _AnimationWindow();
-
-  @override
-  Widget build(BuildContext context) {
-    return AspectRatio(
-      aspectRatio: 0.82,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          border: Border.all(color: AboutScreen._ink, width: 1.4),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x1A000000),
-              blurRadius: 0,
-              offset: Offset(8, 8),
-            ),
-          ],
-        ),
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: Padding(
-                padding: const EdgeInsets.all(18),
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF4F4EF),
-                    border: Border.all(color: const Color(0xFFE0E0DA)),
-                  ),
-                  child: Center(
-                    child: Lottie.asset(
-                      'assets/animations/aboutBG.lottie',
-                      fit: BoxFit.contain,
-                      repeat: true,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            Positioned(
-              left: 12,
-              top: 10,
-              child: Text(
-                'ART SLOT',
-                style: GoogleFonts.dmMono(
-                  fontSize: 9,
-                  fontWeight: FontWeight.w700,
-                  color: AboutScreen._teal,
-                  letterSpacing: 1.4,
-                ),
-              ),
-            ),
-            Positioned(
-              right: 12,
-              bottom: 10,
-              child: Text(
-                'LOTTIE READY',
-                style: GoogleFonts.dmMono(
-                  fontSize: 9,
-                  fontWeight: FontWeight.w700,
-                  color: AboutScreen._muted,
-                  letterSpacing: 1.2,
-                ),
-              ),
-            ),
-          ],
-        ),
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 760),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [masthead, const SizedBox(height: 18), deck],
       ),
     );
   }

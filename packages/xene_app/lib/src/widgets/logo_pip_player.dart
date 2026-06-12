@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:xene_app/src/layout/xene_layout_metrics.dart';
+import 'package:xene_app/src/providers/accessibility_provider.dart';
 import 'package:xene_app/src/layout/xene_responsive_debug.dart';
 import 'package:xene_app/src/providers/auth_provider.dart';
 import 'package:xene_app/src/providers/player_provider.dart';
@@ -31,8 +32,12 @@ class _LogoPipPlayerState extends ConsumerState<LogoPipPlayer>
       duration: const Duration(milliseconds: 600),
     );
 
-    // Auto-start animation when widget is created
-    _entryController.forward();
+    final reduceMotion = ref.read(accessibilityProvider).reduceMotion;
+    if (reduceMotion) {
+      _entryController.value = 1.0;
+    } else {
+      _entryController.forward();
+    }
   }
 
   @override
@@ -103,13 +108,19 @@ class _LogoPipPlayerState extends ConsumerState<LogoPipPlayer>
     final topPadding = mediaQuery.padding.top;
     final isLandscape = mediaQuery.orientation == Orientation.landscape;
 
+    final reduceMotion = ref.watch(accessibilityProvider).reduceMotion;
+
     // Listen for visibility change
     ref.listen(playerProvider.select((s) => s.isVisible), (previous, next) {
       if (next == true && previous != true) {
         setState(() {
           _dragOffset = 0.0;
         });
-        _entryController.forward(from: 0.0);
+        if (reduceMotion) {
+          _entryController.value = 1.0;
+        } else {
+          _entryController.forward(from: 0.0);
+        }
       }
     });
 
@@ -122,7 +133,11 @@ class _LogoPipPlayerState extends ConsumerState<LogoPipPlayer>
         setState(() {
           _dragOffset = 0.0;
         });
-        _entryController.forward(from: 0.0);
+        if (reduceMotion) {
+          _entryController.value = 1.0;
+        } else {
+          _entryController.forward(from: 0.0);
+        }
       }
     });
 
@@ -209,45 +224,62 @@ class _LogoPipPlayerState extends ConsumerState<LogoPipPlayer>
                               ? MainAxisAlignment.start
                               : MainAxisAlignment.end,
                           children: [
-                            GestureDetector(
-                              onTap: () async {
-                                if (isAnon) {
-                                  showAuthGate(
-                                    context,
-                                    featureHint: 'to save tracks',
-                                  );
-                                  return;
-                                }
-                                final match = ref
-                                    .read(savedProvider.notifier)
-                                    .matchForUrl(currentTrack.externalUrl);
-                                if (match != null) {
-                                  await ref
+                            Semantics(
+                              label: isBookmarked
+                                  ? 'Remove bookmark'
+                                  : 'Bookmark track',
+                              button: true,
+                              child: GestureDetector(
+                                onTap: () async {
+                                  if (isAnon) {
+                                    showAuthGate(
+                                      context,
+                                      featureHint: 'to save tracks',
+                                    );
+                                    return;
+                                  }
+                                  final match = ref
                                       .read(savedProvider.notifier)
-                                      .unbookmark(match.id);
-                                } else {
-                                  await ref
-                                      .read(savedProvider.notifier)
-                                      .bookmarkFeedItem(currentTrack);
-                                }
-                              },
-                              child: Icon(
-                                isBookmarked
-                                    ? Icons.bookmark
-                                    : Icons.bookmark_border,
-                                color: isBookmarked
-                                    ? const Color(0xFF39FF14)
-                                    : iconColor,
-                                size: 16,
+                                      .matchForUrl(currentTrack.externalUrl);
+                                  if (match != null) {
+                                    await ref
+                                        .read(savedProvider.notifier)
+                                        .unbookmark(match.id);
+                                  } else {
+                                    await ref
+                                        .read(savedProvider.notifier)
+                                        .bookmarkFeedItem(currentTrack);
+                                  }
+                                },
+                                child: SizedBox(
+                                  width: 44,
+                                  height: 32,
+                                  child: Icon(
+                                    isBookmarked
+                                        ? Icons.bookmark
+                                        : Icons.bookmark_border,
+                                    color: isBookmarked
+                                        ? const Color(0xFF39FF14)
+                                        : iconColor,
+                                    size: 16,
+                                  ),
+                                ),
                               ),
                             ),
-                            const SizedBox(width: 10),
-                            GestureDetector(
-                              onTap: _close,
-                              child: Icon(
-                                Icons.close,
-                                color: iconColor,
-                                size: 16,
+                            Semantics(
+                              label: 'Close player',
+                              button: true,
+                              child: GestureDetector(
+                                onTap: _close,
+                                child: SizedBox(
+                                  width: 44,
+                                  height: 32,
+                                  child: Icon(
+                                    Icons.close,
+                                    color: iconColor,
+                                    size: 16,
+                                  ),
+                                ),
                               ),
                             ),
                           ],
@@ -296,30 +328,32 @@ class _LogoPipPlayerState extends ConsumerState<LogoPipPlayer>
                     ],
                   ),
 
-                  // Drag Handle
-                  Positioned(
-                    top: 32,
-                    bottom: 0,
-                    left: isLandscape ? 0 : null,
-                    right: isLandscape ? null : 0,
-                    width: 50,
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onHorizontalDragUpdate: _handleDragUpdate,
-                      onHorizontalDragEnd: _handleDragEnd,
-                      child: Align(
-                        alignment: isLandscape
-                            ? Alignment.centerLeft
-                            : Alignment.centerRight,
-                        child: Container(
-                          width: 4,
-                          height: 50,
-                          margin: isLandscape
-                              ? const EdgeInsets.only(left: 4)
-                              : const EdgeInsets.only(right: 4),
-                          decoration: BoxDecoration(
-                            color: handleColor,
-                            borderRadius: BorderRadius.circular(2),
+                  // Drag Handle — gesture only, no semantic meaning
+                  ExcludeSemantics(
+                    child: Positioned(
+                      top: 32,
+                      bottom: 0,
+                      left: isLandscape ? 0 : null,
+                      right: isLandscape ? null : 0,
+                      width: 50,
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onHorizontalDragUpdate: _handleDragUpdate,
+                        onHorizontalDragEnd: _handleDragEnd,
+                        child: Align(
+                          alignment: isLandscape
+                              ? Alignment.centerLeft
+                              : Alignment.centerRight,
+                          child: Container(
+                            width: 4,
+                            height: 50,
+                            margin: isLandscape
+                                ? const EdgeInsets.only(left: 4)
+                                : const EdgeInsets.only(right: 4),
+                            decoration: BoxDecoration(
+                              color: handleColor,
+                              borderRadius: BorderRadius.circular(2),
+                            ),
                           ),
                         ),
                       ),

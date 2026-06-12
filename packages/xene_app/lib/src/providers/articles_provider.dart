@@ -177,6 +177,35 @@ class MagazineCover {
 
 // ─── Providers ───────────────────────────────────────────────────────────────
 
+/// Fetches curated Feature Strip articles from Supabase.
+/// Managed entirely by the admin dashboard — no press scout dependency.
+/// Falls back to empty list when the table doesn't exist yet.
+final featuredArticlesProvider = FutureProvider.autoDispose<List<ArticleItem>>((
+  ref,
+) async {
+  debugPrint('[featuredArticlesProvider] Fetching featured articles');
+  try {
+    final data = await Supabase.instance.client
+        .from('featured_articles')
+        .select()
+        .eq('active', true)
+        .order('sort_order', ascending: true)
+        .limit(20);
+    final items = (data as List<dynamic>)
+        .whereType<Map<String, dynamic>>()
+        .map(ArticleItem.fromJson)
+        .where((a) => a.title.isNotEmpty)
+        .toList();
+    debugPrint(
+      '[featuredArticlesProvider] Loaded ${items.length} featured articles',
+    );
+    return items;
+  } catch (e) {
+    debugPrint('[featuredArticlesProvider] Error: $e');
+    return const [];
+  }
+});
+
 /// Fetches press articles for the currently active preset.
 /// Auto-refetches whenever [activePresetSlugProvider] changes.
 final presetArticlesProvider = FutureProvider.autoDispose<List<ArticleItem>>((
@@ -260,6 +289,7 @@ class XeneArticle {
     this.dek,
     this.author,
     this.layoutTemplate = 'editorial',
+    this.sectionLabel,
     this.coverImageUrl,
     this.themeColor,
     this.publishedAt,
@@ -271,6 +301,7 @@ class XeneArticle {
   final String? dek;
   final String? author;
   final String layoutTemplate;
+  final String? sectionLabel;
   final String? coverImageUrl;
   final String? themeColor; // hex e.g. '#00A88F'
   final List<XeneArticleBlock> blocks;
@@ -290,6 +321,7 @@ class XeneArticle {
       dek: json['dek'] as String?,
       author: json['author'] as String?,
       layoutTemplate: json['layout_template'] as String? ?? 'editorial',
+      sectionLabel: json['section_label'] as String?,
       coverImageUrl: json['cover_image_url'] as String?,
       themeColor: json['theme_color'] as String?,
       blocks: blocks,

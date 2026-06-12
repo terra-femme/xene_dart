@@ -131,12 +131,14 @@ export interface PressPublication {
 export interface ArtistArticle {
   id: string
   artist_id: string
+  artist_name: string | null
   title: string
   url: string
   snippet: string | null
   source: string | null
   published_at: string | null
   discovered_at: string
+  preset_slug: string | null
 }
 
 export interface GameParty {
@@ -169,10 +171,36 @@ export interface PartyScore {
   updated_at: string
 }
 
+// ─── Social Analytics ─────────────────────────────────────────────────────────
+
+export type SocialPlatform = 'youtube' | 'soundcloud' | 'twitch' | 'instagram' | 'tiktok'
+
+export interface ConnectedAccount {
+  id: string
+  org_id: string
+  platform: SocialPlatform
+  account_id: string | null
+  username: string | null
+  connected_at: string
+}
+
+export interface SocialMetric {
+  id: string
+  org_id: string
+  platform: SocialPlatform
+  metric_date: string
+  followers: number | null
+  total_views: number | null
+  total_likes: number | null
+  posts_count: number | null
+  metadata: Record<string, unknown>
+  created_at: string
+}
+
 // ─── Xene Articles ────────────────────────────────────────────────────────────
 
 export type ArticleStatus = 'draft' | 'published' | 'scheduled'
-export type LayoutTemplate = 'editorial' | 'interview' | 'visual_essay' | 'audio_story'
+export type LayoutTemplate = 'editorial' | 'interview' | 'visual_essay' | 'audio_story' | 'custom'
 export type BlockType = 'text' | 'quote' | 'image' | 'video' | 'voice_note' | 'spacer'
 export type SpacerSize = 'sm' | 'md' | 'lg'
 export type VideoProvider = 'youtube' | 'direct'
@@ -237,6 +265,7 @@ export interface XeneArticle {
   dek: string | null
   author: string | null
   layout_template: LayoutTemplate
+  section_label: string | null
   status: ArticleStatus
   cover_image_url: string | null
   theme_color: string | null

@@ -1,8 +1,85 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:js_interop';
 import 'dart:ui_web' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:web/web.dart' as web;
 
+/// Broadcast stream of SC playback positions in milliseconds.
+/// Emits as the active SC iframe progresses; empty on non-web platforms (see stub).
+Stream<int> get scPlayPositionStream => _ScBridge.positionStream;
+
+// ─── SC Widget API bridge ─────────────────────────────────────────────────────
+// The SC Widget API communicates via postMessage. This bridge:
+//   1. Loads api.js (once per page, guarded by window.__xeneScApiLoading)
+//   2. Calls SC.Widget(iframe).bind(PLAY_PROGRESS) after the API is ready
+//   3. Forwards currentPosition as a Dart broadcast stream
+class _ScBridge {
+  _ScBridge._();
+
+  static final _controller = StreamController<int>.broadcast();
+  static Stream<int> get positionStream => _controller.stream;
+  static bool _listenerReady = false;
+
+  static void _ensureListener() {
+    if (_listenerReady) return;
+    _listenerReady = true;
+    web.window.addEventListener(
+      'message',
+      (JSAny? rawEvent) {
+        final event = rawEvent as web.MessageEvent;
+        final raw = event.data?.dartify();
+        if (raw is! String) return;
+        try {
+          final msg = jsonDecode(raw) as Map<String, dynamic>;
+          if (msg['type'] != 'xene_sc_progress') return;
+          final pos = (msg['position'] as num?)?.toInt();
+          if (pos != null) _controller.add(pos);
+        } catch (_) {}
+      }.toJS,
+    );
+  }
+
+  /// Injects an inline script that loads the SC Widget API once, then binds
+  /// PLAY_PROGRESS for [iframeId] and posts progress events to the parent window.
+  static void bind(String iframeId) {
+    _ensureListener();
+    final js =
+        """
+(function(iframeId) {
+  function doBind() {
+    var el = document.getElementById(iframeId);
+    if (!el || !window.SC) return;
+    SC.Widget(el).bind(SC.Widget.Events.PLAY_PROGRESS, function(e) {
+      window.postMessage(
+        JSON.stringify({ type: 'xene_sc_progress', position: Math.round(e.currentPosition || 0) }),
+        '*'
+      );
+    });
+  }
+  if (window.__xeneScApiReady) { doBind(); return; }
+  window.__xeneScPending = window.__xeneScPending || [];
+  window.__xeneScPending.push(doBind);
+  if (!window.__xeneScApiLoading) {
+    window.__xeneScApiLoading = true;
+    var s = document.createElement('script');
+    s.src = 'https://w.soundcloud.com/player/api.js';
+    s.onload = function() {
+      window.__xeneScApiReady = true;
+      (window.__xeneScPending || []).forEach(function(fn) { fn(); });
+      window.__xeneScPending = [];
+    };
+    document.head.appendChild(s);
+  }
+})('$iframeId');
+""";
+    final script = web.HTMLScriptElement()..text = js;
+    web.document.body!.appendChild(script);
+  }
+}
+
+// ─── Widget ───────────────────────────────────────────────────────────────────
 class SoundCloudEmbed extends StatefulWidget {
   const SoundCloudEmbed({
     super.key,
@@ -18,10 +95,6 @@ class SoundCloudEmbed extends StatefulWidget {
 }
 
 class _SoundCloudEmbedState extends State<SoundCloudEmbed> {
-  // Static counter ensures every widget instance gets a unique view ID.
-  // Using trackId as the view ID caused silent factory-registration collisions:
-  // playing the same track a second time re-runs initState with the same ID,
-  // registerViewFactory is a no-op the second time, and the iframe never renders.
   static int _nextInstanceId = 0;
   late final String _viewId;
 
@@ -32,10 +105,8 @@ class _SoundCloudEmbedState extends State<SoundCloudEmbed> {
 
     ui.platformViewRegistry.registerViewFactory(_viewId, (int viewId) {
       final iframe = web.HTMLIFrameElement()
+        ..id = _viewId
         ..src = _buildEmbedUrl(widget.trackId, widget.isVisual)
-        // CSS dimensions fill the Flutter-controlled container.
-        // HTML width/height attributes fight with flt-platform-view sizing
-        // and produce the "height/width may not be set" console warnings.
         ..style.border = 'none'
         ..style.width = '100%'
         ..style.height = '100%'
@@ -47,16 +118,21 @@ class _SoundCloudEmbedState extends State<SoundCloudEmbed> {
 
       return iframe;
     });
+
+    // Bind the SC Widget API after the first frame — by then Flutter has
+    // inserted the iframe into the DOM and SC.Widget() can find it by id.
+    // The Widget API polls internally until the SC player inside the iframe
+    // responds, so calling bind() before the player fully loads is safe.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _ScBridge.bind(_viewId);
+    });
   }
 
   String _buildEmbedUrl(String trackId, bool isVisual) {
-    // Full SoundCloud URLs are used for private playlist embeds because they
-    // can include a secret_token query parameter.
     final String resourcePath;
     if (trackId.startsWith('http://') || trackId.startsWith('https://')) {
       resourcePath = Uri.encodeComponent(trackId);
     } else if (trackId.startsWith('playlist-')) {
-      // Playlist IDs are stored as 'playlist-{id}' and need /playlists/.
       final playlistId = trackId.substring('playlist-'.length);
       resourcePath = 'https%3A//api.soundcloud.com/playlists/$playlistId';
     } else {
@@ -77,7 +153,6 @@ class _SoundCloudEmbedState extends State<SoundCloudEmbed> {
 
   @override
   Widget build(BuildContext context) {
-    // SizedBox.expand() fills whatever space the parent allocates via Flutter layout.
     return ClipRRect(
       borderRadius: BorderRadius.circular(8),
       child: SizedBox.expand(child: HtmlElementView(viewType: _viewId)),

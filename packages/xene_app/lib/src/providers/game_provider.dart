@@ -145,6 +145,8 @@ class WeeklyTracksNotifier
       '[game] submitTrack partyId=$arg trackId=${track['sc_track_id']}',
     );
     await refresh();
+    // Party card count is stale without this — the list screen caches it.
+    ref.read(gamePartiesProvider.notifier).refresh();
   }
 
   Future<void> deleteTrack(String trackId) async {
@@ -152,6 +154,7 @@ class WeeklyTracksNotifier
     await dio.delete('/game/parties/$arg/tracks/$trackId');
     _logger.info('[game] deleteTrack partyId=$arg trackId=$trackId');
     await refresh();
+    ref.read(gamePartiesProvider.notifier).refresh();
   }
 
   Future<String?> exportToScPlaylist(String weekStart) async {
@@ -239,6 +242,36 @@ final weekVotesProvider =
       WeekVotesNotifier.new,
     );
 
+// ── Weekly scene ─────────────────────────────────────────────────────────────
+
+/// The active scene text for the current week. Null when no scene is set.
+/// Global — the same scene applies to every party this week.
+final weekSceneProvider = FutureProvider.autoDispose<String?>((ref) async {
+  final dio = ref.watch(authenticatedDioProvider);
+  final week = _currentWeekStart();
+  _logger.info('[game] fetchWeekScene week=$week');
+  try {
+    final res = await dio.get<Map<String, dynamic>>(
+      '/game/scene',
+      queryParameters: {'week': week},
+    );
+    return res.data?['text'] as String?;
+  } catch (e) {
+    _logger.warning('[game] weekSceneProvider error: $e');
+    return null;
+  }
+});
+
+// ── Party weeks (archive navigation) ─────────────────────────────────────────
+
+final partyWeeksProvider = FutureProvider.family
+    .autoDispose<List<String>, String>((ref, partyId) async {
+      final dio = ref.watch(authenticatedDioProvider);
+      _logger.info('[game] fetchPartyWeeks partyId=$partyId');
+      final res = await dio.get<List<dynamic>>('/game/parties/$partyId/weeks');
+      return (res.data ?? []).cast<String>();
+    });
+
 // ── Archive tracks (past weeks, read-only) ────────────────────────────────────
 
 /// Family arg: (partyId, weekStart) — both strings. Records implement == / hashCode.
@@ -277,6 +310,26 @@ final leaderboardProvider = FutureProvider.family
           .toList();
     });
 
+// ── Weekly winners (for monthly progress widget) ──────────────────────────────
+
+final weeklyWinnersProvider = FutureProvider.family
+    .autoDispose<List<WeekWinner>, String>((ref, partyId) async {
+      final dio = ref.watch(authenticatedDioProvider);
+      _logger.info('[game] fetchWeeklyWinners partyId=$partyId');
+      try {
+        final res = await dio.get<List<dynamic>>(
+          '/game/parties/$partyId/weekly_winners',
+        );
+        return (res.data ?? [])
+            .cast<Map<String, dynamic>>()
+            .map(WeekWinner.fromJson)
+            .toList();
+      } catch (e) {
+        _logger.warning('[game] weeklyWinnersProvider error: $e');
+        return [];
+      }
+    });
+
 // ── SC track search ───────────────────────────────────────────────────────────
 
 final scTrackSearchProvider = FutureProvider.family
@@ -296,7 +349,8 @@ final scTrackSearchProvider = FutureProvider.family
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 String _currentWeekStart() {
-  final now = DateTime.now().toUtc();
+  const offsetHours = int.fromEnvironment('GAME_DEBUG_HOURS', defaultValue: 0);
+  final now = DateTime.now().toUtc().add(const Duration(hours: offsetHours));
   final monday = now.subtract(Duration(days: now.weekday - 1));
   return '${monday.year.toString().padLeft(4, '0')}-'
       '${monday.month.toString().padLeft(2, '0')}-'

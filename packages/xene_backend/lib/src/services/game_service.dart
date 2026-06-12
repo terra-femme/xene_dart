@@ -5,7 +5,9 @@ import '../database.dart';
 final _logger = Logger('GameService');
 
 const _maxPartiesPerUser = 3;
-const _maxTracksPerWeek = 5;
+const _maxMembersPerParty = 20;
+const _maxScenarioTracksPerWeek = 1;
+const _maxDiscoveryTracksPerWeek = 4;
 const _inviteCodeChars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
 class GameService {
@@ -13,12 +15,32 @@ class GameService {
 
   final DatabaseService _db;
 
+  // ── Debug clock ───────────────────────────────────────────────────────────
+
+  /// Returns a shifted "now" when GAME_DEBUG_HOURS is set at compile time.
+  /// In all normal builds (no --dart-define) this returns real UTC time.
+  ///
+  /// Usage:
+  ///   dart run --define=GAME_DEBUG_HOURS=74   → simulates next Tuesday
+  ///   dart run --define=GAME_DEBUG_HOURS=169  → simulates post-results Friday
+  static DateTime _debugNow() {
+    const offsetHours = int.fromEnvironment(
+      'GAME_DEBUG_HOURS',
+      defaultValue: 0,
+    );
+    if (offsetHours != 0) {
+      // ignore: avoid_print
+      print('[GameService] *** DEBUG CLOCK ACTIVE: offset=${offsetHours}h ***');
+    }
+    return DateTime.now().toUtc().add(const Duration(hours: offsetHours));
+  }
+
   // ── Week helpers ──────────────────────────────────────────────────────────
 
   /// Returns the date string ('YYYY-MM-DD') for the Monday that starts the
   /// current week (UTC).
   static String currentWeekStart() {
-    final now = DateTime.now().toUtc();
+    final now = _debugNow();
     final monday = now.subtract(Duration(days: now.weekday - 1));
     return '${monday.year.toString().padLeft(4, '0')}-'
         '${monday.month.toString().padLeft(2, '0')}-'
@@ -41,7 +63,7 @@ class GameService {
     final monday = _parseWeekStart(weekStart);
     final friday = monday.add(const Duration(days: 4));
     final deadline = DateTime.utc(friday.year, friday.month, friday.day, 21);
-    return DateTime.now().toUtc().isAfter(deadline);
+    return _debugNow().isAfter(deadline);
   }
 
   /// True if track submission is closed for a given week.
@@ -55,7 +77,7 @@ class GameService {
     final monday = _parseWeekStart(weekStart);
     final friday = monday.add(const Duration(days: 4));
     final reveal = DateTime.utc(friday.year, friday.month, friday.day, 21, 5);
-    return DateTime.now().toUtc().isAfter(reveal);
+    return _debugNow().isAfter(reveal);
   }
 
   // ── Username ──────────────────────────────────────────────────────────────
@@ -168,6 +190,13 @@ class GameService {
       return party;
     }
 
+    final memberCount = await _currentMemberCount(partyId);
+    if (memberCount >= _maxMembersPerParty) {
+      throw StateError(
+        'This party is full — maximum $_maxMembersPerParty members',
+      );
+    }
+
     final count = await _partyCountForUser(userId);
     if (count >= _maxPartiesPerUser) {
       throw StateError('Maximum of $_maxPartiesPerUser parties per user');
@@ -234,10 +263,30 @@ class GameService {
             .eq('user_id', userId)
             .eq('week_start', weekStart);
 
+        // Wrapped separately so a missing track_type column (migration not yet
+        // applied) never silences the entire party list.
+        bool myScenarioSubmitted = false;
+        try {
+          final myScenarioTrack = await _db.client
+              .from('party_tracks')
+              .select('id')
+              .eq('party_id', partyId)
+              .eq('user_id', userId)
+              .eq('week_start', weekStart)
+              .eq('track_type', 'scenario')
+              .maybeSingle();
+          myScenarioSubmitted = myScenarioTrack != null;
+        } catch (e) {
+          _logger.warning(
+            '[game] myScenarioSubmitted check failed (migration pending?): $e',
+          );
+        }
+
         result.add({
           ...party,
           'member_count': (memberCount as List).length,
           'my_track_count_this_week': (myTracksThisWeek as List).length,
+          'my_scenario_submitted': myScenarioSubmitted,
           'week_start': weekStart,
         });
       }
@@ -313,17 +362,37 @@ class GameService {
 
   // ── Tracks ─────────────────────────────────────────────────────────────────
 
+  /// Returns the scene text assigned to [weekStart], or null if none is set.
+  Future<String?> getWeekScene(String weekStart) async {
+    _logger.info('[game] getWeekScene week=$weekStart');
+    try {
+      final row = await _db.client
+          .from('game_week_scenes')
+          .select('game_scenes(text)')
+          .eq('week_start', weekStart)
+          .maybeSingle();
+      if (row == null) return null;
+      final scene = row['game_scenes'] as Map<String, dynamic>?;
+      return scene?['text'] as String?;
+    } catch (e) {
+      _logger.warning('[game] getWeekScene error: $e');
+      return null;
+    }
+  }
+
   /// Submits a SoundCloud track to the party for the current week.
-  /// Throws [StateError] if the cap (5 tracks/week) is hit or the week is closed.
+  /// track_type 'scenario' is capped at 1 per user per week.
+  /// track_type 'discovery' is capped at 4 per user per week.
   Future<Map<String, dynamic>> submitTrack(
     String partyId,
     String userId,
     Map<String, dynamic> track,
   ) async {
     final weekStart = currentWeekStart();
+    final trackType = (track['track_type'] as String?)?.trim() ?? 'discovery';
     _logger.info(
       '[game] submitTrack partyId=$partyId userId=$userId '
-      'trackId=${track['sc_track_id']} week=$weekStart',
+      'trackId=${track['sc_track_id']} type=$trackType week=$weekStart',
     );
 
     if (isSubmissionClosed(weekStart)) {
@@ -333,17 +402,58 @@ class GameService {
     final isMember = await _isMember(partyId, userId);
     if (!isMember) throw StateError('User is not a member of this party');
 
-    final existing = await _db.client
+    if (!_isValidScTrackUrl(track['sc_track_url'] as String?)) {
+      throw ArgumentError(
+        'sc_track_url must be a valid https://soundcloud.com URL',
+      );
+    }
+    if (!_isValidScArtworkUrl(track['sc_artwork_url'] as String?)) {
+      throw ArgumentError(
+        'sc_artwork_url must be a valid https://i[1-7].sndcdn.com URL',
+      );
+    }
+
+    if (trackType == 'scenario') {
+      final existingScenario = await _db.client
+          .from('party_tracks')
+          .select('id')
+          .eq('party_id', partyId)
+          .eq('user_id', userId)
+          .eq('week_start', weekStart)
+          .eq('track_type', 'scenario')
+          .maybeSingle();
+      if (existingScenario != null) {
+        throw StateError(
+          'Maximum of $_maxScenarioTracksPerWeek scene track per week — '
+          'you have already submitted yours',
+        );
+      }
+    } else {
+      final discoveryRows = await _db.client
+          .from('party_tracks')
+          .select('id')
+          .eq('party_id', partyId)
+          .eq('user_id', userId)
+          .eq('week_start', weekStart)
+          .eq('track_type', 'discovery');
+      if ((discoveryRows as List).length >= _maxDiscoveryTracksPerWeek) {
+        throw StateError(
+          'Maximum of $_maxDiscoveryTracksPerWeek discovery tracks per week already submitted',
+        );
+      }
+    }
+
+    final duplicate = await _db.client
         .from('party_tracks')
         .select('id')
         .eq('party_id', partyId)
         .eq('user_id', userId)
-        .eq('week_start', weekStart);
+        .eq('sc_track_id', track['sc_track_id'] as String)
+        .eq('week_start', weekStart)
+        .maybeSingle();
 
-    if ((existing as List).length >= _maxTracksPerWeek) {
-      throw StateError(
-        'Maximum of $_maxTracksPerWeek tracks per week already submitted',
-      );
+    if (duplicate != null) {
+      throw StateError('That track is already in your list for this week');
     }
 
     final row = await _db.client
@@ -357,6 +467,7 @@ class GameService {
           'sc_artwork_url': track['sc_artwork_url'],
           'sc_duration_seconds': track['sc_duration_seconds'],
           'week_start': weekStart,
+          'track_type': trackType,
         })
         .select()
         .single();
@@ -388,6 +499,49 @@ class GameService {
     _logger.info('[game] deleteTrack: deleted $trackId');
   }
 
+  /// Checks whether [scTrackId] has already been submitted in this party by
+  /// anyone other than [requestingUserId], across all weeks.
+  /// Returns the earliest match's username and date, or null if no match.
+  Future<Map<String, dynamic>?> findTrackInParty(
+    String partyId,
+    String requestingUserId,
+    String scTrackId,
+  ) async {
+    _logger.info('[game] findTrackInParty partyId=$partyId trackId=$scTrackId');
+    try {
+      final rows = await _db.client
+          .from('party_tracks')
+          .select('user_id, submitted_at, week_start')
+          .eq('party_id', partyId)
+          .eq('sc_track_id', scTrackId)
+          .neq('user_id', requestingUserId)
+          .order('submitted_at')
+          .limit(1);
+
+      final list = List<Map<String, dynamic>>.from(rows as List);
+      if (list.isEmpty) return null;
+
+      final row = list.first;
+      final uid = row['user_id'] as String;
+
+      final profile = await _db.client
+          .from('profiles')
+          .select('username')
+          .eq('id', uid)
+          .maybeSingle();
+
+      return {
+        'found': true,
+        'username': profile?['username'] as String? ?? 'Another member',
+        'submitted_at': row['submitted_at'] as String,
+        'week_start': row['week_start'] as String,
+      };
+    } catch (e) {
+      _logger.warning('[game] findTrackInParty error: $e');
+      return null;
+    }
+  }
+
   /// Returns all tracks for a party in a given week, grouped by member.
   /// Each entry: { member: {...}, tracks: [...] }
   Future<List<Map<String, dynamic>>> getWeeklyTracks(
@@ -402,6 +556,8 @@ class GameService {
         _logger.warning('[game] getWeeklyTracks: not a member');
         return [];
       }
+
+      await _purgeExpiredWeeks(partyId);
 
       final tracks = await _db.client
           .from('party_tracks')
@@ -454,6 +610,43 @@ class GameService {
     }
   }
 
+  /// Returns all distinct past week_start values for this party that have at
+  /// least one track submitted, ordered most-recent first.
+  /// Excludes the current week — that belongs in the THIS WEEK tab.
+  Future<List<String>> getPartyWeeks(
+    String partyId,
+    String requestingUserId,
+  ) async {
+    _logger.info('[game] getPartyWeeks partyId=$partyId');
+    try {
+      final isMember = await _isMember(partyId, requestingUserId);
+      if (!isMember) return [];
+
+      await _purgeExpiredWeeks(partyId);
+
+      final thisWeek = currentWeekStart();
+
+      final rows = await _db.client
+          .from('party_tracks')
+          .select('week_start')
+          .eq('party_id', partyId)
+          .lt('week_start', thisWeek)
+          .order('week_start', ascending: false);
+
+      final seen = <String>{};
+      final weeks = <String>[];
+      for (final row in List<Map<String, dynamic>>.from(rows as List)) {
+        final w = row['week_start'] as String;
+        if (seen.add(w)) weeks.add(w);
+      }
+      _logger.info('[game] getPartyWeeks: ${weeks.length} past weeks');
+      return weeks;
+    } catch (e) {
+      _logger.warning('[game] getPartyWeeks error: $e');
+      return [];
+    }
+  }
+
   // ── Voting ─────────────────────────────────────────────────────────────────
 
   /// Casts (or updates) the voter's vote for the given week.
@@ -481,6 +674,21 @@ class GameService {
     final targetMember = await _isMember(partyId, votedForId);
     if (!targetMember)
       throw ArgumentError('Voted-for user is not in this party');
+
+    final hasScenarioTrack = await _db.client
+        .from('party_tracks')
+        .select('id')
+        .eq('party_id', partyId)
+        .eq('user_id', votedForId)
+        .eq('week_start', weekStart)
+        .eq('track_type', 'scenario')
+        .limit(1)
+        .maybeSingle();
+    if (hasScenarioTrack == null) {
+      throw ArgumentError(
+        'That member has not submitted a track for this week\'s scene',
+      );
+    }
 
     await _db.client.from('party_votes').upsert({
       'party_id': partyId,
@@ -673,6 +881,88 @@ class GameService {
     }
   }
 
+  // ── Weekly winners (per-week, for monthly progress widget) ───────────────────
+
+  /// Returns one entry per closed+revealed week: the winner's userId + username.
+  /// Ties are broken alphabetically by userId for stability.
+  Future<List<Map<String, dynamic>>> getWeeklyWinners(
+    String partyId,
+    String requestingUserId,
+  ) async {
+    _logger.info('[game] getWeeklyWinners partyId=$partyId');
+    try {
+      final isMember = await _isMember(partyId, requestingUserId);
+      if (!isMember) return [];
+
+      final votes = await _db.client
+          .from('party_votes')
+          .select('voted_for_id, week_start')
+          .eq('party_id', partyId);
+
+      final voteList = List<Map<String, dynamic>>.from(votes as List);
+      final revealedVotes = voteList
+          .where((v) => isResultsVisible(v['week_start'] as String))
+          .toList();
+
+      // Group by week → userId → vote count.
+      final votesByWeek = <String, Map<String, int>>{};
+      for (final v in revealedVotes) {
+        final week = v['week_start'] as String;
+        final uid = v['voted_for_id'] as String;
+        votesByWeek.putIfAbsent(week, () => {});
+        votesByWeek[week]![uid] = (votesByWeek[week]![uid] ?? 0) + 1;
+      }
+
+      if (votesByWeek.isEmpty) return [];
+
+      final weekWinners = <String, String>{}; // week_start → winner userId
+      for (final entry in votesByWeek.entries) {
+        if (entry.value.isEmpty) continue;
+        final maxVotes = entry.value.values.reduce((a, b) => a > b ? a : b);
+        final tied =
+            entry.value.entries
+                .where((e) => e.value == maxVotes)
+                .map((e) => e.key)
+                .toList()
+              ..sort();
+        weekWinners[entry.key] = tied.first;
+      }
+
+      final winnerIds = weekWinners.values.toSet().toList();
+      final profiles = await _db.client
+          .from('profiles')
+          .select('id, username')
+          .inFilter('id', winnerIds);
+
+      final usernameMap = <String, String>{
+        for (final p in List<Map<String, dynamic>>.from(profiles as List))
+          p['id'] as String: p['username'] as String? ?? 'Unknown',
+      };
+
+      final result =
+          weekWinners.entries
+              .map(
+                (e) => {
+                  'week_start': e.key,
+                  'winner_user_id': e.value,
+                  'winner_username': usernameMap[e.value] ?? 'Unknown',
+                },
+              )
+              .toList()
+            ..sort(
+              (a, b) => (a['week_start'] as String).compareTo(
+                b['week_start'] as String,
+              ),
+            );
+
+      _logger.info('[game] getWeeklyWinners: ${result.length} resolved weeks');
+      return result;
+    } catch (e) {
+      _logger.severe('[game] getWeeklyWinners error: $e');
+      return [];
+    }
+  }
+
   // ── Private helpers ────────────────────────────────────────────────────────
 
   Future<bool> _isMember(String partyId, String userId) async {
@@ -691,6 +981,60 @@ class GameService {
         .select('party_id')
         .eq('user_id', userId);
     return (rows as List).length;
+  }
+
+  Future<int> _currentMemberCount(String partyId) async {
+    final rows = await _db.client
+        .from('party_members')
+        .select('user_id')
+        .eq('party_id', partyId);
+    return (rows as List).length;
+  }
+
+  /// Deletes party_tracks and party_votes rows whose week closed more than
+  /// 31 days ago (week_start + 35 days < now). Called on every read so no
+  /// scheduled job is needed. Uses _debugNow() so the debug clock works too.
+  Future<void> _purgeExpiredWeeks(String partyId) async {
+    final cutoff = _debugNow().subtract(const Duration(days: 35));
+    final cutoffStr =
+        '${cutoff.year.toString().padLeft(4, '0')}-'
+        '${cutoff.month.toString().padLeft(2, '0')}-'
+        '${cutoff.day.toString().padLeft(2, '0')}';
+    try {
+      await _db.client
+          .from('party_tracks')
+          .delete()
+          .eq('party_id', partyId)
+          .lt('week_start', cutoffStr);
+      await _db.client
+          .from('party_votes')
+          .delete()
+          .eq('party_id', partyId)
+          .lt('week_start', cutoffStr);
+      _logger.info(
+        '[game] purgeExpiredWeeks partyId=$partyId cutoff=$cutoffStr',
+      );
+    } catch (e) {
+      _logger.warning('[game] purgeExpiredWeeks error: $e');
+      // Non-fatal — a failed purge never blocks the read.
+    }
+  }
+
+  static bool _isValidScTrackUrl(String? url) {
+    if (url == null || url.isEmpty) return false;
+    final uri = Uri.tryParse(url);
+    if (uri == null || uri.scheme != 'https') return false;
+    final host = uri.host.toLowerCase();
+    return host == 'soundcloud.com' ||
+        host == 'www.soundcloud.com' ||
+        host == 'on.soundcloud.com';
+  }
+
+  static bool _isValidScArtworkUrl(String? url) {
+    if (url == null || url.isEmpty) return true; // artwork is optional
+    final uri = Uri.tryParse(url);
+    if (uri == null || uri.scheme != 'https') return false;
+    return RegExp(r'^i[1-7]\.sndcdn\.com$').hasMatch(uri.host.toLowerCase());
   }
 
   static String _generateInviteCode() {

@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:dart_frog/dart_frog.dart';
 import 'package:logging/logging.dart';
 import 'package:xene_backend/src/database.dart';
+import 'package:xene_backend/src/services/analysis_service.dart';
 import 'package:xene_backend/src/utils/auth_utils.dart';
 
 final _logger = Logger('user.queue');
@@ -98,6 +100,17 @@ Future<Response> _addToQueue(RequestContext context) async {
         })
         .select()
         .single();
+
+    // Fire-and-forget track analysis — does not block the queue response
+    final trackId = body['track_id'] as String?;
+    if (trackId != null) {
+      final analysisService = context.read<AnalysisService>();
+      unawaited(
+        analysisService.analyzeTrack(platform, trackId).catchError((Object e) {
+          _logger.warning('[queue] analyzeTrack failed trackId=$trackId: $e');
+        }),
+      );
+    }
 
     return Response.json(statusCode: HttpStatus.created, body: row);
   } on Exception catch (e) {
