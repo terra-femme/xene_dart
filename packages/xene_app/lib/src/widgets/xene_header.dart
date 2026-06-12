@@ -312,25 +312,6 @@ class _XeneHeaderState extends ConsumerState<XeneHeader> {
                             ),
 
                             // Fade + chevron — decorative scroll indicator
-                            if (!_isAtEnd)
-                              ExcludeSemantics(
-                                child: Positioned(
-                                  right: 0,
-                                  top: 0,
-                                  bottom: 0,
-                                  child: Container(
-                                    width: 48,
-                                    decoration: const BoxDecoration(
-                                      gradient: LinearGradient(
-                                        colors: [
-                                          Color(0x00FFFFFF),
-                                          Colors.white,
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
                           ],
                         ),
                       ),
