@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:dart_frog/dart_frog.dart';
@@ -21,6 +22,22 @@ Future<Response> onRequest(
   final row = await analysis.getAnalysis(platform, trackId);
 
   if (row == null) {
+    // Lazy-trigger: kick off analysis on a miss so tracks never analyzed at
+    // queue-add time (history, saved, game playback) still get a row. Fire-and-
+    // forget — the client polls and picks it up on a later GET. analyzeTrack is
+    // idempotent (skips if stored) and in-flight de-duped, so repeated polls
+    // during the analysis window won't spawn duplicate work.
+    _logger.info(
+      '[analysis] miss — triggering analyzeTrack platform=$platform '
+      'trackId=$trackId',
+    );
+    unawaited(
+      analysis.analyzeTrack(platform, trackId).catchError((Object e) {
+        _logger.warning(
+          '[analysis] lazy analyzeTrack failed trackId=$trackId: $e',
+        );
+      }),
+    );
     return Response.json(
       statusCode: HttpStatus.notFound,
       body: {

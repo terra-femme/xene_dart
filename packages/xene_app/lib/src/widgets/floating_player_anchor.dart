@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:pointer_interceptor/pointer_interceptor.dart';
 import '../providers/auth_provider.dart';
 import '../providers/player_provider.dart';
 import '../providers/saved_provider.dart';
@@ -82,65 +83,73 @@ class FloatingPlayerAnchor extends ConsumerWidget {
                           externalUrl: currentTrack.externalUrl,
                         ),
 
-                      // 2. Save button (top-left)
+                      // 2. Save button (top-left).
+                      // PointerInterceptor lets the tap reach Flutter instead
+                      // of the web player iframe underneath (web-only; no-op
+                      // elsewhere).
                       Positioned(
                         top: 2,
                         left: 2,
-                        child: GestureDetector(
-                          onTap: () async {
-                            if (isAnon) {
-                              showAuthGate(
-                                context,
-                                featureHint: 'to save tracks',
+                        child: PointerInterceptor(
+                          child: GestureDetector(
+                            onTap: () async {
+                              if (isAnon) {
+                                showAuthGate(
+                                  context,
+                                  featureHint: 'to save tracks',
+                                );
+                                return;
+                              }
+                              final notifier = ref.read(savedProvider.notifier);
+                              final match = notifier.matchForUrl(
+                                currentTrack.externalUrl,
                               );
-                              return;
-                            }
-                            final notifier = ref.read(savedProvider.notifier);
-                            final match = notifier.matchForUrl(
-                              currentTrack.externalUrl,
-                            );
-                            if (match != null) {
-                              await notifier.unbookmark(match.id);
-                            } else {
-                              await notifier.bookmarkFeedItem(currentTrack);
-                            }
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.all(4),
-                            decoration: const BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: Colors.black26,
-                            ),
-                            child: Icon(
-                              savedMatch != null
-                                  ? Icons.bookmark
-                                  : Icons.bookmark_border,
-                              color: savedMatch != null
-                                  ? const Color(0xFF39FF14)
-                                  : Colors.white70,
-                              size: 10,
+                              if (match != null) {
+                                await notifier.unbookmark(match.id);
+                              } else {
+                                await notifier.bookmarkFeedItem(currentTrack);
+                              }
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.all(4),
+                              decoration: const BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: Colors.black26,
+                              ),
+                              child: Icon(
+                                savedMatch != null
+                                    ? Icons.bookmark
+                                    : Icons.bookmark_border,
+                                color: savedMatch != null
+                                    ? const Color(0xFF39FF14)
+                                    : Colors.white70,
+                                size: 10,
+                              ),
                             ),
                           ),
                         ),
                       ),
 
-                      // 3. Close button (top-right)
+                      // 3. Close button (top-right). PointerInterceptor so the
+                      // tap reaches Flutter, not the web player iframe.
                       Positioned(
                         top: 2,
                         right: 2,
-                        child: GestureDetector(
-                          onTap: () =>
-                              ref.read(playerProvider.notifier).stopAndHide(),
-                          child: Container(
-                            padding: const EdgeInsets.all(4),
-                            decoration: const BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: Colors.black26,
-                            ),
-                            child: const Icon(
-                              Icons.close,
-                              color: Colors.white70,
-                              size: 10,
+                        child: PointerInterceptor(
+                          child: GestureDetector(
+                            onTap: () =>
+                                ref.read(playerProvider.notifier).stopAndHide(),
+                            child: Container(
+                              padding: const EdgeInsets.all(4),
+                              decoration: const BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: Colors.black26,
+                              ),
+                              child: const Icon(
+                                Icons.close,
+                                color: Colors.white70,
+                                size: 10,
+                              ),
                             ),
                           ),
                         ),

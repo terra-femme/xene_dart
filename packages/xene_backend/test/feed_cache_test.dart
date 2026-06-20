@@ -37,6 +37,13 @@ FeedItem _makeItem(String id, String artistName) => FeedItem(
 void main() {
   late MockDatabaseService db;
 
+  setUpAll(() {
+    // Required so any(named: 'ttl'/'metadata') can synthesise a fallback for
+    // the non-nullable Duration / Map args of tryClaimSystemCacheLease.
+    registerFallbackValue(Duration.zero);
+    registerFallbackValue(<String, dynamic>{});
+  });
+
   setUp(() {
     db = MockDatabaseService();
     when(
@@ -47,11 +54,26 @@ void main() {
       ),
     ).thenAnswer((_) async => []);
     when(() => db.getSystemCache(any())).thenAnswer((_) async => null);
-    when(() => db.setLastPolled(any(), any())).thenAnswer((_) async {});
+    when(
+      () => db.setLastPolled(any(), any(), at: any(named: 'at')),
+    ).thenAnswer((_) async {});
     when(
       () => db.setSystemCache(any(), any(), expiresAt: any(named: 'expiresAt')),
     ).thenAnswer((_) async => true);
     when(() => db.deleteSystemCache(any())).thenAnswer((_) async {});
+    // Background-refresh lease (added by the 06-16 concurrency hardening): claim
+    // succeeds by default so the refresh proceeds, mirroring pre-lease behaviour.
+    when(
+      () => db.tryClaimSystemCacheLease(
+        any(),
+        ttl: any(named: 'ttl'),
+        metadata: any(named: 'metadata'),
+      ),
+    ).thenAnswer((_) async => 'test-owner');
+    // Lease release (called in _runLiveFetch / _backgroundRefresh finally blocks).
+    when(
+      () => db.releaseSystemCacheLease(any(), any()),
+    ).thenAnswer((_) async {});
   });
 
   group('fetchWithCache', () {
@@ -88,7 +110,7 @@ void main() {
       );
       expect(result.length, equals(1));
       expect(result.first.id, equals('track_001'));
-      verifyNever(() => db.setLastPolled(any(), any()));
+      verifyNever(() => db.setLastPolled(any(), any(), at: any(named: 'at')));
     });
 
     test(
@@ -97,7 +119,9 @@ void main() {
         when(
           () => db.getLastPolled(platform, artist),
         ).thenAnswer((_) async => null);
-        when(() => db.setLastPolled(platform, artist)).thenAnswer((_) async {});
+        when(
+          () => db.setLastPolled(platform, artist, at: any(named: 'at')),
+        ).thenAnswer((_) async {});
 
         final liveItem = _makeItem('track_live', artist);
         final result = await fetchWithCache(
@@ -110,7 +134,9 @@ void main() {
 
         expect(result.length, equals(1));
         expect(result.first.id, equals('track_live'));
-        verify(() => db.setLastPolled(platform, artist)).called(1);
+        verify(
+          () => db.setLastPolled(platform, artist, at: any(named: 'at')),
+        ).called(1);
       },
     );
 
@@ -119,7 +145,9 @@ void main() {
       when(() => db.getLastPolled(platform, artist)).thenAnswer(
         (_) async => DateTime.now().toUtc().subtract(const Duration(hours: 7)),
       );
-      when(() => db.setLastPolled(platform, artist)).thenAnswer((_) async {});
+      when(
+        () => db.setLastPolled(platform, artist, at: any(named: 'at')),
+      ).thenAnswer((_) async {});
 
       final liveItem = _makeItem('track_stale', artist);
       final result = await fetchWithCache(
@@ -131,7 +159,9 @@ void main() {
       );
 
       expect(result.first.id, equals('track_stale'));
-      verify(() => db.setLastPolled(platform, artist)).called(1);
+      verify(
+        () => db.setLastPolled(platform, artist, at: any(named: 'at')),
+      ).called(1);
     });
 
     test('live fetch failure — serves stale rows instead of empty', () async {
@@ -155,7 +185,7 @@ void main() {
 
       expect(result.length, equals(1));
       expect(result.first.id, equals('stale_001'));
-      verifyNever(() => db.setLastPolled(any(), any()));
+      verifyNever(() => db.setLastPolled(any(), any(), at: any(named: 'at')));
     });
 
     test('live fetch returns empty — stamps verified-empty marker', () async {
@@ -172,7 +202,9 @@ void main() {
       );
 
       expect(result, isEmpty);
-      verify(() => db.setLastPolled(platform, artist)).called(1);
+      verify(
+        () => db.setLastPolled(platform, artist, at: any(named: 'at')),
+      ).called(1);
       verify(
         () => db.setSystemCache(
           'feed_empty_window:$platform:$artist:31d',
@@ -195,7 +227,9 @@ void main() {
           days: any(named: 'days'),
         ),
       ).thenAnswer((_) async => []);
-      when(() => db.setLastPolled(platform, artist)).thenAnswer((_) async {});
+      when(
+        () => db.setLastPolled(platform, artist, at: any(named: 'at')),
+      ).thenAnswer((_) async {});
 
       final liveItem = _makeItem('track_fallthrough', artist);
       var liveCalled = false;

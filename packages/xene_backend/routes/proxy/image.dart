@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:dart_frog/dart_frog.dart';
 import 'package:logging/logging.dart';
 import 'package:dio/dio.dart' hide Response;
@@ -48,11 +50,32 @@ Future<Response> onRequest(RequestContext context) async {
     'i7.sndcdn.com',
     'yt3.ggpht.com',
     'yt4.ggpht.com',
+    'i.ytimg.com',
+    'img.youtube.com',
   ];
 
   final uri = Uri.parse(encodedUrl);
+
+  // SSRF guard 1: only https. Blocks file://, http://, gopher://, etc.
+  if (uri.scheme != 'https') {
+    _logger.warning('[proxy.image] Non-https scheme rejected: ${uri.scheme}');
+    return Response(statusCode: 403, body: 'Only https URLs are allowed');
+  }
+
+  // SSRF guard 2: host must be on the CDN allowlist. Because the allowlist holds
+  // only known public CDN hostnames (never raw IPs), this also rejects attempts
+  // to target an IP literal like 169.254.169.254 (cloud metadata) or 127.0.0.1.
   if (!allowedDomains.contains(uri.host)) {
     _logger.warning('[proxy.image] Domain not whitelisted: ${uri.host}');
+    return Response(statusCode: 403, body: 'Domain not allowed');
+  }
+
+  // SSRF guard 3 (defense in depth): if the host is somehow an IP literal, block
+  // any private / loopback / link-local target outright.
+  if (_isBlockedIpHost(uri.host)) {
+    _logger.warning(
+      '[proxy.image] Private/loopback IP host rejected: ${uri.host}',
+    );
     return Response(statusCode: 403, body: 'Domain not allowed');
   }
 
@@ -62,9 +85,26 @@ Future<Response> onRequest(RequestContext context) async {
     final response = await dio
         .get<List<int>>(
           encodedUrl,
-          options: Options(responseType: ResponseType.bytes),
+          options: Options(
+            responseType: ResponseType.bytes,
+            // SSRF guard 4: never follow redirects. The allowlist only checks the
+            // initial host; a 302 from an allowed CDN to an internal address
+            // (e.g. the cloud metadata endpoint) would otherwise bypass it.
+            // Treat any non-2xx (including 3xx) as a failure to handle below.
+            followRedirects: false,
+            maxRedirects: 0,
+            validateStatus: (status) => status != null && status < 400,
+          ),
         )
         .timeout(const Duration(seconds: 10));
+
+    // A redirect (3xx) reaches here because we disabled following. Refuse it
+    // rather than handing the client a Location to an unvalidated host.
+    final code = response.statusCode ?? 500;
+    if (code >= 300 && code < 400) {
+      _logger.warning('[proxy.image] Refusing upstream redirect ($code)');
+      return Response(statusCode: 403, body: 'Upstream redirect not allowed');
+    }
 
     if (response.statusCode != 200) {
       _logger.warning('[proxy.image] Upstream returned ${response.statusCode}');
@@ -90,4 +130,31 @@ Future<Response> onRequest(RequestContext context) async {
     _logger.severe('[proxy.image] Exception: $e');
     return Response(statusCode: 500, body: 'Proxy fetch failed');
   }
+}
+
+/// True if [host] is an IP literal in a private, loopback, or link-local range
+/// that should never be reachable through the proxy. Non-IP hostnames return
+/// false (they're handled by the allowlist). Covers the IPv4 ranges plus the
+/// cloud metadata address (169.254.169.254) and IPv6 loopback.
+bool _isBlockedIpHost(String host) {
+  final h = host.toLowerCase();
+  // IPv6 loopback / unspecified.
+  if (h == '::1' || h == '::') return true;
+  final addr = InternetAddress.tryParse(h);
+  if (addr == null) return false; // not an IP literal — allowlist governs it
+  if (addr.isLoopback || addr.isLinkLocal || addr.isMulticast) return true;
+  if (addr.type == InternetAddressType.IPv4) {
+    final p = h.split('.').map(int.tryParse).toList();
+    if (p.length != 4 || p.any((o) => o == null))
+      return true; // malformed → block
+    final a = p[0]!, b = p[1]!;
+    if (a == 10) return true; // 10.0.0.0/8
+    if (a == 127) return true; // 127.0.0.0/8 loopback
+    if (a == 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
+    if (a == 192 && b == 168) return true; // 192.168.0.0/16
+    if (a == 169 && b == 254)
+      return true; // 169.254.0.0/16 link-local + metadata
+    if (a == 0) return true; // 0.0.0.0/8
+  }
+  return false;
 }

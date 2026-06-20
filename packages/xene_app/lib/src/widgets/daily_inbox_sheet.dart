@@ -11,6 +11,7 @@ import '../providers/auth_provider.dart';
 import '../providers/daily_inbox_provider.dart';
 import '../providers/dio_provider.dart';
 import '../theme/xene_theme.dart';
+import '../utils/artwork_proxy.dart';
 import 'auth_gate_sheet.dart';
 
 void showDailyInbox(BuildContext context) {
@@ -403,7 +404,7 @@ class _TrackRowState extends ConsumerState<_TrackRow> {
             ClipRRect(
               borderRadius: BorderRadius.circular(4),
               child: CachedNetworkImage(
-                imageUrl: track.artworkUrl!,
+                imageUrl: proxyArtworkUrl(track.artworkUrl)!,
                 width: 42,
                 height: 42,
                 fit: BoxFit.cover,

@@ -4,8 +4,10 @@ import 'package:dart_frog/dart_frog.dart';
 import 'package:logging/logging.dart';
 import 'package:xene_backend/src/database.dart';
 import 'package:xene_backend/src/services/soundcloud_service.dart';
+import 'package:xene_backend/src/utils/audit_logger.dart';
 import 'package:xene_backend/src/utils/auth_utils.dart';
 import 'package:xene_backend/src/utils/json_utils.dart';
+import 'package:xene_backend/src/utils/rate_limiter.dart';
 
 final _logger = Logger('presets.sources');
 
@@ -30,7 +32,8 @@ Future<Response> _listSources(RequestContext context, String slug) async {
 }
 
 Future<Response> _addSource(RequestContext context, String slug) async {
-  final guard = requireRealUser(context);
+  // Global preset source mutation — admin only.
+  final guard = await requireAdminUser(context);
   if (guard != null) return guard;
 
   Map<String, dynamic> body;
@@ -100,6 +103,21 @@ Future<Response> _addSource(RequestContext context, String slug) async {
         scUrl: resolvedUrl,
       ),
     );
+    unawaited(
+      logSecurityEvent(
+        db.client,
+        action: 'preset_source_add',
+        userId: context.read<String>(),
+        targetId: slug,
+        ip: extractClientIp(context),
+        metadata: {
+          'source_id': saved['id']?.toString(),
+          'name': scName,
+          'soundcloud_username': scUsername,
+          'reused_verified': true,
+        },
+      ),
+    );
     return Response.json(statusCode: 201, body: _sourceToApiRow(saved));
   }
 
@@ -119,6 +137,20 @@ Future<Response> _addSource(RequestContext context, String slug) async {
   }
 
   _logger.info('[presets.sources] Source added: $scName to preset=$slug');
+  unawaited(
+    logSecurityEvent(
+      db.client,
+      action: 'preset_source_add',
+      userId: context.read<String>(),
+      targetId: slug,
+      ip: extractClientIp(context),
+      metadata: {
+        'source_id': saved['id']?.toString(),
+        'name': scName,
+        'soundcloud_username': scUsername,
+      },
+    ),
+  );
   unawaited(
     _warmSoundCloudSource(
       db: db,
@@ -156,7 +188,8 @@ Future<void> _warmSoundCloudSource({
 }
 
 Future<Response> _removeSource(RequestContext context, String slug) async {
-  final guard = requireRealUser(context);
+  // Global preset source mutation — admin only.
+  final guard = await requireAdminUser(context);
   if (guard != null) return guard;
 
   final sourceId = context.request.uri.queryParameters['source_id']?.trim();
@@ -177,6 +210,16 @@ Future<Response> _removeSource(RequestContext context, String slug) async {
     );
   }
   await _clearSourceFeedCache(db, source);
+  unawaited(
+    logSecurityEvent(
+      db.client,
+      action: 'preset_source_remove',
+      userId: context.read<String>(),
+      targetId: slug,
+      ip: extractClientIp(context),
+      metadata: {'source_id': sourceId},
+    ),
+  );
   return Response(statusCode: 204);
 }
 

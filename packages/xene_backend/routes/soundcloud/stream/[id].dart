@@ -16,6 +16,16 @@ Future<Response> onRequest(RequestContext context, String id) async {
   final rateLimited = checkRateLimit(streamRateLimiter, userId);
   if (rateLimited != null) return rateLimited;
 
+  // SoundCloud track IDs are numeric. Reject anything else before it is
+  // interpolated into the upstream `/tracks/$id/streams` path — blocks path /
+  // parameter injection against the SC API using the app's client credentials.
+  if (int.tryParse(id) == null) {
+    return Response.json(
+      statusCode: HttpStatus.badRequest,
+      body: {'error': 'Invalid track id'},
+    );
+  }
+
   final scService = context.read<SoundCloudService>();
   final streamUrl = await scService.getStreamUrl(id);
 

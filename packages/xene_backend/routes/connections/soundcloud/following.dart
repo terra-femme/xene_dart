@@ -59,10 +59,10 @@ Future<Response> onRequest(RequestContext context) async {
   }
 
   Future<Response> fetchFollowing(String token) async {
+    // Log only the token length, never the token itself (secret-in-logs leak).
     _logger.info(
       '[following] Attempting request with token length: ${token.length}',
     );
-    _logger.info('[following] Header: Authorization: OAuth $token');
 
     final dio = Dio(
       BaseOptions(

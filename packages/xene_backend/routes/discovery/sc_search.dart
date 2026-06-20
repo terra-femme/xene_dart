@@ -1,5 +1,6 @@
 import 'package:dart_frog/dart_frog.dart';
 import 'package:logging/logging.dart';
+import 'package:xene_backend/src/database.dart';
 import 'package:xene_backend/src/services/soundcloud_service.dart';
 import 'package:xene_backend/src/utils/rate_limiter.dart';
 
@@ -47,8 +48,28 @@ Future<Response> onRequest(RequestContext context) async {
       .where((c) => c['soundcloud_username'] != null)
       .toList();
 
+  // Annotate each candidate with the preset(s) it is already a source in, so
+  // the playground can show an "already added" badge. One DB round trip for the
+  // whole result set; failures are swallowed inside the DB helper so search
+  // still returns even if the lookup fails.
+  final db = context.read<DatabaseService>();
+  final usernames = candidates
+      .map((c) => c['soundcloud_username'] as String?)
+      .whereType<String>()
+      .toList();
+  final presetsByUsername = await db.getPresetsForSoundCloudUsernames(
+    usernames,
+  );
+  for (final candidate in candidates) {
+    final username = candidate['soundcloud_username'] as String?;
+    candidate['in_presets'] = username == null
+        ? const <Map<String, String>>[]
+        : (presetsByUsername[username] ?? const <Map<String, String>>[]);
+  }
+
   _logger.info(
-    '[sc_search] Returning ${candidates.length} candidates for "$query"',
+    '[sc_search] Returning ${candidates.length} candidates for "$query" '
+    '(${presetsByUsername.length} already in a preset)',
   );
 
   return Response.json(

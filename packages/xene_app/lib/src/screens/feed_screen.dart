@@ -32,6 +32,12 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
   Ticker? _crawlTicker;
   Duration _lastTickTime = Duration.zero;
 
+  // The route this feed lives in, captured in didChangeDependencies (an active
+  // phase) so the crawl tick can cheaply check route.isCurrent without an
+  // ancestor lookup. Used to freeze the crawl while a route is pushed over the
+  // feed or during the pop transition back to it.
+  ModalRoute<dynamic>? _route;
+
   bool _isPaused = false;
   Timer? _resumeTimer;
   int _crawlCopyCount = 2;
@@ -88,6 +94,14 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
         _startCrawl();
       }
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Capture the enclosing route now, while the element is active. Reading
+    // ModalRoute.of here is safe; reading it from the crawl tick would not be.
+    _route = ModalRoute.of(context);
   }
 
   void _onSearchChanged(String value) {
@@ -148,10 +162,17 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
 
   // ------------------------------------------------------------
   // AUTO-SCROLL TICKER
-  // setPixels drives per-frame position — unlike jumpTo it never calls
-  // goBallistic(0), so scroll physics are never reset mid-crawl and
-  // SliverPersistentHeader gets no spurious layout passes per frame.
-  // jumpTo is only used for the seamless loop-wrap (once per ~100 s).
+  // Drives the continuous feed crawl. Per-frame movement uses
+  // _scrollController.jumpTo (see below) on whole-pixel boundaries; the same
+  // jumpTo handles the seamless loop-wrap. Note jumpTo resets scroll physics
+  // (goBallistic(0)) and dispatches a scroll notification every frame — fine
+  // while the feed is active; the deactivate()/!mounted guards stop the ticker
+  // before those notifications can reach a deactivating subtree.
+  //
+  // FUTURE OPT: driving position via a custom ScrollPosition's setPixels would
+  // avoid the per-frame ballistic reset and notifications, but ScrollPosition
+  // .setPixels is @protected and would require a custom ScrollPosition/Physics
+  // subclass — deliberately deferred as separate, test-gated work.
   // ------------------------------------------------------------
   void _startCrawl() {
     _crawlTicker?.dispose();
@@ -213,7 +234,17 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
       _crawlTicker = createTicker((elapsed) {
         _dbgFrame++;
 
-        if (_isPaused || !_scrollController.hasClients) {
+        // Freeze the crawl whenever the feed is not the top-most route. While a
+        // route is pushed over the feed, and crucially during the pop
+        // transition back to it, route.isCurrent is false. Calling jumpTo in
+        // that window dispatches a scroll notification that an ancestor
+        // Material ink layer handles via findRenderObject() on an element that
+        // is still inactive mid-transition, which throws "Cannot get
+        // renderObject of inactive element" and brings down the frame.
+        if (!mounted ||
+            _isPaused ||
+            !_scrollController.hasClients ||
+            !(_route?.isCurrent ?? true)) {
           _lastTickTime = elapsed;
           return;
         }
@@ -567,12 +598,18 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
           debugPrint(
             '[FeedScreen] Empty feed during preset transition — scheduling retry',
           );
+          // Capture the notifier now, while this listener body runs on an
+          // active element. Calling ref.read() inside the delayed callback
+          // would walk up to the ProviderScope ancestor, which throws
+          // "Looking up a deactivated widget's ancestor is unsafe" if the feed
+          // has been navigated away from (deactivated) before the timer fires.
+          final feedNotifier = ref.read(feedProvider.notifier);
           Future.delayed(const Duration(milliseconds: 600), () {
             if (mounted && _isPresetTransition) {
               debugPrint(
                 '[FeedScreen] Retrying feed fetch after empty transition response',
               );
-              ref.read(feedProvider.notifier).refresh();
+              feedNotifier.refresh();
             }
           });
         }
@@ -580,11 +617,14 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
       // Start crawl on data arrival only if the overlay has already been removed.
       // If not revealed yet, revealCompleteProvider listener below handles it.
       if (next.hasValue && (next.value?.isNotEmpty ?? false)) {
+        // Read reveal state now, on the active element. Reading it inside the
+        // post-frame callback instead crashes with "Looking up a deactivated
+        // widget's ancestor is unsafe" when the feed is deactivated by a route
+        // pushed over it before the frame callback runs. If reveal isn't
+        // complete yet, the revealCompleteProvider listener below covers it.
+        final revealed = ref.read(revealCompleteProvider);
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted &&
-              _crawlTicker == null &&
-              !_searchActive &&
-              ref.read(revealCompleteProvider)) {
+          if (mounted && _crawlTicker == null && !_searchActive && revealed) {
             _startCrawl();
           }
         });
@@ -914,6 +954,16 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
                           _cachedSections = _buildDateSections(items);
                           _cachedLoop = null;
                           _cachedLoopHeight = null;
+                          // Divider diagnostics: one section == one date divider.
+                          // If this logs 1 section (or very few items) for a
+                          // preset that has many recent days in feed_items, the
+                          // gap is in what /feed/merged returns live — not here.
+                          final secs = _cachedSections!;
+                          debugPrint(
+                            '[FeedScreen][dividers] preset=$activeSlug '
+                            'items=${items.length} dateSections=${secs.length} '
+                            'dates=${secs.map((s) => '${DateFormat('MM.dd').format(s.date)}×${s.items.length}').join(' ')}',
+                          );
                         }
                         final sections = _cachedSections!;
 

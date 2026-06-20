@@ -51,6 +51,11 @@ final _allowedOrigins = () {
   return raw.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toSet();
 }();
 
+// True when running with XENE_ENV=production. Used to fail CORS closed when no
+// allowlist is configured — production must never echo an arbitrary origin / '*'.
+final bool _isProduction =
+    (Platform.environment['XENE_ENV'] ?? 'development') == 'production';
+
 // Global singleton instances
 final _db = DatabaseService();
 final _apiAnalytics = ApiAnalyticsService();
@@ -113,9 +118,9 @@ final bool _envReady = () {
     print('');
     print('╔══════════════════════════════════════════════════════╗');
     print('║ SECURITY WARNING: ALLOWED_ORIGINS is not set!        ║');
-    print('║ Running in production with permissive CORS (*)       ║');
-    print('║ Any web page can make authenticated API requests.    ║');
-    print('║ Set ALLOWED_ORIGINS=https://your-domain.com to fix.  ║');
+    print('║ Production CORS is now failing CLOSED — all cross-    ║');
+    print('║ origin browser requests will be DENIED until you set ║');
+    print('║ ALLOWED_ORIGINS=https://your-domain.com              ║');
     print('╚══════════════════════════════════════════════════════╝');
   }
 
@@ -168,13 +173,22 @@ Handler _corsMiddleware(Handler handler) {
     // If ALLOWED_ORIGINS is empty (dev / not configured), echo the request origin
     // or fall back to '*' so localhost dev still works without any env setup.
     String effectiveOrigin;
-    if (_allowedOrigins.isEmpty) {
-      effectiveOrigin = requestOrigin ?? '*';
-    } else if (requestOrigin != null &&
-        _allowedOrigins.contains(requestOrigin)) {
-      effectiveOrigin = requestOrigin;
+    if (_allowedOrigins.isNotEmpty) {
+      // Allowlist configured: echo the origin only if it's on the list,
+      // otherwise send a non-matching origin so the browser blocks it.
+      effectiveOrigin =
+          (requestOrigin != null && _allowedOrigins.contains(requestOrigin))
+          ? requestOrigin
+          : _allowedOrigins.first;
+    } else if (_isProduction) {
+      // Fail CLOSED in production when no allowlist is set: never echo an
+      // arbitrary origin or '*'. 'null' matches no real origin, so the browser
+      // blocks cross-origin requests instead of the server trusting any site.
+      effectiveOrigin = 'null';
     } else {
-      effectiveOrigin = _allowedOrigins.first;
+      // Development convenience only — permissive so localhost works with no
+      // env setup. Never reached in production (guarded above).
+      effectiveOrigin = requestOrigin ?? '*';
     }
 
     final corsHeaders = {

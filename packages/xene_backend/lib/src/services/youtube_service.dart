@@ -4,6 +4,7 @@ import 'package:logging/logging.dart';
 import 'package:xml/xml.dart';
 import 'package:xene_domain/xene_domain.dart';
 import '../database.dart';
+import '../utils/http_client.dart';
 import 'api_analytics_service.dart';
 
 final _logger = Logger('YouTubeService');
@@ -23,7 +24,7 @@ class YouTubeService {
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       },
     ),
-  );
+  )..httpClientAdapter = pooledKeepAliveAdapter();
   static const _youtubeApiBase = 'https://www.googleapis.com/youtube/v3';
   static const _uploadsPlaylistCacheTtl = Duration(days: 30);
 

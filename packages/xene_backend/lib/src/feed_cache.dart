@@ -13,10 +13,22 @@ final _inFlight = <String, Future<List<FeedItem>>>{};
 
 final _random = Random();
 
-// Bandcamp background-refresh concurrency cap.
-// At ~2,000 unique BC artists, all going stale simultaneously (cold start /
-// overnight idle) would otherwise fire 2,000 concurrent scrapes from one IP.
-// This semaphore limits how many background BC scrapes run at the same time.
+// Global background-refresh concurrency cap (ALL platforms).
+// Each stale artist on /feed/merged queues a fire-and-forget background scrape.
+// When many artists go stale at once (cold start / overnight idle / cache
+// reset) this would otherwise fan out one outbound HTTP connection per artist
+// simultaneously. On Azure App Service that exhausts the limited pool of SNAT
+// ports (and trips upstream 429s). This semaphore bounds how many background
+// scrapes — across SoundCloud, YouTube, and Bandcamp — run concurrently, so
+// outbound connections stay within the singleton clients' pooled, capped
+// keep-alive sockets instead of stampeding.
+const _kBackgroundMaxConcurrent = 6;
+final _backgroundSemaphore = _Semaphore(_kBackgroundMaxConcurrent);
+
+// Bandcamp background-refresh concurrency cap (tighter, nested inside the
+// global cap above). At ~2,000 unique BC artists, all going stale at once would
+// otherwise fire many concurrent grid scrapes from one IP and trip 429s. BC
+// scrapes acquire the global permit first, then this one.
 const _kBcBackgroundMaxConcurrent = 3;
 final _bcBackgroundSemaphore = _Semaphore(_kBcBackgroundMaxConcurrent);
 
@@ -287,6 +299,7 @@ void _backgroundRefresh(
   Future(() async {
     var claimedHere = false;
     var completed = false;
+    var backgroundSemaphoreAcquired = false;
     var bcSemaphoreAcquired = false;
     try {
       if (leaseKey == null || leaseOwner == null) {
@@ -319,6 +332,12 @@ void _backgroundRefresh(
       _logger.fine(
         '[feed_cache] Background refresh started: $platform/$artistName',
       );
+      // Global cap across all platforms — acquired late (right before the
+      // network call) so it isn't held during DB/lease work. Bounds total
+      // concurrent outbound background scrapes to protect SNAT ports / avoid
+      // 429s under a stale-cache stampede.
+      await _backgroundSemaphore.acquire();
+      backgroundSemaphoreAcquired = true;
       if (platform == 'bandcamp') {
         await _bcBackgroundSemaphore.acquire();
         bcSemaphoreAcquired = true;
@@ -361,6 +380,12 @@ void _backgroundRefresh(
         _bcBackgroundSemaphore.release();
         _logger.fine(
           '[feed_cache] BC background semaphore released: $artistName',
+        );
+      }
+      if (backgroundSemaphoreAcquired) {
+        _backgroundSemaphore.release();
+        _logger.fine(
+          '[feed_cache] Background semaphore released: $platform/$artistName',
         );
       }
       if (completed && releaseLease && leaseKey != null && leaseOwner != null) {

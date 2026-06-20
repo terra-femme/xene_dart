@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'dart:developer' as dev;
 import 'dart:ui';
 
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_web_plugins/url_strategy.dart';
@@ -16,8 +15,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:app_links/app_links.dart';
 import 'package:xene_app/src/screens/auth_screen.dart';
 
-import 'package:xene_app/src/layout/xene_layout_metrics.dart';
-import 'package:xene_app/src/layout/xene_responsive_debug.dart';
 import 'package:xene_app/src/screens/feed_screen.dart';
 import 'package:xene_app/src/screens/articles_screen.dart';
 import 'package:xene_app/src/screens/artists_screen.dart';
@@ -32,13 +29,10 @@ import 'package:xene_app/src/screens/game_screen.dart';
 import 'package:xene_app/src/screens/party_screen.dart';
 import 'package:xene_app/src/screens/settings_screen.dart';
 import 'package:xene_app/src/widgets/xene_header.dart';
-import 'package:xene_app/src/widgets/xene_sidebar.dart';
-import 'package:xene_app/src/widgets/xene_draggable_sheet.dart';
-import 'package:xene_app/src/widgets/logo_pip_player.dart';
+import 'package:xene_app/src/layout/root_shell.dart';
 import 'package:xene_app/src/sandbox/sandbox_preview.dart';
+import 'package:xene_app/src/sandbox/av_sphere_sandbox.dart';
 import 'package:xene_app/src/widgets/admin_guard.dart';
-import 'package:xene_app/src/widgets/loading_overlay.dart';
-import 'package:xene_app/src/providers/nav_swipe_provider.dart';
 import 'package:xene_app/src/providers/ui_config_provider.dart';
 import 'package:xene_app/src/theme/xene_theme.dart';
 import 'package:xene_app/src/providers/accessibility_provider.dart';
@@ -240,7 +234,7 @@ class _InnerPageLayout extends StatelessWidget {
           children: [
             const XeneHeader(),
             const Divider(color: XeneTheme.border, height: 1),
-            Expanded(child: _SwipeNavWrapper(child: child)),
+            Expanded(child: child),
           ],
         ),
       );
@@ -322,255 +316,16 @@ class _InnerPageLayout extends StatelessWidget {
             ),
           ),
           const Divider(color: XeneTheme.border, height: 1),
-          Expanded(child: _SwipeNavWrapper(child: child)),
+          Expanded(child: child),
         ],
       ),
     );
   }
 }
 
-class PageLayout extends StatelessWidget {
-  const PageLayout({super.key, required this.child});
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final mediaQuery = MediaQuery.of(context);
-        final metrics = XeneLayoutMetrics.fromConstraints(
-          constraints: constraints,
-          safePadding: mediaQuery.padding,
-          viewInsets: mediaQuery.viewInsets,
-          textScaleFactor: mediaQuery.textScaler.scale(1),
-        );
-        final double topOffset = metrics.headerHeight;
-
-        XeneResponsiveDebug.mediaQuery('PageLayout', mediaQuery);
-        XeneResponsiveDebug.constraints('PageLayout', constraints);
-        XeneResponsiveDebug.values('PageLayout.metrics', metrics.toDebugMap());
-
-        return XeneLayoutScope(
-          metrics: metrics,
-          child: Scaffold(
-            backgroundColor: Colors.white,
-            body: Stack(
-              children: [
-                // 1. Sidebar & Content Area — always at full opacity.
-                // The LoadingOverlay covers everything until reveal is complete.
-                Column(
-                  children: [
-                    SizedBox(height: topOffset),
-                    Expanded(
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const XeneSidebar(),
-                          Expanded(
-                            child: _SwipeNavWrapper(
-                              child: Container(
-                                color: Colors.white,
-                                child: child,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-
-                // 2. Fixed Header
-                const Positioned(
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  child: XeneHeader(),
-                ),
-
-                // 3. Draggable Sheet
-                const XeneDraggableSheet(),
-
-                // 4. Logo PiP Player
-                const LogoPipPlayer(),
-
-                // 5. Loading Overlay (topmost — covers everything on first load)
-                const LoadingOverlay(),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
 // ---------------------------------------------------------------------------
-// Swipe-based page turn
+// Router
 // ---------------------------------------------------------------------------
-
-/// Builds a [CustomTransitionPage] with a horizontal slide whose direction
-/// is captured from [navGoingForward] at the moment the page is built.
-/// When [skipNextTransition] is true (swipe-commit path), the transition
-/// duration is zero — the slide-out animation already handled the visual.
-CustomTransitionPage<void> _slidePage({
-  required LocalKey key,
-  required Widget child,
-  required BuildContext pageContext,
-}) {
-  final forward = navGoingForward;
-  final skip = skipNextTransition;
-  skipNextTransition = false;
-  final reduceMotion = ProviderScope.containerOf(
-    pageContext,
-  ).read(accessibilityProvider).reduceMotion;
-
-  return CustomTransitionPage<void>(
-    key: key,
-    child: child,
-    transitionDuration: (skip || reduceMotion)
-        ? Duration.zero
-        : const Duration(milliseconds: 260),
-    reverseTransitionDuration: reduceMotion
-        ? Duration.zero
-        : const Duration(milliseconds: 200),
-    transitionsBuilder: (skip || reduceMotion)
-        ? (_, __, ___, child) => child
-        : (context, animation, secondaryAnimation, child) {
-            final begin = forward
-                ? const Offset(1.0, 0.0)
-                : const Offset(-1.0, 0.0);
-            return SlideTransition(
-              position: animation.drive(
-                Tween(
-                  begin: begin,
-                  end: Offset.zero,
-                ).chain(CurveTween(curve: Curves.easeOutCubic)),
-              ),
-              child: child,
-            );
-          },
-  );
-}
-
-/// Detects horizontal swipe gestures on the content area and navigates between
-/// pages in [kSwipeNavRoutes] order. Works as a hidden easter egg — magazine-
-/// style page turn without any visible hint until discovered.
-class _SwipeNavWrapper extends ConsumerStatefulWidget {
-  const _SwipeNavWrapper({required this.child});
-  final Widget child;
-
-  @override
-  ConsumerState<_SwipeNavWrapper> createState() => _SwipeNavWrapperState();
-}
-
-class _SwipeNavWrapperState extends ConsumerState<_SwipeNavWrapper>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
-  double _offset = 0;
-  double _animStart = 0;
-  double _animEnd = 0;
-  bool _dragging = false;
-
-  // Raw (un-damped) horizontal distance since drag started. Used as a
-  // distance-based commit fallback for web/desktop where mouse drags
-  // produce much lower velocity than mobile finger flicks.
-  double _rawDrag = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 210),
-    );
-    _ctrl.addListener(() {
-      setState(() {
-        _offset = _animStart + (_animEnd - _animStart) * _ctrl.value;
-      });
-    });
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  void _snapBack() {
-    _ctrl.stop();
-    _animStart = _offset;
-    _animEnd = 0;
-    _ctrl.duration = const Duration(milliseconds: 210);
-    _ctrl.forward(from: 0).whenComplete(() {
-      if (mounted) setState(() => _offset = 0);
-    });
-  }
-
-  void _commitNavigate(bool goBack, int targetIdx) {
-    final sw = MediaQuery.of(context).size.width;
-    _ctrl.stop();
-    _animStart = _offset;
-    _animEnd = goBack ? sw : -sw;
-    _ctrl.duration = const Duration(milliseconds: 130);
-    _ctrl.forward(from: 0).whenComplete(() {
-      if (!mounted) return;
-      navGoingForward = !goBack;
-      skipNextTransition = true;
-      ref.read(navIndexProvider.notifier).state = targetIdx;
-      context.go(kSwipeNavRoutes[targetIdx]);
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.translucent,
-      onHorizontalDragStart: (_) {
-        _ctrl.stop();
-        _dragging = true;
-        _rawDrag = 0;
-      },
-      onHorizontalDragUpdate: (details) {
-        if (!_dragging) return;
-        _rawDrag += details.delta.dx;
-        setState(() => _offset += details.delta.dx * 0.35);
-      },
-      onHorizontalDragEnd: (details) {
-        if (!_dragging) return;
-        _dragging = false;
-
-        final v = details.primaryVelocity ?? 0;
-        final sw = MediaQuery.of(context).size.width;
-
-        // Commit if: fast flick (mobile) OR dragged far enough (web/desktop mouse).
-        final commitByVelocity = v.abs() >= 300;
-        final commitByDistance = _rawDrag.abs() / sw >= 0.28;
-
-        if (!commitByVelocity && !commitByDistance) {
-          _snapBack();
-          return;
-        }
-
-        // Prefer velocity sign for direction; fall back to raw drag direction
-        // when velocity is near zero (slow deliberate web drag).
-        final goBack = v.abs() >= 50 ? v > 0 : _rawDrag > 0;
-
-        final currentIdx = ref.read(navIndexProvider);
-        final targetIdx = goBack ? currentIdx - 1 : currentIdx + 1;
-        if (targetIdx < 0 || targetIdx >= kSwipeNavRoutes.length) {
-          _snapBack();
-          return;
-        }
-        _commitNavigate(goBack, targetIdx);
-      },
-      child: Transform.translate(
-        offset: Offset(_offset, 0),
-        child: widget.child,
-      ),
-    );
-  }
-}
 
 final _router = GoRouter(
   initialLocation: '/',
@@ -583,33 +338,84 @@ final _router = GoRouter(
     return null;
   },
   routes: [
-    // /auth is a top-level route — intentionally outside ShellRoute/PageLayout.
-    // PageLayout contains XeneSidebar and XeneHeader which watch authenticated
-    // providers. Nesting /auth inside the shell would trigger those providers
-    // before any session exists.
+    // /auth is a top-level route — intentionally outside the shell. RootShell
+    // contains XeneSidebar/XeneHeader which watch authenticated providers;
+    // nesting /auth would trigger them before any session exists.
     GoRoute(path: '/auth', builder: (context, state) => const AuthScreen()),
-    ShellRoute(
-      pageBuilder: (context, state, child) => _slidePage(
-        key: state.pageKey,
-        child: PageLayout(child: child),
-        pageContext: context,
-      ),
-      routes: [
-        GoRoute(path: '/', builder: (context, state) => const FeedScreen()),
+
+    // Persistent shell for the 7 primary swipe routes. RootShell stays mounted
+    // across branch switches, so navigating between these pages never tears
+    // down + reactivates the chrome — structurally eliminating the
+    // _RenderLayoutBuilder crash. Branch order MUST match kSwipeNavRoutes so
+    // header taps / swipe (which use that index) line up with goBranch().
+    StatefulShellRoute(
+      builder: (context, state, navigationShell) =>
+          RootShell(navigationShell: navigationShell),
+      navigatorContainerBuilder: (context, navigationShell, children) =>
+          AnimatedBranchContainer(
+            currentIndex: navigationShell.currentIndex,
+            children: children,
+          ),
+      branches: [
+        StatefulShellBranch(
+          routes: [
+            GoRoute(path: '/', builder: (context, state) => const FeedScreen()),
+          ],
+        ),
+        StatefulShellBranch(
+          routes: [
+            GoRoute(
+              path: '/articles',
+              builder: (context, state) => const ArticlesScreen(),
+            ),
+          ],
+        ),
+        StatefulShellBranch(
+          routes: [
+            GoRoute(
+              path: '/following',
+              builder: (context, state) => const FollowingScreen(),
+            ),
+          ],
+        ),
+        StatefulShellBranch(
+          routes: [
+            GoRoute(
+              path: '/game',
+              builder: (context, state) => const GameScreen(),
+            ),
+          ],
+        ),
+        StatefulShellBranch(
+          routes: [
+            GoRoute(
+              path: '/channels',
+              builder: (context, state) => const ChannelsScreen(),
+            ),
+          ],
+        ),
+        StatefulShellBranch(
+          routes: [
+            GoRoute(
+              path: '/profile',
+              builder: (context, state) => const ProfileScreen(),
+            ),
+          ],
+        ),
+        StatefulShellBranch(
+          routes: [
+            GoRoute(
+              path: '/about',
+              builder: (context, state) => const AboutScreen(),
+            ),
+          ],
+        ),
       ],
     ),
-    GoRoute(
-      path: '/articles',
-      pageBuilder: (context, state) => _slidePage(
-        key: state.pageKey,
-        child: const _InnerPageLayout(
-          title: 'ARTICLES',
-          showFullNav: true,
-          child: ArticlesScreen(),
-        ),
-        pageContext: context,
-      ),
-    ),
+
+    // Secondary routes — pushed OVER the persistent shell, each carrying its
+    // own chrome (_InnerPageLayout). Intentionally NOT branches: they keep the
+    // shell mounted underneath (no teardown) while bringing their own back-nav.
     GoRoute(
       path: '/artists',
       builder: (context, state) =>
@@ -621,42 +427,6 @@ final _router = GoRouter(
           const _InnerPageLayout(title: 'NETWORK', child: NetworkScreen()),
     ),
     GoRoute(
-      path: '/following',
-      pageBuilder: (context, state) => _slidePage(
-        key: state.pageKey,
-        child: const _InnerPageLayout(
-          title: 'FOLLOWING',
-          showFullNav: true,
-          child: FollowingScreen(),
-        ),
-        pageContext: context,
-      ),
-    ),
-    GoRoute(
-      path: '/game',
-      pageBuilder: (context, state) => _slidePage(
-        key: state.pageKey,
-        child: const _InnerPageLayout(
-          title: 'GAME',
-          showFullNav: true,
-          child: GameScreen(),
-        ),
-        pageContext: context,
-      ),
-    ),
-    GoRoute(
-      path: '/channels',
-      pageBuilder: (context, state) => _slidePage(
-        key: state.pageKey,
-        child: const _InnerPageLayout(
-          title: 'CHANNELS',
-          showFullNav: true,
-          child: ChannelsScreen(),
-        ),
-        pageContext: context,
-      ),
-    ),
-    GoRoute(
       path: '/game/party/:partyId',
       builder: (context, state) => _InnerPageLayout(
         title: 'PARTY',
@@ -665,27 +435,11 @@ final _router = GoRouter(
       ),
     ),
     GoRoute(
-      path: '/profile',
-      pageBuilder: (context, state) => _slidePage(
-        key: state.pageKey,
-        child: const _InnerPageLayout(
-          title: 'PROFILE',
-          showFullNav: true,
-          child: ProfileScreen(),
-        ),
-        pageContext: context,
-      ),
-    ),
-    GoRoute(
       path: '/settings',
-      pageBuilder: (context, state) => _slidePage(
-        key: state.pageKey,
-        child: const _InnerPageLayout(
-          title: 'SETTINGS',
-          showFullNav: true,
-          child: SettingsScreen(),
-        ),
-        pageContext: context,
+      builder: (context, state) => const _InnerPageLayout(
+        title: 'SETTINGS',
+        showFullNav: true,
+        child: SettingsScreen(),
       ),
     ),
     GoRoute(
@@ -704,15 +458,9 @@ final _router = GoRouter(
       ),
     ),
     GoRoute(
-      path: '/about',
-      pageBuilder: (context, state) => _slidePage(
-        key: state.pageKey,
-        child: const _InnerPageLayout(
-          title: 'ABOUT',
-          showFullNav: true,
-          child: AboutScreen(),
-        ),
-        pageContext: context,
+      path: '/dev/av',
+      builder: (context, state) => const AdminGuard(
+        child: _InnerPageLayout(title: 'AV SANDBOX', child: AvSphereSandbox()),
       ),
     ),
     GoRoute(

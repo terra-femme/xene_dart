@@ -689,6 +689,72 @@ class DatabaseService {
     }
   }
 
+  /// For a set of SoundCloud usernames, find which preset(s) already contain
+  /// each one. Returns a map keyed by username → list of `{slug, name}` for
+  /// every preset that has that SoundCloud profile as a source. Usernames with
+  /// no matches are simply absent from the map.
+  ///
+  /// Used by GET /discovery/sc_search to annotate results so the preset
+  /// playground can show "already in PRESET" without the client fetching every
+  /// preset's source list. The join to `preset_templates` is done in a single
+  /// PostgREST embed via the `template_id` foreign key — one round trip
+  /// regardless of how many usernames are passed.
+  Future<Map<String, List<Map<String, String>>>>
+  getPresetsForSoundCloudUsernames(List<String> usernames) async {
+    if (usernames.isEmpty) return {};
+    // The same username can repeat many times across search results, but we
+    // only need to query each distinct one once.
+    final unique = usernames
+        .map((u) => u.trim())
+        .where((u) => u.isNotEmpty)
+        .toSet()
+        .toList();
+    if (unique.isEmpty) return {};
+
+    _logger.info(
+      '[db] getPresetsForSoundCloudUsernames: looking up ${unique.length} username(s)',
+    );
+
+    try {
+      // Embed the parent preset_templates row (slug, name) via the template_id
+      // FK so we resolve "which preset" without a second query.
+      final response = await client
+          .from('preset_template_sources')
+          .select('soundcloud_username, preset_templates(slug, name)')
+          .inFilter('soundcloud_username', unique);
+
+      final rows = List<Map<String, dynamic>>.from(response);
+      final result = <String, List<Map<String, String>>>{};
+      for (final row in rows) {
+        final username = row['soundcloud_username'] as String?;
+        if (username == null || username.isEmpty) continue;
+        final template = row['preset_templates'];
+        if (template is! Map) continue;
+        final slug = template['slug'] as String?;
+        final name = template['name'] as String?;
+        if (slug == null || name == null) continue;
+        result.putIfAbsent(username, () => []).add({
+          'slug': slug,
+          'name': name,
+        });
+      }
+
+      _logger.info(
+        '[db] getPresetsForSoundCloudUsernames: ${result.length}/${unique.length} '
+        'username(s) already assigned to a preset',
+      );
+      return result;
+    } catch (e) {
+      // Non-fatal: this annotation is a nice-to-have layered on top of search.
+      // A failure here must never break SoundCloud search itself — return empty
+      // and let results render without the "already added" badge.
+      _logger.warning(
+        '[db] getPresetsForSoundCloudUsernames failed (non-fatal): $e',
+      );
+      return {};
+    }
+  }
+
   Future<Map<String, dynamic>?> addSoundCloudSourceToPreset(
     String slug,
     Map<String, dynamic> source,

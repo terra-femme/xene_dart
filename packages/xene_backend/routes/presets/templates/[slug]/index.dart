@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:dart_frog/dart_frog.dart';
 import 'package:xene_backend/src/database.dart';
 import 'package:xene_backend/src/preset_template_payload.dart';
+import 'package:xene_backend/src/utils/audit_logger.dart';
 import 'package:xene_backend/src/utils/auth_utils.dart';
 import 'package:xene_backend/src/utils/json_utils.dart';
+import 'package:xene_backend/src/utils/rate_limiter.dart';
 
 Future<Response> onRequest(RequestContext context, String slug) async {
   switch (context.request.method) {
@@ -14,7 +18,8 @@ Future<Response> onRequest(RequestContext context, String slug) async {
 }
 
 Future<Response> _patchTemplate(RequestContext context, String slug) async {
-  final guard = requireRealUser(context);
+  // Global preset content — admin only.
+  final guard = await requireAdminUser(context);
   if (guard != null) return guard;
 
   Map<String, dynamic> body;
@@ -42,6 +47,17 @@ Future<Response> _patchTemplate(RequestContext context, String slug) async {
       body: {'error': 'Preset template not found or update failed'},
     );
   }
+
+  unawaited(
+    logSecurityEvent(
+      context.read<DatabaseService>().client,
+      action: 'preset_template_patch',
+      userId: context.read<String>(),
+      targetId: slug,
+      ip: extractClientIp(context),
+      metadata: {'fields': body.keys.toList()},
+    ),
+  );
 
   return Response.json(body: toApiRow(updated));
 }

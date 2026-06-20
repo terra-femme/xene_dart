@@ -12,6 +12,7 @@ import 'package:xene_app/src/providers/feed_provider.dart';
 import 'package:xene_app/src/theme/xene_theme.dart';
 import 'package:xene_app/src/widgets/auth_gate_sheet.dart';
 import 'package:xene_app/src/widgets/daily_inbox_sheet.dart';
+import 'package:xene_app/src/layout/root_shell.dart';
 import '../providers/soundcloud_connection_provider.dart';
 import '../providers/nav_swipe_provider.dart';
 
@@ -92,18 +93,23 @@ class _XeneHeaderState extends ConsumerState<XeneHeader> {
             );
             return;
           }
-          // Sync swipe-nav state so the slide animation goes the right direction
-          // even when the user taps non-linearly (e.g. skips from HOME to ABOUT).
-          final targetIdx = kSwipeNavRoutes.indexOf(path);
-          if (targetIdx >= 0) {
-            final currentIdx = ref.read(navIndexProvider);
-            navGoingForward = targetIdx >= currentIdx;
-            ref.read(navIndexProvider.notifier).state = targetIdx;
-          }
           try {
-            if (path == '/') {
-              context.go(path);
+            final targetIdx = kSwipeNavRoutes.indexOf(path);
+            if (targetIdx >= 0) {
+              // Primary route: switch the persistent shell's branch when we're
+              // inside it. The AnimatedBranchContainer derives slide direction
+              // from the index delta, so non-linear taps (HOME → ABOUT) animate
+              // correctly without any global nav state. When the header is shown
+              // outside the shell (e.g. on /settings, pushed over it),
+              // ShellScope is absent — fall back to a plain go().
+              final shell = ShellScope.maybeOf(context);
+              if (shell != null) {
+                shell.goBranch(targetIdx);
+              } else {
+                context.go(path);
+              }
             } else {
+              // Secondary route (e.g. /settings): push over the shell.
               context.push(path);
             }
           } catch (e) {
@@ -226,6 +232,10 @@ class _XeneHeaderState extends ConsumerState<XeneHeader> {
             context.push('/dev/monitor');
             return;
           }
+          if (value == 'av') {
+            context.push('/dev/av');
+            return;
+          }
           if (value == 'test') {
             final seed = DateTime.now().add(Duration(days: _seedDayOffset));
             final seedStr = seed.toIso8601String().substring(0, 10);
@@ -238,6 +248,7 @@ class _XeneHeaderState extends ConsumerState<XeneHeader> {
           _devMenuItem('network', 'NETWORK'),
           _devMenuItem('presets', 'PRESET PLAYGROUND'),
           _devMenuItem('monitor', 'MONITOR'),
+          _devMenuItem('av', 'AV SANDBOX'),
           _devMenuItem('test', 'TEST +${_seedDayOffset}D'),
         ],
         child: Padding(
@@ -460,10 +471,7 @@ class _NavOverflowChevron extends StatelessWidget {
             height: 22,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              border: Border.all(
-                color: XeneTheme.muted,
-                width: 1.5,
-              ),
+              border: Border.all(color: XeneTheme.muted, width: 1.5),
             ),
             child: const Icon(
               Icons.chevron_right,
