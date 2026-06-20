@@ -529,10 +529,10 @@ packages:
     dependency: transitive
     description:
       name: googleai_dart
-      sha256: b7283c2d0d0aefb8feb735b1a8bcaa5cd1eaeb18fef86d500e9644564586d762
+      sha256: fa1925592e52709adb99c57cb45f519b9de39800ba6b728e59e583fae82f40ee
       url: "https://pub.dev"
     source: hosted
-    version: "5.1.0"
+    version: "6.3.0"
   gotrue:
     dependency: transitive
     description:
