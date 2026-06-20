@@ -15,7 +15,8 @@ import '../theme/xene_theme.dart';
 ///   Layer 3 — Beat pulse: orange full-width flash on beat-grid hits
 ///   Side effect: frequency-mapped HapticFeedback on beat/energy events
 ///
-/// Fallback to WinampVisualizer when [analysis] is null or [reduceMotion] is true.
+/// Renders nothing ([SizedBox.shrink]) when [analysis] is null or
+/// [reduceMotion] is true.
 class TrackVisualizerWidget extends StatefulWidget {
   const TrackVisualizerWidget({
     super.key,

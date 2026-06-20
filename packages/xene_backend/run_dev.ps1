@@ -24,5 +24,19 @@ if ($existing) {
     Start-Sleep -Milliseconds 500
 }
 
+# Self-heal PATH: `dart pub global activate` does NOT persist its bin dir to the
+# Windows PATH, so a freshly launched terminal may not resolve `dart_frog`. If it
+# is not on PATH, prepend the pub global bin for THIS session (also covers melos).
+if (-not (Get-Command dart_frog -ErrorAction SilentlyContinue)) {
+    $pubBin = Join-Path $env:LOCALAPPDATA "Pub\Cache\bin"
+    if (Test-Path (Join-Path $pubBin "dart_frog.bat")) {
+        $env:Path = "$pubBin;$env:Path"
+        Write-Host "  PATH: prepended $pubBin (dart_frog was not on PATH)"
+    } else {
+        Write-Error "dart_frog not found and $pubBin\dart_frog.bat is missing. Run: dart pub global activate dart_frog_cli"
+        exit 1
+    }
+}
+
 Write-Host "`nStarting dart_frog dev...`n"
 dart_frog dev

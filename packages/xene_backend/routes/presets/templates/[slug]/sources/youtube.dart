@@ -4,8 +4,10 @@ import 'package:dart_frog/dart_frog.dart';
 import 'package:logging/logging.dart';
 import 'package:xene_backend/src/database.dart';
 import 'package:xene_backend/src/services/youtube_service.dart';
+import 'package:xene_backend/src/utils/audit_logger.dart';
 import 'package:xene_backend/src/utils/auth_utils.dart';
 import 'package:xene_backend/src/utils/json_utils.dart';
+import 'package:xene_backend/src/utils/rate_limiter.dart';
 
 final _logger = Logger('presets.sources.youtube');
 
@@ -16,7 +18,8 @@ Future<Response> onRequest(RequestContext context, String slug) async {
     return Response(statusCode: 405);
   }
 
-  final guard = requireRealUser(context);
+  // Global preset source mutation — admin only.
+  final guard = await requireAdminUser(context);
   if (guard != null) return guard;
 
   Map<String, dynamic> body;
@@ -57,6 +60,20 @@ Future<Response> onRequest(RequestContext context, String slug) async {
 
   _logger.info(
     '[presets.sources.youtube] Added "$displayName" to preset=$slug',
+  );
+  unawaited(
+    logSecurityEvent(
+      db.client,
+      action: 'preset_source_add_youtube',
+      userId: context.read<String>(),
+      targetId: slug,
+      ip: extractClientIp(context),
+      metadata: {
+        'source_id': saved['id']?.toString(),
+        'display_name': displayName,
+        'youtube_url': youtubeUrl,
+      },
+    ),
   );
   unawaited(
     _warmYouTubeSource(

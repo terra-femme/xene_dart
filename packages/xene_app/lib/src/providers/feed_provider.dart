@@ -8,6 +8,7 @@ import 'auth_provider.dart';
 import 'dio_provider.dart';
 import 'feed_frontend_cache.dart';
 import 'preset_provider.dart';
+import '../utils/artwork_proxy.dart';
 
 // Recent feed: 30 items is enough for the initial above-fold view.
 // Archive is fetched separately on sheet open (lazy hydration).
@@ -169,40 +170,6 @@ List<FeedItem> _applyFeedFilters(
   }).toList();
 }
 
-/// Transforms CORS-restricted artwork URLs to proxy through the backend.
-String? _proxyArtworkUrl(String? url) {
-  if (url == null || url.isEmpty) return null;
-
-  const corsRestrictedDomains = [
-    'f4.bcbits.com',
-    'f3.bcbits.com',
-    'f2.bcbits.com',
-    'f1.bcbits.com',
-    'a.bcbits.com', // Bandcamp
-    'i1.sndcdn.com',
-    'i2.sndcdn.com',
-    'i3.sndcdn.com',
-    'i4.sndcdn.com',
-    'i5.sndcdn.com',
-    'i6.sndcdn.com',
-    'i7.sndcdn.com', // SoundCloud
-    'yt3.ggpht.com',
-    'yt4.ggpht.com', // YouTube
-  ];
-
-  try {
-    final uri = Uri.parse(url);
-    if (corsRestrictedDomains.contains(uri.host)) {
-      final encoded = Uri.encodeComponent(url);
-      return '$kBackendUrl/proxy/image?url=$encoded';
-    }
-  } catch (e) {
-    debugPrint('[feedProvider._proxyArtworkUrl] Failed to parse URL: $url');
-  }
-
-  return url;
-}
-
 /// Parses a raw JSON list into FeedItems, applying the artwork proxy transform.
 List<FeedItem> _parseFeedItems(List<dynamic> data, String logTag) {
   final items = <FeedItem>[];
@@ -210,7 +177,7 @@ List<FeedItem> _parseFeedItems(List<dynamic> data, String logTag) {
     try {
       final parsed = FeedItem.fromJson(data[i] as Map<String, dynamic>);
       items.add(
-        parsed.copyWith(artworkUrl: _proxyArtworkUrl(parsed.artworkUrl)),
+        parsed.copyWith(artworkUrl: proxyArtworkUrl(parsed.artworkUrl)),
       );
     } catch (e) {
       debugPrint('[$logTag] ERROR parsing item[$i]: $e');

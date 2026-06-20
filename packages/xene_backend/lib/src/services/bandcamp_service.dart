@@ -4,6 +4,7 @@ import 'package:logging/logging.dart';
 import 'package:xml/xml.dart';
 import 'package:xene_domain/xene_domain.dart';
 import '../database.dart';
+import '../utils/http_client.dart';
 import 'api_analytics_service.dart';
 
 final _logger = Logger('BandcampService');
@@ -134,7 +135,7 @@ class BandcampService {
         'Accept-Language': 'en-US,en;q=0.5',
       },
     ),
-  );
+  )..httpClientAdapter = pooledKeepAliveAdapter();
 
   /// Strip any stored path from a Bandcamp URL and return the artist root.
   /// Handles any format: root, /music, /feed, /album/slug (from SC web profiles), etc.

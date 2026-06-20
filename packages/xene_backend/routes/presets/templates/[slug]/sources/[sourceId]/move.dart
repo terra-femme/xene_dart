@@ -1,7 +1,11 @@
+import 'dart:async';
+
 import 'package:dart_frog/dart_frog.dart';
 import 'package:logging/logging.dart';
 import 'package:xene_backend/src/database.dart';
+import 'package:xene_backend/src/utils/audit_logger.dart';
 import 'package:xene_backend/src/utils/auth_utils.dart';
+import 'package:xene_backend/src/utils/rate_limiter.dart';
 
 final _logger = Logger('presets.sources.move');
 
@@ -19,7 +23,8 @@ Future<Response> onRequest(
     return Response(statusCode: 405);
   }
 
-  final guard = requireRealUser(context);
+  // Global preset source mutation — admin only.
+  final guard = await requireAdminUser(context);
   if (guard != null) return guard;
 
   Map<String, dynamic> body;
@@ -61,6 +66,16 @@ Future<Response> onRequest(
 
   _logger.info(
     '[presets.sources.move] Moved source $sourceId from $slug to $targetSlug',
+  );
+  unawaited(
+    logSecurityEvent(
+      db.client,
+      action: 'preset_source_move',
+      userId: context.read<String>(),
+      targetId: sourceId,
+      ip: extractClientIp(context),
+      metadata: {'from': slug, 'to': targetSlug},
+    ),
   );
   return Response(statusCode: 204);
 }

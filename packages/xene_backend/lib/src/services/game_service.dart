@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'package:logging/logging.dart';
 import '../database.dart';
+import '../utils/game_clock.dart';
 
 final _logger = Logger('GameService');
 
@@ -11,36 +12,26 @@ const _maxDiscoveryTracksPerWeek = 4;
 const _inviteCodeChars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
 class GameService {
-  GameService(this._db);
+  /// [clock] defaults to the real wall clock (which honors the GAME_DEBUG_HOURS
+  /// compile-time define). Pass a [GameClock.fixed] in tests to assert exact
+  /// time boundaries without touching the real calendar.
+  GameService(this._db, {GameClock clock = const GameClock.real()})
+    : _clock = clock;
 
   final DatabaseService _db;
-
-  // ── Debug clock ───────────────────────────────────────────────────────────
-
-  /// Returns a shifted "now" when GAME_DEBUG_HOURS is set at compile time.
-  /// In all normal builds (no --dart-define) this returns real UTC time.
-  ///
-  /// Usage:
-  ///   dart run --define=GAME_DEBUG_HOURS=74   → simulates next Tuesday
-  ///   dart run --define=GAME_DEBUG_HOURS=169  → simulates post-results Friday
-  static DateTime _debugNow() {
-    const offsetHours = int.fromEnvironment(
-      'GAME_DEBUG_HOURS',
-      defaultValue: 0,
-    );
-    if (offsetHours != 0) {
-      // ignore: avoid_print
-      print('[GameService] *** DEBUG CLOCK ACTIVE: offset=${offsetHours}h ***');
-    }
-    return DateTime.now().toUtc().add(const Duration(hours: offsetHours));
-  }
+  final GameClock _clock;
 
   // ── Week helpers ──────────────────────────────────────────────────────────
+  //
+  // Each helper takes an optional [GameClock] defaulting to the real clock, so
+  // route handlers can keep calling them statically (`GameService.isWeekClosed(w)`)
+  // while instance methods pass `_clock` for testability. The real clock still
+  // honors GAME_DEBUG_HOURS, so the manual-UI and e2e debug workflows are intact.
 
   /// Returns the date string ('YYYY-MM-DD') for the Monday that starts the
   /// current week (UTC).
-  static String currentWeekStart() {
-    final now = _debugNow();
+  static String currentWeekStart([GameClock clock = const GameClock.real()]) {
+    final now = clock.now();
     final monday = now.subtract(Duration(days: now.weekday - 1));
     return '${monday.year.toString().padLeft(4, '0')}-'
         '${monday.month.toString().padLeft(2, '0')}-'
@@ -59,25 +50,34 @@ class GameService {
 
   /// True if the voting window has closed (past Friday 21:00 UTC).
   /// Does NOT gate track submission — use [isSubmissionClosed] for that.
-  static bool isWeekClosed(String weekStart) {
+  static bool isWeekClosed(
+    String weekStart, [
+    GameClock clock = const GameClock.real(),
+  ]) {
     final monday = _parseWeekStart(weekStart);
     final friday = monday.add(const Duration(days: 4));
     final deadline = DateTime.utc(friday.year, friday.month, friday.day, 21);
-    return _debugNow().isAfter(deadline);
+    return clock.now().isAfter(deadline);
   }
 
   /// True if track submission is closed for a given week.
   /// Submission is open the entire current week; closes only when the week rolls over.
-  static bool isSubmissionClosed(String weekStart) {
-    return weekStart != currentWeekStart();
+  static bool isSubmissionClosed(
+    String weekStart, [
+    GameClock clock = const GameClock.real(),
+  ]) {
+    return weekStart != currentWeekStart(clock);
   }
 
   /// True if results are visible (past Friday 21:05 UTC).
-  static bool isResultsVisible(String weekStart) {
+  static bool isResultsVisible(
+    String weekStart, [
+    GameClock clock = const GameClock.real(),
+  ]) {
     final monday = _parseWeekStart(weekStart);
     final friday = monday.add(const Duration(days: 4));
     final reveal = DateTime.utc(friday.year, friday.month, friday.day, 21, 5);
-    return _debugNow().isAfter(reveal);
+    return clock.now().isAfter(reveal);
   }
 
   // ── Username ──────────────────────────────────────────────────────────────
@@ -245,7 +245,7 @@ class GameService {
           .order('created_at', ascending: false);
 
       final partyList = List<Map<String, dynamic>>.from(parties);
-      final weekStart = currentWeekStart();
+      final weekStart = currentWeekStart(_clock);
 
       final result = <Map<String, dynamic>>[];
       for (final party in partyList) {
@@ -388,14 +388,14 @@ class GameService {
     String userId,
     Map<String, dynamic> track,
   ) async {
-    final weekStart = currentWeekStart();
+    final weekStart = currentWeekStart(_clock);
     final trackType = (track['track_type'] as String?)?.trim() ?? 'discovery';
     _logger.info(
       '[game] submitTrack partyId=$partyId userId=$userId '
       'trackId=${track['sc_track_id']} type=$trackType week=$weekStart',
     );
 
-    if (isSubmissionClosed(weekStart)) {
+    if (isSubmissionClosed(weekStart, _clock)) {
       throw StateError('Submission is only allowed for the current week');
     }
 
@@ -491,7 +491,7 @@ class GameService {
     if (track['user_id'] != userId) {
       throw StateError("Cannot delete another user's track");
     }
-    if (isWeekClosed(track['week_start'] as String)) {
+    if (isWeekClosed(track['week_start'] as String, _clock)) {
       throw StateError('Cannot delete track after the week has closed');
     }
 
@@ -624,7 +624,7 @@ class GameService {
 
       await _purgeExpiredWeeks(partyId);
 
-      final thisWeek = currentWeekStart();
+      final thisWeek = currentWeekStart(_clock);
 
       final rows = await _db.client
           .from('party_tracks')
@@ -661,7 +661,7 @@ class GameService {
       '[game] castVote partyId=$partyId voter=$voterId for=$votedForId week=$weekStart',
     );
 
-    if (isWeekClosed(weekStart)) {
+    if (isWeekClosed(weekStart, _clock)) {
       throw StateError('Voting window is closed for this week');
     }
     if (voterId == votedForId) {
@@ -742,8 +742,8 @@ class GameService {
           .where((v) => v['voter_id'] == requestingUserId)
           .firstOrNull;
       final myVote = myVoteRow?['voted_for_id'] as String?;
-      final weekClosed = isWeekClosed(weekStart);
-      final resultsVisible = isResultsVisible(weekStart);
+      final weekClosed = isWeekClosed(weekStart, _clock);
+      final resultsVisible = isResultsVisible(weekStart, _clock);
 
       if (!resultsVisible) {
         final hasVoted = <String, bool>{};
@@ -760,11 +760,7 @@ class GameService {
         };
       }
 
-      final tally = <String, int>{};
-      for (final v in voteList) {
-        final uid = v['voted_for_id'] as String;
-        tally[uid] = (tally[uid] ?? 0) + 1;
-      }
+      final tally = tallyVotes(voteList);
 
       _logger.info(
         '[game] getWeekVotes: results visible, tally=${tally.length} entries',
@@ -824,35 +820,14 @@ class GameService {
 
       // Filter to only closed+revealed weeks.
       final closedVotes = voteList
-          .where((v) => isResultsVisible(v['week_start'] as String))
+          .where((v) => isResultsVisible(v['week_start'] as String, _clock))
           .toList();
 
-      // Total votes per user.
-      final totalVotes = <String, int>{};
-      for (final v in closedVotes) {
-        final uid = v['voted_for_id'] as String;
-        totalVotes[uid] = (totalVotes[uid] ?? 0) + 1;
-      }
-
-      // Wins: group by week, find highest vote count per week.
-      final votesByWeek = <String, Map<String, int>>{};
-      for (final v in closedVotes) {
-        final week = v['week_start'] as String;
-        final uid = v['voted_for_id'] as String;
-        votesByWeek.putIfAbsent(week, () => {});
-        votesByWeek[week]![uid] = (votesByWeek[week]![uid] ?? 0) + 1;
-      }
-
-      final wins = <String, int>{};
-      for (final weekTally in votesByWeek.values) {
-        if (weekTally.isEmpty) continue;
-        final maxVotes = weekTally.values.reduce((a, b) => a > b ? a : b);
-        for (final entry in weekTally.entries) {
-          if (entry.value == maxVotes) {
-            wins[entry.key] = (wins[entry.key] ?? 0) + 1;
-          }
-        }
-      }
+      // Total votes per user, and wins (all members tied at a week's max each
+      // earn a win). Both derived by pure, unit-tested helpers.
+      final totalVotes = tallyVotes(closedVotes);
+      final votesByWeek = groupVotesByWeek(closedVotes);
+      final wins = winsPerUserAllTied(votesByWeek);
 
       final leaderboard = memberList.map((m) {
         final uid = m['user_id'] as String;
@@ -901,32 +876,15 @@ class GameService {
 
       final voteList = List<Map<String, dynamic>>.from(votes as List);
       final revealedVotes = voteList
-          .where((v) => isResultsVisible(v['week_start'] as String))
+          .where((v) => isResultsVisible(v['week_start'] as String, _clock))
           .toList();
 
-      // Group by week → userId → vote count.
-      final votesByWeek = <String, Map<String, int>>{};
-      for (final v in revealedVotes) {
-        final week = v['week_start'] as String;
-        final uid = v['voted_for_id'] as String;
-        votesByWeek.putIfAbsent(week, () => {});
-        votesByWeek[week]![uid] = (votesByWeek[week]![uid] ?? 0) + 1;
-      }
-
+      // Group by week → userId → vote count, then resolve one winner per week
+      // (alphabetical tie-break). Both via pure, unit-tested helpers.
+      final votesByWeek = groupVotesByWeek(revealedVotes);
       if (votesByWeek.isEmpty) return [];
 
-      final weekWinners = <String, String>{}; // week_start → winner userId
-      for (final entry in votesByWeek.entries) {
-        if (entry.value.isEmpty) continue;
-        final maxVotes = entry.value.values.reduce((a, b) => a > b ? a : b);
-        final tied =
-            entry.value.entries
-                .where((e) => e.value == maxVotes)
-                .map((e) => e.key)
-                .toList()
-              ..sort();
-        weekWinners[entry.key] = tied.first;
-      }
+      final weekWinners = singleWinnerPerWeek(votesByWeek); // week → winner uid
 
       final winnerIds = weekWinners.values.toSet().toList();
       final profiles = await _db.client
@@ -963,6 +921,77 @@ class GameService {
     }
   }
 
+  // ── Pure scoring helpers ─────────────────────────────────────────────────
+  // These are static, side-effect-free, and DB-independent so the game's
+  // "conduct" rules (tallies, weekly winners, win counts) can be unit-tested
+  // offline without a live Supabase. Each DB-backed method above delegates here.
+
+  /// Counts votes per `voted_for_id` across the given vote rows.
+  /// Each row must contain a `voted_for_id` String. Pure.
+  static Map<String, int> tallyVotes(List<Map<String, dynamic>> votes) {
+    final tally = <String, int>{};
+    for (final v in votes) {
+      final uid = v['voted_for_id'] as String;
+      tally[uid] = (tally[uid] ?? 0) + 1;
+    }
+    return tally;
+  }
+
+  /// Groups vote rows into `week_start → (voted_for_id → count)`.
+  /// Each row must contain `week_start` and `voted_for_id` Strings. Pure.
+  static Map<String, Map<String, int>> groupVotesByWeek(
+    List<Map<String, dynamic>> votes,
+  ) {
+    final byWeek = <String, Map<String, int>>{};
+    for (final v in votes) {
+      final week = v['week_start'] as String;
+      final uid = v['voted_for_id'] as String;
+      byWeek.putIfAbsent(week, () => {});
+      byWeek[week]![uid] = (byWeek[week]![uid] ?? 0) + 1;
+    }
+    return byWeek;
+  }
+
+  /// Win counts per user where EVERY member tied at a week's max vote count is
+  /// credited a win. This mirrors the all-time leaderboard semantics — a tie
+  /// gives each tied member a win. Pure.
+  static Map<String, int> winsPerUserAllTied(
+    Map<String, Map<String, int>> votesByWeek,
+  ) {
+    final wins = <String, int>{};
+    for (final weekTally in votesByWeek.values) {
+      if (weekTally.isEmpty) continue;
+      final maxVotes = weekTally.values.reduce((a, b) => a > b ? a : b);
+      for (final entry in weekTally.entries) {
+        if (entry.value == maxVotes) {
+          wins[entry.key] = (wins[entry.key] ?? 0) + 1;
+        }
+      }
+    }
+    return wins;
+  }
+
+  /// Single winner per week. Ties are broken alphabetically by userId for
+  /// stable output. This mirrors the weekly-winners widget semantics — exactly
+  /// one winner per resolved week. Pure.
+  static Map<String, String> singleWinnerPerWeek(
+    Map<String, Map<String, int>> votesByWeek,
+  ) {
+    final winners = <String, String>{};
+    for (final entry in votesByWeek.entries) {
+      if (entry.value.isEmpty) continue;
+      final maxVotes = entry.value.values.reduce((a, b) => a > b ? a : b);
+      final tied =
+          entry.value.entries
+              .where((e) => e.value == maxVotes)
+              .map((e) => e.key)
+              .toList()
+            ..sort();
+      winners[entry.key] = tied.first;
+    }
+    return winners;
+  }
+
   // ── Private helpers ────────────────────────────────────────────────────────
 
   Future<bool> _isMember(String partyId, String userId) async {
@@ -993,9 +1022,10 @@ class GameService {
 
   /// Deletes party_tracks and party_votes rows whose week closed more than
   /// 31 days ago (week_start + 35 days < now). Called on every read so no
-  /// scheduled job is needed. Uses _debugNow() so the debug clock works too.
+  /// scheduled job is needed. Uses the injected clock so the debug/test clock
+  /// works too.
   Future<void> _purgeExpiredWeeks(String partyId) async {
-    final cutoff = _debugNow().subtract(const Duration(days: 35));
+    final cutoff = _clock.now().subtract(const Duration(days: 35));
     final cutoffStr =
         '${cutoff.year.toString().padLeft(4, '0')}-'
         '${cutoff.month.toString().padLeft(2, '0')}-'

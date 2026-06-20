@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:dart_frog/dart_frog.dart';
 import 'package:xene_backend/src/database.dart';
 import 'package:xene_backend/src/preset_template_payload.dart';
+import 'package:xene_backend/src/utils/audit_logger.dart';
 import 'package:xene_backend/src/utils/auth_utils.dart';
 import 'package:xene_backend/src/utils/json_utils.dart';
+import 'package:xene_backend/src/utils/rate_limiter.dart';
 
 Future<Response> onRequest(RequestContext context) async {
   switch (context.request.method) {
@@ -21,7 +25,11 @@ Future<Response> _listTemplates(RequestContext context) async {
 }
 
 Future<Response> _createTemplate(RequestContext context) async {
-  final guard = requireRealUser(context);
+  // Creating a preset template writes GLOBAL content shown to every user, so it
+  // requires admin — not merely a real (non-anonymous) account. Mirrors the
+  // guard on the other preset-mutation routes ([slug] PATCH, sources POST/DELETE,
+  // youtube POST, move POST). Reads (_listTemplates) stay public.
+  final guard = await requireAdminUser(context);
   if (guard != null) return guard;
 
   final body = await _readJsonBody(context);
@@ -46,6 +54,17 @@ Future<Response> _createTemplate(RequestContext context) async {
       body: {'error': 'Failed to create preset template'},
     );
   }
+
+  unawaited(
+    logSecurityEvent(
+      context.read<DatabaseService>().client,
+      action: 'preset_template_create',
+      userId: context.read<String>(),
+      targetId: created['id']?.toString(),
+      ip: extractClientIp(context),
+      metadata: {'slug': created['slug'], 'name': created['name']},
+    ),
+  );
 
   return Response.json(statusCode: 201, body: toApiRow(created));
 }

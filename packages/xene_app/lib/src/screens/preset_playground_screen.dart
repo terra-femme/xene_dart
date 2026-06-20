@@ -1650,8 +1650,18 @@ class _SearchResultRow extends StatelessWidget {
         ? '${(followers / 1000).toStringAsFixed(0)}K'
         : followers.toString();
 
+    // Presets this SoundCloud profile is already a source in (annotated by the
+    // backend in /discovery/sc_search). Informational only — adding again is
+    // always allowed, including to a preset that already has it.
+    final inPresetNames = (candidate['in_presets'] as List?)
+        ?.whereType<Map>()
+        .map((e) => (e['name'] ?? e['slug'] ?? '').toString())
+        .where((s) => s.isNotEmpty)
+        .toList(growable: false);
+    final alreadyAdded = inPresetNames != null && inPresetNames.isNotEmpty;
+
     return Container(
-      height: 64,
+      constraints: const BoxConstraints(minHeight: 64),
       decoration: BoxDecoration(
         border: Border.all(color: const Color(0xFFE8E8E8)),
         borderRadius: BorderRadius.circular(5),
@@ -1700,6 +1710,31 @@ class _SearchResultRow extends StatelessWidget {
                     color: const Color(0xFF888888),
                   ),
                 ),
+                if (alreadyAdded) ...[
+                  const SizedBox(height: 3),
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.playlist_add_check,
+                        size: 12,
+                        color: _kAccent,
+                      ),
+                      const SizedBox(width: 3),
+                      Flexible(
+                        child: Text(
+                          'IN ${inPresetNames.join(', ').toUpperCase()}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.teko(
+                            fontSize: 12,
+                            color: _kAccent,
+                            letterSpacing: 0.4,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ],
             ),
           ),
@@ -1707,7 +1742,7 @@ class _SearchResultRow extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(right: 8),
             child: _SmallActionButton(
-              label: 'ADD',
+              label: alreadyAdded ? 'ADD AGAIN' : 'ADD',
               icon: Icons.add,
               onTap: onAdd,
             ),

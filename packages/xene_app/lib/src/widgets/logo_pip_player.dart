@@ -328,14 +328,16 @@ class _LogoPipPlayerState extends ConsumerState<LogoPipPlayer>
                     ],
                   ),
 
-                  // Drag Handle — gesture only, no semantic meaning
-                  ExcludeSemantics(
-                    child: Positioned(
-                      top: 32,
-                      bottom: 0,
-                      left: isLandscape ? 0 : null,
-                      right: isLandscape ? null : 0,
-                      width: 50,
+                  // Drag Handle — gesture only, no semantic meaning.
+                  // Positioned must be a direct child of Stack; ExcludeSemantics
+                  // wraps the gesture *inside* it (not around it).
+                  Positioned(
+                    top: 32,
+                    bottom: 0,
+                    left: isLandscape ? 0 : null,
+                    right: isLandscape ? null : 0,
+                    width: 50,
+                    child: ExcludeSemantics(
                       child: GestureDetector(
                         behavior: HitTestBehavior.opaque,
                         onHorizontalDragUpdate: _handleDragUpdate,
