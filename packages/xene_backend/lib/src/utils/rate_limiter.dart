@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:dart_frog/dart_frog.dart';
 
 /// In-memory sliding-window rate limiter, one bucket per key.
@@ -100,11 +102,50 @@ final imageProxyRateLimiter = RateLimiter(
   window: Duration(minutes: 1),
 );
 
-/// Extract the originating IP from the request, respecting proxy headers.
+/// Number of trusted reverse-proxy hops sitting in front of this server, read
+/// once from the TRUSTED_PROXY_HOPS env var. This is **provider-specific** —
+/// Azure App Service, GCP Cloud Run / load balancer, Cloudflare, and bare metal
+/// each prepend a different number of hops — so it is configuration, never
+/// hardcoded. Switching hosting providers is then a config change, not a code
+/// change.
+///
+/// Default 0 = do NOT trust X-Forwarded-For at all (correct for local dev and
+/// any deploy with no proxy in front). Typical values: Azure App Service ≈ 1,
+/// GCP HTTPS LB ≈ 1, Cloudflare → an extra hop on top of your origin proxy.
+/// Verify against your real deployment before trusting it (see logged value).
+final int trustedProxyHops =
+    int.tryParse(Platform.environment['TRUSTED_PROXY_HOPS'] ?? '') ?? 0;
+
+/// Extract the originating client IP, honoring exactly [trustedProxyHops] of
+/// proxy-appended `X-Forwarded-For` entries.
+///
+/// `X-Forwarded-For` is built left→right: each proxy APPENDS the address it
+/// received the connection from. So the rightmost entries are the ones our own
+/// infrastructure added (trustworthy); anything a client prepends sits to the
+/// LEFT and is attacker-controlled. We therefore count [trustedProxyHops] in
+/// from the right to find the real client and ignore any spoofed prefix.
+///
+/// With 0 trusted hops we never read X-Forwarded-For (it would be fully
+/// spoofable), falling back to `x-real-ip` then `'unknown'`.
 String extractClientIp(RequestContext context) {
-  final forwarded = context.request.headers['x-forwarded-for'];
-  if (forwarded != null && forwarded.isNotEmpty) {
-    return forwarded.split(',').first.trim();
+  if (trustedProxyHops > 0) {
+    final forwarded = context.request.headers['x-forwarded-for'];
+    if (forwarded != null && forwarded.trim().isNotEmpty) {
+      final parts = forwarded
+          .split(',')
+          .map((s) => s.trim())
+          .where((s) => s.isNotEmpty)
+          .toList();
+      if (parts.isNotEmpty) {
+        // Real client = the entry [trustedProxyHops] in from the right.
+        final idx = parts.length - trustedProxyHops;
+        if (idx >= 0 && idx < parts.length) return parts[idx];
+        // Chain is shorter than configured (malformed / unexpected routing):
+        // fall back to the rightmost entry — the one our closest proxy added,
+        // which is the least attacker-controllable value available.
+        return parts.last;
+      }
+    }
   }
   return context.request.headers['x-real-ip'] ?? 'unknown';
 }

@@ -5,8 +5,10 @@ import 'package:xene_backend/src/database.dart';
 import 'package:xene_backend/src/feed_cache.dart';
 import 'package:xene_backend/src/services/bandcamp_service.dart';
 import 'package:xene_backend/src/services/youtube_service.dart';
+import 'package:xene_backend/src/utils/audit_logger.dart';
 import 'package:xene_backend/src/utils/auth_utils.dart';
 import 'package:xene_backend/src/utils/json_utils.dart';
+import 'package:xene_backend/src/utils/rate_limiter.dart';
 import 'package:xene_backend/src/utils/url_utils.dart';
 
 final _logger = Logger('presets.sources.id');
@@ -119,6 +121,16 @@ Future<Response> _patchSource(
         patchKeys: patch.keys.toSet(),
       ),
     );
+    unawaited(
+      logSecurityEvent(
+        db.client,
+        action: 'preset_source_patch',
+        userId: userId,
+        targetId: sourceId,
+        ip: extractClientIp(context),
+        metadata: {'fields': patch.keys.toList()},
+      ),
+    );
     return Response.json(body: toApiRow(updated));
   }
 
@@ -137,6 +149,16 @@ Future<Response> _patchSource(
     );
   }
 
+  unawaited(
+    logSecurityEvent(
+      db.client,
+      action: 'preset_source_patch',
+      userId: userId,
+      targetId: sourceId,
+      ip: extractClientIp(context),
+      metadata: {'fields': patch.keys.toList(), 'artist_id': artistId},
+    ),
+  );
   unawaited(
     _warmNewPlatforms(
       db: db,

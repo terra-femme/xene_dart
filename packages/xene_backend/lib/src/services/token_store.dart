@@ -28,10 +28,19 @@ class TokenStore {
       throw StateError('TOKEN_ENCRYPTION_KEY must be set');
     }
     final decoded = base64Url.decode(base64Url.normalize(raw));
-    final keyBytes = Uint8List(32);
-    final copyLen = decoded.length < 32 ? decoded.length : 32;
-    keyBytes.setAll(0, decoded.sublist(0, copyLen));
-    _key = Key(keyBytes);
+    // AES-256 requires exactly 32 key bytes. Previously a short key was silently
+    // zero-padded, which would mask a misconfiguration with a dangerously weak
+    // key. Fail loudly instead so a bad TOKEN_ENCRYPTION_KEY is caught at startup.
+    if (decoded.length != 32) {
+      throw StateError(
+        'TOKEN_ENCRYPTION_KEY must decode to exactly 32 bytes for AES-256 '
+        '(got ${decoded.length}). Generate one with: '
+        "dart -e \"import 'dart:math';import 'dart:convert';"
+        'void main(){final r=Random.secure();'
+        'print(base64Url.encode(List<int>.generate(32,(_)=>r.nextInt(256))));}"',
+      );
+    }
+    _key = Key(Uint8List.fromList(decoded));
     return _key!;
   }
 

@@ -149,6 +149,60 @@ class SoundCloudService {
     }
   }
 
+  /// Revoke a user's OAuth access token upstream at SoundCloud.
+  ///
+  /// Calls the documented sign-out endpoint:
+  ///   POST https://secure.soundcloud.com/sign-out  body: {"access_token": ...}
+  /// which terminates the SC session and invalidates the token for further API
+  /// use (https://developers.soundcloud.com/docs).
+  ///
+  /// Best-effort: returns true if the token is no longer usable upstream, false
+  /// on any failure. NEVER throws — the disconnect route must still delete the
+  /// local row even if SoundCloud is unreachable or the token was already dead.
+  Future<bool> revokeUserToken(String accessToken) async {
+    _logger.info(
+      '[sc] revokeUserToken: revoking access token upstream '
+      '(len=${accessToken.length})',
+    );
+    try {
+      final response = await _dio.post<dynamic>(
+        'https://secure.soundcloud.com/sign-out',
+        data: jsonEncode({'access_token': accessToken}),
+        options: Options(
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          // SC returns 401 when the token is already invalid. Treat <500 as
+          // "handled" so an already-dead token is not surfaced as a Dio error.
+          validateStatus: (status) => status != null && status < 500,
+        ),
+      );
+      final status = response.statusCode ?? 0;
+      if (status == 200) {
+        _logger.info('[sc] revokeUserToken: SC token revoked (status=200)');
+        return true;
+      }
+      if (status == 401) {
+        // 401 = "this token is associated with a session that is already
+        // invalid" — from our perspective the token is dead, so count it as
+        // revoked rather than a failure.
+        _logger.info(
+          '[sc] revokeUserToken: token already invalid upstream (status=401) '
+          '— treating as revoked',
+        );
+        return true;
+      }
+      _logger.warning(
+        '[sc] revokeUserToken: unexpected status=$status body=${response.data}',
+      );
+      return false;
+    } catch (e) {
+      _logger.warning('[sc] revokeUserToken: revoke request failed: $e');
+      return false;
+    }
+  }
+
   /// Resolve a username to a User ID.
   Future<Map<String, dynamic>?> _resolveUserInfo(String username) async {
     final token = await _getToken();
