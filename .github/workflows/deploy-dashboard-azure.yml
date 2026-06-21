@@ -11,7 +11,7 @@ on:
 
 env:
   AZURE_RESOURCE_GROUP: xene-rg
-  ACR_REGISTRY_NAME: xeneacr
+  ACR_REGISTRY_NAME: xeneacr7244
   CONTAINER_APP_NAME: xene-dashboard
   CONTAINER_APP_ENV: xene-env
 
