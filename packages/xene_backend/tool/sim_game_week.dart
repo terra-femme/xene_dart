@@ -103,10 +103,20 @@ Future<void> _setup(SupabaseClient supabase, Dio dio) async {
   final ts = DateTime.now().millisecondsSinceEpoch;
   final players = <Map<String, dynamic>>[];
 
+  // Dedicated client for minting user JWTs. Sign-ins MUST stay off the admin
+  // [supabase] client: signInWithPassword sets a user session, after which
+  // PostgREST calls (.from()) use that user's token instead of the service key
+  // — re-enabling RLS and breaking service-role writes like the profiles upsert
+  // below. The admin client must never hold a user session.
+  final authClient = SupabaseClient(_supabaseUrl!, _serviceKey!);
+
   for (var i = 0; i < _playerCount; i++) {
     final email = 'sim_${ts}_$i@xene.test';
     final password = _randomPassword();
-    final username = 'sim_${i}_${ts.toRadixString(36)}'.substring(0, 18);
+    final usernameBase = 'sim_${i}_${ts.toRadixString(36)}';
+    final username = usernameBase.length > 18
+        ? usernameBase.substring(0, 18)
+        : usernameBase;
 
     // 1. Create an email-confirmed (real, non-anonymous) account.
     final created = await supabase.auth.admin.createUser(
@@ -129,8 +139,9 @@ Future<void> _setup(SupabaseClient supabase, Dio dio) async {
       'username': username,
     });
 
-    // 3. Sign in to mint a non-anonymous JWT for backend calls.
-    final auth = await supabase.auth.signInWithPassword(
+    // 3. Sign in (on the dedicated authClient, NOT the admin client) to mint a
+    //    non-anonymous JWT for backend calls.
+    final auth = await authClient.auth.signInWithPassword(
       email: email,
       password: password,
     );
@@ -145,6 +156,10 @@ Future<void> _setup(SupabaseClient supabase, Dio dio) async {
       'token': token,
     });
   }
+
+  // Tokens are captured; the auth client is no longer needed. Dispose it so its
+  // session never lingers (the admin [supabase] client stays session-free).
+  await authClient.dispose();
 
   String tokenOf(int i) => players[i]['token'] as String;
   String idOf(int i) => players[i]['id'] as String;
