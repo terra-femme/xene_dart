@@ -2,6 +2,16 @@
 # Stage 1: Builder
 FROM node:20-alpine AS builder
 
+# Accept build args for Supabase config
+ARG NEXT_PUBLIC_SUPABASE_URL
+ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
+ARG SUPABASE_SERVICE_ROLE_KEY
+
+# Pass to environment so Next.js build can access them
+ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
+ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
+ENV SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_ROLE_KEY
+
 WORKDIR /app
 
 # Copy package files
@@ -13,7 +23,7 @@ RUN npm ci
 # Copy source code
 COPY . .
 
-# Build Next.js app
+# Build Next.js app (env vars embedded in bundle)
 RUN npm run build
 
 # Stage 2: Runtime
