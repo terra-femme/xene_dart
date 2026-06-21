@@ -15,13 +15,13 @@ export default async function CoverEditorPage({
   const [coverResult, articlesResult] = await Promise.all([
     db.from('magazine_covers').select('*').eq('id', id).single(),
     // Graceful fallback: xene_articles table may not exist yet if migration hasn't run
-    db
-      .from('xene_articles')
-      .select('slug, title')
-      .eq('status', 'published')
-      .order('title', { ascending: true })
-      .then((r) => r)
-      .catch(() => ({ data: [], error: null })),
+    Promise.resolve(
+      db
+        .from('xene_articles')
+        .select('slug, title')
+        .eq('status', 'published')
+        .order('title', { ascending: true })
+    ).catch(() => ({ data: [], error: null })),
   ])
 
   if (coverResult.error || !coverResult.data) notFound()

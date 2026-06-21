@@ -197,10 +197,10 @@ export function SocialAnalytics({ metrics, latestByPlatform, configuredPlatforms
                       borderRadius: 6,
                       fontSize: 11,
                     }}
-                    formatter={(value: number, name: string) => [
-                      fmt(value),
+                    formatter={((value: number | undefined, name: string) => [
+                      value !== undefined ? fmt(value) : '',
                       name.replace('_followers', ''),
-                    ]}
+                    ]) as any}
                   />
                   <Legend
                     wrapperStyle={{ fontSize: 11 }}
@@ -250,10 +250,10 @@ export function SocialAnalytics({ metrics, latestByPlatform, configuredPlatforms
                       borderRadius: 6,
                       fontSize: 11,
                     }}
-                    formatter={(value: number, name: string) => [
-                      fmt(value),
+                    formatter={((value: number | undefined, name: string) => [
+                      value !== undefined ? fmt(value) : '',
                       name.replace('_views', ''),
-                    ]}
+                    ]) as any}
                   />
                   <Legend
                     wrapperStyle={{ fontSize: 11 }}
