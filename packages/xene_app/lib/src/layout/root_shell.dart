@@ -84,9 +84,15 @@ class RootShell extends ConsumerWidget {
               // 2. Fixed header (floating over the spacer band).
               const Positioned(top: 0, left: 0, right: 0, child: XeneHeader()),
 
-              // 3. Feed-only global overlays.
+              // 3. Overlays. The draggable sheet is feed-only chrome, but the
+              //    PiP player must persist across every swipe branch — gating it
+              //    on `isFeed` is what made it vanish when the user swiped off
+              //    the feed. RootShell stays mounted across branch switches, so
+              //    keeping the player here (always) keeps the SoundCloud/YouTube
+              //    iframe alive and playing until the user closes/gestures it
+              //    away. It self-hides when nothing is playing.
               if (isFeed) const XeneDraggableSheet(),
-              if (isFeed) const LogoPipPlayer(),
+              const LogoPipPlayer(),
 
               // 4. Loading overlay (topmost — covers everything on first load).
               const LoadingOverlay(),
