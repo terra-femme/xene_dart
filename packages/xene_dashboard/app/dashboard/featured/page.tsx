@@ -16,14 +16,14 @@ export default async function FeaturedPage() {
       .select('title, url, snippet, image_url, published_at, artists(name)')
       .order('published_at', { ascending: false })
       .limit(60)
-      .then((r) => r)
+      .then((r) => r as any)
       .catch(() => ({ data: [], error: null })),
     db
       .from('publication_articles')
       .select('title, url, snippet, image_url, published_at, press_publications(name)')
       .order('published_at', { ascending: false })
       .limit(60)
-      .then((r) => r)
+      .then((r) => r as any)
       .catch(() => ({ data: [], error: null })),
   ])
 
