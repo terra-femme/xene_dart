@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Dancing Points — Audio Reactive Sphere</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #07070a;
+    --panel: rgba(16,17,21,0.72);
+    --line: rgba(255,255,255,0.09);
+    --line-2: rgba(255,255,255,0.05);
+    --fg: #e8eaee;
+    --dim: #797d88;
+    --dim-2: #4f535d;
+    --accent: oklch(0.86 0.05 220);
+    --hot: oklch(0.9 0.06 220);
+    --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--mono);
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+  #stage { position: fixed; inset: 0; }
+  #gl { width: 100%; height: 100%; display: block; }
+
+  /* faint vignette + grain so the void isn't flat */
+  #stage::after {
+    content: "";
+    position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(120% 120% at 50% 45%, transparent 55%, rgba(0,0,0,0.55) 100%);
+  }
+
+  /* corner title */
+  .brand {
+    position: fixed; top: 22px; left: 26px; z-index: 5;
+    pointer-events: none;
+  }
+  .brand h1 {
+    font-size: 12px; font-weight: 500; letter-spacing: 0.42em;
+    text-transform: uppercase; color: var(--fg);
+  }
+  .brand p {
+    margin-top: 6px; font-size: 10px; letter-spacing: 0.18em;
+    color: var(--dim-2); text-transform: uppercase;
+  }
+
+  /* ------- control panel ------- */
+  #panel {
+    position: fixed; top: 0; right: 0; z-index: 10;
+    width: 346px; height: 100%;
+    background: var(--panel);
+    backdrop-filter: blur(22px) saturate(1.1);
+    -webkit-backdrop-filter: blur(22px) saturate(1.1);
+    border-left: 1px solid var(--line);
+    display: flex; flex-direction: column;
+    transition: transform 0.4s cubic-bezier(0.4,0,0.1,1);
+  }
+  #panel.hidden { transform: translateX(100%); }
+
+  .panel-scroll { overflow-y: auto; overflow-x: hidden; flex: 1; }
+  .panel-scroll::-webkit-scrollbar { width: 7px; }
+  .panel-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 4px; }
+
+  .sec { padding: 18px 22px; border-bottom: 1px solid var(--line-2); }
+  .sec-h {
+    font-size: 9.5px; letter-spacing: 0.26em; text-transform: uppercase;
+    color: var(--dim); margin-bottom: 14px; display: flex; justify-content: space-between;
+  }
+  .sec-h .meta { color: var(--dim-2); letter-spacing: 0.14em; }
+
+  /* upload + transport */
+  .drop {
+    border: 1px dashed var(--line); border-radius: 8px;
+    padding: 16px; text-align: center; cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+  }
+  .drop:hover, .drop.drag { border-color: var(--accent); background: rgba(255,255,255,0.02); }
+  .drop .ico { font-size: 11px; letter-spacing: 0.2em; color: var(--accent); }
+  .drop .fn { margin-top: 8px; font-size: 11px; color: var(--fg); word-break: break-all; }
+  .drop .hint { margin-top: 4px; font-size: 9.5px; letter-spacing: 0.1em; color: var(--dim-2); }
+
+  .transport { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
+  .play {
+    width: 42px; height: 42px; flex: 0 0 42px; border-radius: 50%;
+    border: 1px solid var(--line); background: rgba(255,255,255,0.03);
+    color: var(--fg); cursor: pointer; display: grid; place-items: center;
+    transition: border-color 0.2s, background 0.2s;
+  }
+  .play:hover { border-color: var(--accent); background: rgba(255,255,255,0.06); }
+  .play:disabled { opacity: 0.3; cursor: not-allowed; }
+  .play svg { width: 14px; height: 14px; fill: var(--fg); }
+  .tcol { flex: 1; min-width: 0; }
+  .scrub {
+    -webkit-appearance: none; appearance: none; width: 100%; height: 3px;
+    background: rgba(255,255,255,0.12); border-radius: 2px; cursor: pointer; outline: none;
+  }
+  .scrub::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 11px; height: 11px; border-radius: 50%;
+    background: var(--fg); cursor: pointer; box-shadow: 0 0 8px rgba(191,230,245,0.6);
+  }
+  .scrub::-moz-range-thumb { width: 11px; height: 11px; border: none; border-radius: 50%; background: var(--fg); }
+  .time { display: flex; justify-content: space-between; margin-top: 7px; font-size: 9.5px; color: var(--dim); letter-spacing: 0.08em; }
+
+  /* band selector */
+  .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+  .band {
+    border: 1px solid var(--line); background: transparent; color: var(--dim);
+    border-radius: 6px; padding: 10px 4px; cursor: pointer; text-align: center;
+    font-family: var(--mono); transition: all 0.18s;
+  }
+  .band .bn { font-size: 10px; letter-spacing: 0.04em; color: inherit; }
+  .band .bf { font-size: 8px; letter-spacing: 0.06em; color: var(--dim-2); margin-top: 3px; }
+  .band:hover { border-color: rgba(255,255,255,0.22); color: var(--fg); }
+  .band.active { border-color: var(--accent); color: var(--fg); background: rgba(160,210,235,0.07); }
+  .band.active .bf { color: var(--accent); }
+
+  /* live meters */
+  .meters { margin-top: 14px; display: grid; gap: 9px; }
+  .meter-row { display: grid; grid-template-columns: 46px 1fr; align-items: center; gap: 10px; }
+  .meter-row label { font-size: 8.5px; letter-spacing: 0.14em; color: var(--dim); text-transform: uppercase; }
+  .bar { height: 6px; background: rgba(255,255,255,0.07); border-radius: 3px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; width: 0%; background: var(--fg); border-radius: 3px; transition: width 0.05s linear; }
+  .bar.react > i { background: var(--accent); box-shadow: 0 0 10px rgba(160,210,235,0.7); }
+
+  /* slider rows */
+  .ctrl { margin-top: 15px; }
+  .ctrl:first-child { margin-top: 0; }
+  .ctrl-h { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 7px; }
+  .ctrl-h .l { font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim); }
+  .ctrl-h .v { font-size: 10px; color: var(--fg); letter-spacing: 0.04em; }
+  input[type=range].sl {
+    -webkit-appearance: none; appearance: none; width: 100%; height: 2px;
+    background: rgba(255,255,255,0.14); border-radius: 2px; outline: none; cursor: pointer;
+  }
+  input[type=range].sl::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%;
+    background: var(--fg); cursor: pointer; transition: transform 0.1s;
+  }
+  input[type=range].sl::-webkit-slider-thumb:hover { transform: scale(1.25); }
+  input[type=range].sl::-moz-range-thumb { width: 12px; height: 12px; border: none; border-radius: 50%; background: var(--fg); cursor: pointer; }
+
+  .range2 { display: flex; align-items: center; gap: 8px; }
+  .range2 .sl { flex: 1; }
+
+  /* warp mode + color swatches */
+  .modes { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .mode {
+    border: 1px solid var(--line); background: transparent; color: var(--dim);
+    border-radius: 6px; padding: 9px 6px; cursor: pointer; text-align: left;
+    font-family: var(--mono); transition: all 0.18s;
+  }
+  .mode .mn { font-size: 10px; letter-spacing: 0.08em; }
+  .mode .md { font-size: 8px; color: var(--dim-2); margin-top: 3px; letter-spacing: 0.04em; }
+  .mode:hover { border-color: rgba(255,255,255,0.22); color: var(--fg); }
+  .mode.active { border-color: var(--accent); color: var(--fg); background: rgba(160,210,235,0.07); }
+
+  .swatches { display: flex; gap: 8px; }
+  .sw { width: 26px; height: 26px; border-radius: 50%; cursor: pointer; border: 1px solid rgba(255,255,255,0.15); transition: transform 0.12s; }
+  .sw:hover { transform: scale(1.12); }
+  .sw.active { box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px var(--fg); }
+
+  /* panel toggle */
+  .toggle {
+    position: fixed; top: 22px; right: 26px; z-index: 11;
+    border: 1px solid var(--line); background: var(--panel); color: var(--dim);
+    font-family: var(--mono); font-size: 9px; letter-spacing: 0.2em; text-transform: uppercase;
+    padding: 9px 12px; border-radius: 6px; cursor: pointer; backdrop-filter: blur(10px);
+    transition: color 0.2s, border-color 0.2s;
+  }
+  .toggle:hover { color: var(--fg); border-color: var(--accent); }
+
+  .foot { padding: 14px 22px 20px; font-size: 8.5px; letter-spacing: 0.1em; color: var(--dim-2); line-height: 1.7; }
+</style>
+</head>
+<body>
+  <div id="stage"><canvas id="gl"></canvas></div>
+
+  <div class="brand">
+    <h1>Dancing Points</h1>
+    <p>Audio-reactive particle sphere</p>
+  </div>
+
+  <button class="toggle" id="toggle">Hide</button>
+
+  <aside id="panel">
+    <div class="panel-scroll">
+
+      <!-- SOURCE -->
+      <div class="sec">
+        <div class="sec-h"><span>Source</span><span class="meta" id="status">no file</span></div>
+        <label class="drop" id="drop">
+          <div class="ico">▲ UPLOAD SONG</div>
+          <div class="fn" id="fname">drop an audio file</div>
+          <div class="hint">mp3 · wav · m4a · ogg</div>
+          <input type="file" id="file" accept="audio/*" hidden />
+        </label>
+        <div class="transport">
+          <button class="play" id="play" disabled aria-label="play">
+            <svg id="playIco" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+          </button>
+          <div class="tcol">
+            <input type="range" class="scrub" id="scrub" min="0" max="1000" value="0" />
+            <div class="time"><span id="cur">0:00</span><span id="dur">0:00</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- REACTIVE SOURCE -->
+      <div class="sec">
+        <div class="sec-h"><span>Reactive Source</span><span class="meta">isolate</span></div>
+        <div class="grid3" id="bands"></div>
+        <div class="meters">
+          <div class="meter-row"><label>Band</label><div class="bar"><i id="mLevel"></i></div></div>
+          <div class="meter-row"><label>React</label><div class="bar react"><i id="mReact"></i></div></div>
+        </div>
+      </div>
+
+      <!-- ISOLATION -->
+      <div class="sec">
+        <div class="sec-h"><span>Isolation</span><span class="meta" id="bandHz">— Hz</span></div>
+        <div class="ctrl">
+          <div class="ctrl-h"><span class="l">Low edge</span><span class="v" id="vLo">35 Hz</span></div>
+          <input type="range" class="sl" id="lo" min="0" max="1000" value="0" />
+        </div>
+        <div class="ctrl">
+          <div class="ctrl-h"><span class="l">High edge</span><span class="v" id="vHi">110 Hz</span></div>
+          <input type="range" class="sl" id="hi" min="0" max="1000" value="0" />
+        </div>
+      </div>
+
+      <!-- REACTION -->
+      <div class="sec">
+        <div class="sec-h"><span>Reaction</span></div>
+        <div class="ctrl">
+          <div class="ctrl-h"><span class="l">Sensitivity</span><span class="v" id="vSens">1.6×</span></div>
+          <input type="range" class="sl" id="sens" min="20" max="400" value="160" />
+        </div>
+        <div class="ctrl">
+          <div class="ctrl-h"><span class="l">Attack</span><span class="v" id="vAtk">0.60</span></div>
+          <input type="range" class="sl" id="atk" min="5" max="100" value="60" />
+        </div>
+        <div class="ctrl">
+          <div class="ctrl-h"><span class="l">Release / Trails</span><span class="v" id="vRel">0.90</span></div>
+          <input type="range" class="sl" id="rel" min="0" max="100" value="53" />
+        </div>
+        <div class="ctrl">
+          <div class="ctrl-h"><span class="l">Warp intensity</span><span class="v" id="vWarp">0.80</span></div>
+          <input type="range" class="sl" id="warp" min="0" max="180" value="80" />
+        </div>
+      </div>
+
+      <!-- ACCESSIBILITY (xene addition) -->
+      <div class="sec">
+        <div class="sec-h"><span>Accessibility</span><span class="meta" id="hapticMeta">vibration</span></div>
+        <button class="mode active" id="haptics" style="width:100%;">
+          <div class="mn" id="hapticLabel">Haptics: ON</div>
+          <div class="md">vibrate on each isolated hit · Android browsers (not iOS Safari)</div>
+        </button>
+      </div>
+
+      <!-- FORM -->
+      <div class="sec">
+        <div class="sec-h"><span>Form</span></div>
+        <div class="modes" id="modes"></div>
+
+        <div class="ctrl" style="margin-top:16px;">
+          <div class="ctrl-h"><span class="l">Point density</span><span class="v" id="vDens">6000</span></div>
+          <input type="range" class="sl" id="dens" min="1000" max="20000" step="1000" value="6000" />
+        </div>
+        <div class="ctrl">
+          <div class="ctrl-h"><span class="l">Point size</span><span class="v" id="vSize">0.70</span></div>
+          <input type="range" class="sl" id="size" min="20" max="220" value="70" />
+        </div>
+        <div class="ctrl">
+          <div class="ctrl-h"><span class="l">Rotation</span><span class="v" id="vRot">0.18</span></div>
+          <input type="range" class="sl" id="rot" min="0" max="100" value="36" />
+        </div>
+        <div class="ctrl">
+          <div class="ctrl-h"><span class="l">Color</span><span class="v" id="vCol">Mono</span></div>
+          <div class="swatches" id="swatches"></div>
+        </div>
+      </div>
+
+      <div class="foot">
+        Upload a track, pick the part to isolate, then tune the band edges until the
+        React meter only fires on that sound. The sphere holds calm, warps on each
+        hit, and drifts back.
+      </div>
+
+    </div>
+  </aside>
+
+  <audio id="audio" crossorigin="anonymous"></audio>
+
+  <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+  <script src="js/shaders.js"></script>
+  <script src="js/audio-engine.js"></script>
+  <script src="js/scene.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

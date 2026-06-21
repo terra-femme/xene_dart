@@ -236,6 +236,14 @@ class _XeneHeaderState extends ConsumerState<XeneHeader> {
             context.push('/dev/av');
             return;
           }
+          if (value == 'av_stream_test') {
+            context.push('/dev/av-stream-test');
+            return;
+          }
+          if (value == 'av_visualizer') {
+            context.push('/dev/av-visualizer');
+            return;
+          }
           if (value == 'test') {
             final seed = DateTime.now().add(Duration(days: _seedDayOffset));
             final seedStr = seed.toIso8601String().substring(0, 10);
@@ -249,6 +257,8 @@ class _XeneHeaderState extends ConsumerState<XeneHeader> {
           _devMenuItem('presets', 'PRESET PLAYGROUND'),
           _devMenuItem('monitor', 'MONITOR'),
           _devMenuItem('av', 'AV SANDBOX'),
+          _devMenuItem('av_stream_test', 'AV STREAM TEST'),
+          _devMenuItem('av_visualizer', 'AV VISUALIZER'),
           _devMenuItem('test', 'TEST +${_seedDayOffset}D'),
         ],
         child: Padding(
