@@ -1,0 +1,44 @@
+name: Deploy backend to Azure Container Apps
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/xene_backend/**'
+      - 'packages/xene_domain/**'
+      - '.dockerignore'
+      - '.github/workflows/deploy-backend.yml'
+  workflow_dispatch:        # manual run button
+
+permissions:
+  id-token: write           # required for OIDC azure/login
+  contents: read
+
+env:
+  ACR: xeneacr7244
+  APP: xene-backend
+  RG:  xene-rg
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id:       ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id:       ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build image in ACR (commit-SHA tag, not :latest)
+        run: |
+          az acr build -r ${{ env.ACR }} \
+            -t xene-backend:${{ github.sha }} \
+            -f packages/xene_backend/Dockerfile .
+
+      - name: Roll the Container App to the new image
+        run: |
+          az containerapp update -n ${{ env.APP }} -g ${{ env.RG }} \
+            --image ${{ env.ACR }}.azurecr.io/xene-backend:${{ github.sha }}
