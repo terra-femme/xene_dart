@@ -33,6 +33,13 @@
   const engine = new AudioEngine(audioEl);
   const scene = createScene($('gl'));
 
+  // ---- xene additions: short-clip cap + haptics (the accessibility core) ----
+  const CLIP_SECONDS = 30;        // cap uploaded-clip playback (modest, in-session)
+  let clipCap = true;             // only uploads are capped; SC sources (later) won't be
+  let hapticsOn = 'vibrate' in navigator;
+  let prevReactForHaptic = 0;     // for rising-edge beat detection
+  const HAPTIC_THRESHOLD = 0.45;  // react level that counts as a "hit"
+
   const state = {
     band: 'kick',
     mode: 0,
@@ -202,14 +209,40 @@
     if (!isNaN(t) && t < audioEl.duration) audioEl.currentTime = t;
   });
   audioEl.addEventListener('timeupdate', () => {
+    // xene: cap the in-session upload clip at CLIP_SECONDS (modest, no storage).
+    if (clipCap && audioEl.currentTime >= CLIP_SECONDS) {
+      audioEl.pause();
+      audioEl.currentTime = 0;
+      return;
+    }
     if (!scrubbing && audioEl.duration) {
-      scrub.value = (audioEl.currentTime / audioEl.duration) * 1000;
+      const denom = clipCap ? Math.min(audioEl.duration, CLIP_SECONDS) : audioEl.duration;
+      scrub.value = (audioEl.currentTime / denom) * 1000;
       $('cur').textContent = fmtTime(audioEl.currentTime);
       localStorage.setItem(LS + '.time', audioEl.currentTime);
     }
   });
   scrub.addEventListener('input', () => { scrubbing = true; $('cur').textContent = fmtTime((scrub.value / 1000) * (audioEl.duration || 0)); });
   scrub.addEventListener('change', () => { if (audioEl.duration) audioEl.currentTime = (scrub.value / 1000) * audioEl.duration; scrubbing = false; });
+
+  // ---------- haptics toggle (xene) ----------
+  const hapticBtn = $('haptics');
+  function syncHapticUi() {
+    hapticBtn.classList.toggle('active', hapticsOn);
+    $('hapticLabel').textContent = hapticsOn ? 'Haptics: ON' : 'Haptics: OFF';
+  }
+  if (!('vibrate' in navigator)) {
+    // iOS Safari and desktops without vibration hardware: disable + label it.
+    hapticsOn = false;
+    $('hapticMeta').textContent = 'unsupported here';
+  }
+  syncHapticUi();
+  hapticBtn.addEventListener('click', () => {
+    if (!('vibrate' in navigator)) return;
+    hapticsOn = !hapticsOn;
+    syncHapticUi();
+    if (hapticsOn) navigator.vibrate(15); // confirmation buzz
+  });
 
   // ---------- panel toggle ----------
   $('toggle').addEventListener('click', () => {
@@ -282,6 +315,16 @@
     const playing = !audioEl.paused && !audioEl.ended;
     scene.setIdle(playing ? 0 : 1);
     scene.update(dt, engine.react, engine.reactSlow);
+
+    // xene: fire a haptic pulse on each RISING beat in the isolated band.
+    // The band-isolated transient IS the beat, so this maps the same signal
+    // that warps the sphere onto touch — the accessibility payload.
+    if (hapticsOn && playing && navigator.vibrate) {
+      if (engine.react > HAPTIC_THRESHOLD && prevReactForHaptic <= HAPTIC_THRESHOLD) {
+        navigator.vibrate(Math.round(8 + Math.min(1, engine.react) * 32)); // 8–40ms
+      }
+    }
+    prevReactForHaptic = engine.react;
 
     // meters
     mLevel.style.width = Math.min(100, (engine.level / (engine.peak + 1e-5)) * 100) + '%';

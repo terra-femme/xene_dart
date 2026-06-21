@@ -33,6 +33,7 @@ import 'package:xene_app/src/layout/root_shell.dart';
 import 'package:xene_app/src/sandbox/sandbox_preview.dart';
 import 'package:xene_app/src/sandbox/av_sphere_sandbox.dart';
 import 'package:xene_app/src/sandbox/av_stream_test.dart';
+import 'package:xene_app/src/sandbox/dancing_points_view.dart';
 import 'package:xene_app/src/widgets/admin_guard.dart';
 import 'package:xene_app/src/providers/ui_config_provider.dart';
 import 'package:xene_app/src/theme/xene_theme.dart';
@@ -468,6 +469,15 @@ final _router = GoRouter(
       path: '/dev/av-stream-test',
       builder: (context, state) => const AdminGuard(
         child: _InnerPageLayout(title: 'AV STREAM TEST', child: AvStreamTest()),
+      ),
+    ),
+    GoRoute(
+      path: '/dev/av-visualizer',
+      builder: (context, state) => const AdminGuard(
+        child: _InnerPageLayout(
+          title: 'AV VISUALIZER',
+          child: DancingPointsView(),
+        ),
       ),
     ),
     GoRoute(
