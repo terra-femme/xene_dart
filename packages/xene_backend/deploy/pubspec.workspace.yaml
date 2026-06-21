@@ -1,0 +1,24 @@
+# Docker-only, Flutter-free pub workspace root.
+#
+# WHY THIS EXISTS:
+# The real monorepo root (xene_dart/pubspec.yaml) lists the Flutter app
+# (packages/xene_app) as a workspace member and depends on device_preview_plus.
+# Neither resolves under the Dart-only `dart:stable` image used to build the
+# backend container, so `dart pub get` at the real root would fail.
+#
+# This trimmed root declares ONLY the two pure-Dart packages the backend needs.
+# It is copied in as /app/pubspec.yaml inside the Dockerfile build stage.
+#
+# MAINTENANCE: update this file only if a pure-Dart workspace *member* is added
+# or removed (not when dependencies change — those live in each package's own
+# pubspec.yaml). Keep the `sdk` constraint in sync with the package pubspecs.
+name: xene_backend_deploy
+description: Flutter-free workspace root used only to build the backend image.
+publish_to: none
+
+environment:
+  sdk: "^3.11.5"
+
+workspace:
+  - packages/xene_backend
+  - packages/xene_domain
