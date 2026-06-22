@@ -1,12 +1,19 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { deleteArtistArticle, updateArtistArticle } from '@/app/dashboard/press-scout/actions'
+import { deleteArtistArticle, updateArtistArticle, triggerPublicationPolling } from '@/app/dashboard/press-scout/actions'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import {
   Table,
   TableBody,
@@ -22,7 +29,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog'
-import { Play, RefreshCw, Pencil, Trash2, ExternalLink, Loader2 } from 'lucide-react'
+import { Play, RefreshCw, Pencil, Trash2, ExternalLink, Loader2, Zap } from 'lucide-react'
 
 interface Article {
   id: string
@@ -43,11 +50,18 @@ interface ArtistScoutStatus {
   last_press_scout_at: string | null
 }
 
+interface Preset {
+  id: string
+  slug: string
+  name: string
+}
+
 interface Props {
   token: string
   backendUrl: string
   initialArticles: Article[]
   artistStatuses: ArtistScoutStatus[]
+  presets?: Preset[]
 }
 
 const emptyForm = () => ({ title: '', url: '', snippet: '', source: '' })
@@ -57,11 +71,15 @@ export function PressScoutClient({
   backendUrl,
   initialArticles,
   artistStatuses,
+  presets = [],
 }: Props) {
   const [isPending, startTransition] = useTransition()
   const [articles, setArticles] = useState<Article[]>(initialArticles)
   const [scoutState, setScoutState] = useState<'idle' | 'running' | 'started' | 'error'>('idle')
   const [scoutError, setScoutError] = useState<string | null>(null)
+  const [pollState, setPollState] = useState<'idle' | 'running' | 'started' | 'error'>('idle')
+  const [pollError, setPollError] = useState<string | null>(null)
+  const [selectedPreset, setSelectedPreset] = useState<string>('')
   const [filterArtist, setFilterArtist] = useState('')
   const [editTarget, setEditTarget] = useState<Article | null>(null)
   const [editForm, setEditForm] = useState(emptyForm())
@@ -70,7 +88,11 @@ export function PressScoutClient({
     setScoutState('running')
     setScoutError(null)
     try {
-      const res = await fetch(`${backendUrl}/press-scout/run`, {
+      const url = new URL(`${backendUrl}/press-scout/run`)
+      if (selectedPreset) {
+        url.searchParams.set('preset_id', selectedPreset)
+      }
+      const res = await fetch(url.toString(), {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -87,6 +109,18 @@ export function PressScoutClient({
     } catch (e) {
       setScoutError((e as Error).message)
       setScoutState('error')
+    }
+  }
+
+  async function runPoll() {
+    setPollState('running')
+    setPollError(null)
+    try {
+      await triggerPublicationPolling(token, backendUrl, selectedPreset || undefined)
+      setPollState('started')
+    } catch (e) {
+      setPollError((e as Error).message)
+      setPollState('error')
     }
   }
 
@@ -139,17 +173,102 @@ export function PressScoutClient({
 
   return (
     <div className="space-y-5">
+      {/* Scout & Poll for Preset */}
+      {presets.length > 0 && (
+        <div className="rounded-lg border border-blue-600/30 bg-blue-600/10 px-4 py-4 space-y-3">
+          <div>
+            <h3 className="font-semibold text-blue-400 text-sm mb-2">Scout & Poll for Preset (HITL)</h3>
+            <p className="text-xs text-blue-300/80 mb-3">
+              Manually trigger press scout (LLM-based) and publication poller (RSS-based) for a preset.
+              Review and approve/reject articles before they stay in the database.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="flex-1 min-w-48">
+              <Label className="text-xs mb-1.5 block">Select Preset</Label>
+              <Select value={selectedPreset} onValueChange={setSelectedPreset}>
+                <SelectTrigger className="h-9 text-sm">
+                  <SelectValue placeholder="Choose a preset…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {presets.map((p) => (
+                    <SelectItem key={p.id} value={p.slug}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <Button
+              onClick={runScout}
+              disabled={!selectedPreset || scoutState === 'running' || pollState === 'running'}
+              size="sm"
+              className="gap-2"
+            >
+              {scoutState === 'running' ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Play className="h-3.5 w-3.5" />
+              )}
+              {scoutState === 'running' ? 'Scouting…' : 'Scout'}
+            </Button>
+
+            <Button
+              onClick={runPoll}
+              disabled={pollState === 'running' || scoutState === 'running'}
+              size="sm"
+              variant="outline"
+              className="gap-2"
+            >
+              {pollState === 'running' ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Zap className="h-3.5 w-3.5" />
+              )}
+              {pollState === 'running' ? 'Polling…' : 'Poll'}
+            </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => window.location.reload()}
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+
+          {scoutState === 'started' && (
+            <p className="text-xs text-emerald-400">
+              Press scout started — takes a few minutes. Refresh to see new articles.
+            </p>
+          )}
+          {scoutState === 'error' && (
+            <p className="text-xs text-destructive">Scout error: {scoutError}</p>
+          )}
+          {pollState === 'started' && (
+            <p className="text-xs text-emerald-400">
+              Publication poll started — takes a few minutes. Refresh to see new articles.
+            </p>
+          )}
+          {pollState === 'error' && (
+            <p className="text-xs text-destructive">Poll error: {pollError}</p>
+          )}
+        </div>
+      )}
+
       {/* Staleness note */}
       <div className="rounded-md border border-amber-600/30 bg-amber-600/10 px-4 py-3 text-xs text-amber-400 space-y-1">
         <p className="font-semibold">60-day staleness window active</p>
         <p>
-          "Run Scout Now" calls <span className="font-mono">scoutArticlesForActiveArtists</span>, which
-          skips any artist scouted within the last 60 days. If an artist was recently scouted they will
-          be silently skipped — this is expected behaviour, not an error.
+          "Run Scout Now" respects the 60-day staleness window — any artist scouted within the last 60 days
+          will be silently skipped. When you use the "Scout & Poll for Preset" section above, it bypasses
+          this window and scouts all artists in the preset immediately.
         </p>
         <p>
-          To force-scout a specific preset regardless of the window, the endpoint accepts{' '}
-          <span className="font-mono">?preset_id=&lt;slug&gt;</span> — not yet wired to this UI.
+          Scout results appear below. Review articles before they stay in the database — delete ones that
+          are hallucinated or irrelevant.
         </p>
       </div>
 

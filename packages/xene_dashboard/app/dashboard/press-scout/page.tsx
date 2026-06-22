@@ -10,7 +10,7 @@ export default async function PressScoutPage() {
 
   const db = createAdminClient()
 
-  const [{ data: articles }, { data: artists }] = await Promise.all([
+  const [{ data: articles }, { data: artists }, { data: presets }] = await Promise.all([
     db
       .from('artist_articles')
       .select(
@@ -21,6 +21,11 @@ export default async function PressScoutPage() {
     db
       .from('artists')
       .select('id, name, last_press_scout_at')
+      .order('name', { ascending: true }),
+    db
+      .from('preset_templates')
+      .select('id, slug, name')
+      .eq('enabled', true)
       .order('name', { ascending: true }),
   ])
 
@@ -37,6 +42,7 @@ export default async function PressScoutPage() {
         backendUrl={process.env.NEXT_PUBLIC_BACKEND_URL ?? ''}
         initialArticles={articles ?? []}
         artistStatuses={artists ?? []}
+        presets={presets ?? []}
       />
     </div>
   )
