@@ -56,6 +56,40 @@ export default async function FeaturedPage() {
           Controls the horizontal article cards on the app's Feature tab. Add manually or import from press. Set an image URL to show a thumbnail on each card.
         </p>
       </div>
+
+      {/* Query Grounding */}
+      <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3 mb-6">
+        <p className="text-xs font-semibold text-foreground">Data Sources</p>
+        <div className="grid gap-3 grid-cols-3 text-xs">
+          <div className="space-y-1">
+            <p className="text-muted-foreground">Featured</p>
+            <pre className="bg-muted px-2 py-1.5 rounded overflow-x-auto font-mono text-muted-foreground">
+{`.from('featured_articles')
+.select('*')
+.order('sort_order', asc)
+Total: ${featured.length}`}</pre>
+          </div>
+          <div className="space-y-1">
+            <p className="text-muted-foreground">Press (Artist)</p>
+            <pre className="bg-muted px-2 py-1.5 rounded overflow-x-auto font-mono text-muted-foreground">
+{`.from('artist_articles')
+.select('...')
+.order('published_at', desc)
+.limit(60)
+Found: ${artistResult.data?.length ?? 0}`}</pre>
+          </div>
+          <div className="space-y-1">
+            <p className="text-muted-foreground">Press (Publications)</p>
+            <pre className="bg-muted px-2 py-1.5 rounded overflow-x-auto font-mono text-muted-foreground">
+{`.from('publication_articles')
+.select('...')
+.order('published_at', desc)
+.limit(60)
+Found: ${pubResult.data?.length ?? 0}`}</pre>
+          </div>
+        </div>
+      </div>
+
       <FeaturedManager featured={featured} pressArticles={pressArticles} />
     </div>
   )

@@ -35,6 +35,23 @@ export default async function PublicationsPage() {
         </p>
       </div>
 
+      {/* Query Grounding */}
+      <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-2">
+        <p className="text-xs font-semibold text-foreground">Data Source</p>
+        <div className="space-y-1">
+          <div className="text-xs">
+            <span className="font-mono bg-muted px-2 py-1 rounded">
+              Table: press_publications
+            </span>
+          </div>
+          <pre className="text-xs bg-muted px-3 py-2 rounded overflow-x-auto font-mono text-muted-foreground">
+{`.select('id, name, slug, rss_url, genres, tier, enabled, last_polled, last_status, failure_count, last_error')
+.order('tier', { ascending: true })
+.order('name', { ascending: true })
+Total: ${(pubs ?? []).length}`}</pre>
+        </div>
+      </div>
+
       <div className="rounded-lg border border-border overflow-hidden">
         <Table>
           <TableHeader>

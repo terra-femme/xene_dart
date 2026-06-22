@@ -37,6 +37,31 @@ export default async function PressScoutPage() {
           Gemini-powered editorial discovery. Auto-scouts every 12 hours; 60-day staleness window per artist.
         </p>
       </div>
+
+      {/* Query Grounding */}
+      <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
+        <p className="text-xs font-semibold text-foreground">Data Sources</p>
+        <div className="grid gap-3 grid-cols-2">
+          <div className="space-y-1">
+            <p className="text-xs text-muted-foreground">Articles Table</p>
+            <pre className="text-xs bg-muted px-3 py-2 rounded overflow-x-auto font-mono text-muted-foreground">
+{`.from('artist_articles')
+.select('...')
+.order('discovered_at', desc)
+.limit(300)
+Total: ${articles?.length ?? 0}`}</pre>
+          </div>
+          <div className="space-y-1">
+            <p className="text-xs text-muted-foreground">Artists Metadata</p>
+            <pre className="text-xs bg-muted px-3 py-2 rounded overflow-x-auto font-mono text-muted-foreground">
+{`.from('artists')
+.select('id, name, last_press_scout_at')
+.order('name', asc)
+Total: ${artists?.length ?? 0} artists`}</pre>
+          </div>
+        </div>
+      </div>
+
       <PressScoutClient
         token={token}
         backendUrl={process.env.NEXT_PUBLIC_BACKEND_URL ?? ''}

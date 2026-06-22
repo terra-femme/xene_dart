@@ -35,6 +35,36 @@ export default async function GamePage() {
         </p>
       </div>
 
+      {/* Query Grounding */}
+      <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
+        <p className="text-xs font-semibold text-foreground">Data Sources</p>
+        <div className="grid gap-3 grid-cols-3">
+          <div className="space-y-1">
+            <p className="text-xs text-muted-foreground">Parties</p>
+            <pre className="text-xs bg-muted px-3 py-2 rounded overflow-x-auto font-mono text-muted-foreground">
+{`.from('game_parties')
+.select('...')
+.order('created_at', desc)
+.limit(50)
+Total: ${parties?.length ?? 0}`}</pre>
+          </div>
+          <div className="space-y-1">
+            <p className="text-xs text-muted-foreground">Members</p>
+            <pre className="text-xs bg-muted px-3 py-2 rounded overflow-x-auto font-mono text-muted-foreground">
+{`.from('party_members')
+.select('*', { count: 'exact' })
+Total: ${memberCount ?? 0}`}</pre>
+          </div>
+          <div className="space-y-1">
+            <p className="text-xs text-muted-foreground">Tracks</p>
+            <pre className="text-xs bg-muted px-3 py-2 rounded overflow-x-auto font-mono text-muted-foreground">
+{`.from('party_tracks')
+.select('*', { count: 'exact' })
+Total: ${trackCount ?? 0}`}</pre>
+          </div>
+        </div>
+      </div>
+
       <div className="grid grid-cols-3 gap-4">
         <Card>
           <CardHeader className="pb-2">

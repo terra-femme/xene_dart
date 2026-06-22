@@ -53,6 +53,22 @@ export default async function ArticlesPage() {
         </Link>
       </div>
 
+      {/* Query Grounding */}
+      <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-2">
+        <p className="text-xs font-semibold text-foreground">Data Source</p>
+        <div className="space-y-1">
+          <div className="text-xs">
+            <span className="font-mono bg-muted px-2 py-1 rounded">
+              Table: xene_articles
+            </span>
+          </div>
+          <pre className="text-xs bg-muted px-3 py-2 rounded overflow-x-auto font-mono text-muted-foreground">
+{`.select('id, slug, title, dek, author, layout_template, status, published_at, created_at')
+.order('created_at', { ascending: false })
+Total: ${(articles ?? []).length}`}</pre>
+        </div>
+      </div>
+
       {(articles ?? []).length === 0 ? (
         <div className="rounded-lg border border-dashed border-border p-12 text-center">
           <p className="text-sm text-muted-foreground">No articles yet.</p>
