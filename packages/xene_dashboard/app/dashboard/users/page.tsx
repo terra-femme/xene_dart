@@ -33,6 +33,23 @@ export default async function UsersPage() {
         </p>
       </div>
 
+      {/* Query Grounding */}
+      <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-2">
+        <p className="text-xs font-semibold text-foreground">Data Source</p>
+        <div className="space-y-1">
+          <div className="text-xs">
+            <span className="font-mono bg-muted px-2 py-1 rounded">
+              Table: profiles
+            </span>
+          </div>
+          <pre className="text-xs bg-muted px-3 py-2 rounded overflow-x-auto font-mono text-muted-foreground">
+{`.select('id, email, role, username, created_at', { count: 'exact' })
+.order('created_at', { ascending: false })
+.limit(100)
+Total: ${count ?? 0}`}</pre>
+        </div>
+      </div>
+
       <div className="rounded-lg border border-border overflow-hidden">
         <Table>
           <TableHeader>
