@@ -4,19 +4,11 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
 export async function GET(request: NextRequest) {
-  console.log('[auth/callback] request.url:', request.url)
-  console.log('[auth/callback] headers.host:', request.headers.get('host'))
-  console.log('[auth/callback] headers.x-forwarded-for:', request.headers.get('x-forwarded-for'))
-  console.log('[auth/callback] headers.x-forwarded-proto:', request.headers.get('x-forwarded-proto'))
-
-  const { searchParams, origin } = new URL(request.url)
-  console.log('[auth/callback] calculated origin:', origin)
-
+  const { searchParams } = new URL(request.url)
   const code = searchParams.get('code')
-  console.log('[auth/callback] code:', code ? 'present' : 'missing')
 
   if (!code) {
-    return NextResponse.redirect(`${origin}/auth?error=no_code`)
+    return NextResponse.redirect(`/auth?error=no_code`)
   }
 
   const supabase = await createAuthServerClient()
@@ -24,8 +16,7 @@ export async function GET(request: NextRequest) {
 
   if (error || !data.session) {
     console.error('[auth/callback] session exchange failed:', error?.message)
-    console.log('[auth/callback] redirecting to:', `${origin}/auth?error=session_failed`)
-    return NextResponse.redirect(`${origin}/auth?error=session_failed`)
+    return NextResponse.redirect(`/auth?error=session_failed`)
   }
 
   // Verify admin role via service role client (bypasses RLS)
