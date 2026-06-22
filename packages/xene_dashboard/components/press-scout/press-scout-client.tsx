@@ -187,7 +187,7 @@ export function PressScoutClient({
           <div className="flex flex-wrap items-end gap-3">
             <div className="flex-1 min-w-48">
               <Label className="text-xs mb-1.5 block">Select Preset</Label>
-              <Select value={selectedPreset} onValueChange={setSelectedPreset}>
+              <Select value={selectedPreset} onValueChange={(value) => setSelectedPreset(value || '')}>
                 <SelectTrigger className="h-9 text-sm">
                   <SelectValue placeholder="Choose a preset…" />
                 </SelectTrigger>
