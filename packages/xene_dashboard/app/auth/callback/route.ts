@@ -4,13 +4,18 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
 export async function GET(request: NextRequest) {
-  // Get the actual external URL from Supabase redirect_to or construct from headers
   const searchParams = new URL(request.url).searchParams
   const code = searchParams.get('code')
 
-  // Get external URL from x-forwarded headers or fallback to request URL
+  // DEBUG: Log all headers to see what Azure is sending
   const proto = request.headers.get('x-forwarded-proto') || 'https'
   const host = request.headers.get('x-forwarded-host') || request.headers.get('host') || 'localhost:3000'
+  console.log('[callback] DEBUG - request.url:', request.url)
+  console.log('[callback] DEBUG - x-forwarded-proto:', request.headers.get('x-forwarded-proto'))
+  console.log('[callback] DEBUG - x-forwarded-host:', request.headers.get('x-forwarded-host'))
+  console.log('[callback] DEBUG - host:', request.headers.get('host'))
+  console.log('[callback] DEBUG - constructed baseUrl:', `${proto}://${host}`)
+
   const baseUrl = `${proto}://${host}`
 
   if (!code) {
