@@ -88,7 +88,7 @@ class CapacityService {
     try {
       final response = await db.client
           .from('profiles')
-          .select('id', const QueryOptions(count: CountOption.exact));
+          .select('id');
       return response.length;
     } catch (e) {
       _logger.warning('Error querying user count: $e');
@@ -143,7 +143,7 @@ class CapacityService {
     try {
       final response = await db.client
           .from(tableName)
-          .select('id', const QueryOptions(count: CountOption.exact));
+          .select('id');
       return response.length;
     } catch (e) {
       _logger.warning('Error counting rows in $tableName: $e');
