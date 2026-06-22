@@ -4,29 +4,26 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
 export async function GET(request: NextRequest) {
-  console.log('[callback] === START ===')
-  console.log('[callback] request.url:', request.url)
-  console.log('[callback] headers: host=' + request.headers.get('host') + ' x-forwarded-proto=' + request.headers.get('x-forwarded-proto') + ' x-forwarded-host=' + request.headers.get('x-forwarded-host'))
-
-  const { searchParams } = new URL(request.url)
+  // Get the actual external URL from Supabase redirect_to or construct from headers
+  const searchParams = new URL(request.url).searchParams
   const code = searchParams.get('code')
-  console.log('[callback] code:', code ? 'FOUND' : 'MISSING')
+
+  // Get external URL from x-forwarded headers or fallback to request URL
+  const proto = request.headers.get('x-forwarded-proto') || 'https'
+  const host = request.headers.get('x-forwarded-host') || request.headers.get('host') || 'localhost:3000'
+  const baseUrl = `${proto}://${host}`
 
   if (!code) {
-    console.log('[callback] redirecting to /auth?error=no_code')
-    return NextResponse.redirect(`/auth?error=no_code`)
+    return NextResponse.redirect(`${baseUrl}/auth?error=no_code`)
   }
 
   const supabase = await createAuthServerClient()
   const { data, error } = await supabase.auth.exchangeCodeForSession(code)
 
   if (error || !data.session) {
-    console.error('[callback] session exchange FAILED:', error?.message)
-    console.log('[callback] redirecting to /auth?error=session_failed')
-    return NextResponse.redirect(`/auth?error=session_failed`)
+    console.error('[auth/callback] session exchange failed:', error?.message)
+    return NextResponse.redirect(`${baseUrl}/auth?error=session_failed`)
   }
-
-  console.log('[callback] SUCCESS - redirecting to /dashboard')
 
 
   // Verify admin role via service role client (bypasses RLS)
