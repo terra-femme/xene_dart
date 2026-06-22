@@ -1,0 +1,26 @@
+# Environment files — use Docker build args instead
+.env
+.env.local
+.env.development
+.env.production
+
+# Dependencies and build outputs (use .dockerignore to reduce image size)
+node_modules
+.next
+.git
+.gitignore
+.dockerignore
+Dockerfile
+docker-compose.yml
+.DS_Store
+*.log
+
+# IDE and editor files
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS files
+Thumbs.db
