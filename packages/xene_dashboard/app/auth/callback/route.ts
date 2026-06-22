@@ -4,46 +4,94 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
 export async function GET(request: NextRequest) {
+  console.log('═══════════════════════════════════════════════════════════')
+  console.log('[CALLBACK] === START OF AUTH CALLBACK REQUEST ===')
+  console.log('═══════════════════════════════════════════════════════════')
+
+  // Log raw request URL
+  console.log('[CALLBACK] Raw request.url:', request.url)
+
+  // Log ALL headers
+  console.log('[CALLBACK] ALL REQUEST HEADERS:')
+  Array.from(request.headers.entries()).forEach(([key, value]) => {
+    console.log(`  ${key}: ${value}`)
+  })
+
   const searchParams = new URL(request.url).searchParams
   const code = searchParams.get('code')
+  console.log('[CALLBACK] Code from searchParams:', code ? 'PRESENT' : 'MISSING')
 
-  // DEBUG: Log all headers to see what Azure is sending
-  const proto = request.headers.get('x-forwarded-proto') || 'https'
-  const host = request.headers.get('x-forwarded-host') || request.headers.get('host') || 'localhost:3000'
-  console.log('[callback] DEBUG - request.url:', request.url)
-  console.log('[callback] DEBUG - x-forwarded-proto:', request.headers.get('x-forwarded-proto'))
-  console.log('[callback] DEBUG - x-forwarded-host:', request.headers.get('x-forwarded-host'))
-  console.log('[callback] DEBUG - host:', request.headers.get('host'))
-  console.log('[callback] DEBUG - constructed baseUrl:', `${proto}://${host}`)
+  // Construct baseUrl from x-forwarded headers
+  const xForwardedProto = request.headers.get('x-forwarded-proto')
+  const xForwardedHost = request.headers.get('x-forwarded-host')
+  const hostHeader = request.headers.get('host')
 
+  console.log('[CALLBACK] Header parsing:')
+  console.log(`  x-forwarded-proto: ${xForwardedProto || 'NULL'}`)
+  console.log(`  x-forwarded-host: ${xForwardedHost || 'NULL'}`)
+  console.log(`  host: ${hostHeader || 'NULL'}`)
+
+  const proto = xForwardedProto || 'https'
+  const host = xForwardedHost || hostHeader || 'localhost:3000'
   const baseUrl = `${proto}://${host}`
 
+  console.log('[CALLBACK] Constructed baseUrl:', baseUrl)
+  console.log('[CALLBACK] Will redirect to:', code ? `${baseUrl}/dashboard` : `${baseUrl}/auth?error=no_code`)
+
   if (!code) {
-    return NextResponse.redirect(`${baseUrl}/auth?error=no_code`)
+    const errorUrl = `${baseUrl}/auth?error=no_code`
+    console.error('[CALLBACK] REDIRECT: NO CODE FOUND ->', errorUrl)
+    console.log('═══════════════════════════════════════════════════════════')
+    return NextResponse.redirect(errorUrl)
   }
 
+  console.log('[CALLBACK] Exchanging code for session...')
   const supabase = await createAuthServerClient()
   const { data, error } = await supabase.auth.exchangeCodeForSession(code)
 
-  if (error || !data.session) {
-    console.error('[auth/callback] session exchange failed:', error?.message)
-    return NextResponse.redirect(`${baseUrl}/auth?error=session_failed`)
+  console.log('[CALLBACK] Session exchange result:')
+  console.log(`  error: ${error?.message || 'NONE'}`)
+  console.log(`  session exists: ${!!data.session}`)
+  if (data.session) {
+    console.log(`  user.id: ${data.session.user.id}`)
+    console.log(`  user.email: ${data.session.user.email}`)
   }
 
+  if (error || !data.session) {
+    const errorUrl = `${baseUrl}/auth?error=session_failed`
+    console.error('[CALLBACK] REDIRECT: SESSION EXCHANGE FAILED ->', errorUrl)
+    console.error('[CALLBACK] Error details:', error?.message)
+    console.log('═══════════════════════════════════════════════════════════')
+    return NextResponse.redirect(errorUrl)
+  }
 
-  // Verify admin role via service role client (bypasses RLS)
+  console.log('[CALLBACK] Checking admin role...')
   const admin = createAdminClient()
-  const { data: profile } = await admin
+  const { data: profile, error: profileError } = await admin
     .from('profiles')
     .select('role')
     .eq('id', data.session.user.id)
     .single()
 
-  if (!profile || profile.role !== 'admin') {
-    console.warn('[auth/callback] non-admin sign-in attempt:', data.session.user.email)
-    await supabase.auth.signOut()
-    return NextResponse.redirect(`${origin}/auth?error=unauthorized`)
+  console.log('[CALLBACK] Profile lookup result:')
+  console.log(`  error: ${profileError?.message || 'NONE'}`)
+  console.log(`  profile found: ${!!profile}`)
+  if (profile) {
+    console.log(`  role: ${profile.role}`)
   }
 
-  return NextResponse.redirect(`${origin}/dashboard`)
+  if (!profile || profile.role !== 'admin') {
+    const errorUrl = `${baseUrl}/auth?error=unauthorized`
+    console.warn('[CALLBACK] REDIRECT: NOT ADMIN ->', errorUrl)
+    console.warn('[CALLBACK] Email:', data.session.user.email)
+    await supabase.auth.signOut()
+    console.log('═══════════════════════════════════════════════════════════')
+    return NextResponse.redirect(errorUrl)
+  }
+
+  const successUrl = `${baseUrl}/dashboard`
+  console.log('[CALLBACK] REDIRECT: SUCCESS ->', successUrl)
+  console.log('[CALLBACK] User:', data.session.user.email)
+  console.log('═══════════════════════════════════════════════════════════')
+  return NextResponse.redirect(successUrl)
 }

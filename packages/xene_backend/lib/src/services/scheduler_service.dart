@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:cron/cron.dart';
@@ -5,13 +6,14 @@ import 'package:logging/logging.dart';
 
 import '../feed_cache.dart';
 import '../database.dart';
-import '../repositories/publication_repository.dart';
+import '../utils/audit_logger.dart';
 import 'soundcloud_service.dart';
 import 'youtube_service.dart';
 import 'beatport_service.dart';
 import 'bandcamp_service.dart';
 import 'press_scout_service.dart';
 import 'publication_poller_service.dart';
+import 'capacity_service.dart';
 
 final _logger = Logger('SchedulerService');
 
@@ -27,7 +29,7 @@ class SchedulerService {
     required this.bandcamp,
     required this.pressScout,
     required this.publicationPoller,
-    required this.publicationRepo,
+    required this.capacity,
   });
 
   final DatabaseService db;
@@ -37,7 +39,7 @@ class SchedulerService {
   final BandcampService bandcamp;
   final PressScoutService pressScout;
   final PublicationPollerService publicationPoller;
-  final PublicationRepository publicationRepo;
+  final CapacityService capacity;
 
   final _cron = Cron();
 
@@ -72,38 +74,6 @@ class SchedulerService {
       }
     });
 
-    // Run press scout once 30 seconds after startup so articles populate
-    // immediately on first boot instead of waiting up to 12 hours for cron.
-    Future<void>.delayed(const Duration(seconds: 30), () async {
-      _logger.info('[Scheduler] Startup press scout warmup starting');
-      try {
-        await pressScout.scoutArticlesForActiveArtists();
-        _logger.info('[Scheduler] Startup press scout warmup done');
-      } catch (e) {
-        _logger.warning('[Scheduler] Startup press scout warmup failed: $e');
-      }
-    });
-
-    // Run publication RSS poller 60 seconds after startup.
-    // Gated by PUBLICATION_STARTUP_POLL=true so dev restarts don't trigger
-    // unnecessary re-polls. Set the env var in production only.
-    if (Platform.environment['PUBLICATION_STARTUP_POLL'] == 'true') {
-      Future<void>.delayed(const Duration(seconds: 60), () async {
-        _logger.info('[Scheduler] Startup publication poller warmup starting');
-        try {
-          final result = await publicationPoller.pollAll();
-          _logger.info(
-            '[Scheduler] Startup publication poller warmup done: '
-            'polled=${result['publications_polled']} '
-            'articles=${result['articles_saved']}',
-          );
-        } catch (e) {
-          _logger.warning(
-            '[Scheduler] Startup publication poller warmup failed: $e',
-          );
-        }
-      });
-    }
 
     // 1. SoundCloud: Every 8 hours (3x/day)
     // Fix B: use fetchWithCache so last_polled is stamped automatically —
@@ -210,53 +180,96 @@ class SchedulerService {
       }
     });
 
-    // 4. Beatport: Once daily at midnight
-    _cron.schedule(Schedule.parse('0 0 * * *'), () async {
-      _logger.info('[Scheduler] Starting Beatport Sync');
-      final artists = await db.getArtists('local_user');
-      for (final artist in artists) {
-        final bpId = artist['beatport_artist_id'] as String?;
-        if (bpId != null) {
-          await beatport.getLabelReleases(
-            bpId,
-            labelName: artist['name'] as String? ?? 'Beatport',
+    // 4. Beatport: DISABLED (will re-enable when adding as feed source)
+    // _cron.schedule(Schedule.parse('0 0 * * *'), () async {
+    //   _logger.info('[Scheduler] Starting Beatport Sync');
+    //   final artists = await db.getArtists('local_user');
+    //   for (final artist in artists) {
+    //     final bpId = artist['beatport_artist_id'] as String?;
+    //     if (bpId != null) {
+    //       await beatport.getLabelReleases(
+    //         bpId,
+    //         labelName: artist['name'] as String? ?? 'Beatport',
+    //       );
+    //     }
+    //   }
+    // });
+
+    // 5. Press scout: DISABLED (manual trigger via dashboard only)
+    // _cron.schedule(Schedule.parse('0 */12 * * *'), () async {
+    //   _logger.info('[Scheduler] Starting Press Scout');
+    //   await pressScout.scoutArticlesForActiveArtists();
+    // });
+
+    // 6. Publication RSS poller: DISABLED (manual trigger via dashboard only)
+    // _cron.schedule(Schedule.parse('0 */4 * * *'), () async {
+    //   _logger.info('[Scheduler] Starting Publication RSS Poll');
+    //   final result = await publicationPoller.pollAll();
+    //   _logger.info(
+    //     '[Scheduler] Publication RSS Poll complete: '
+    //     'polled=${result['publications_polled']} '
+    //     'succeeded=${result['succeeded']} '
+    //     'failed=${result['failed']} '
+    //     'articles=${result['articles_saved']}',
+    //   );
+    // });
+
+    // 7. Capacity check: Every 6 hours — monitors user count and storage usage
+    _cron.schedule(Schedule.parse('0 */6 * * *'), () async {
+      _logger.info('[Scheduler] Starting Capacity Check');
+      try {
+        final status = await capacity.getStatus();
+        _logger.info(
+          '[Scheduler] Capacity check: users=${status.userCount}/${2000} (${status.userCapPercent.toStringAsFixed(1)}%) '
+          'storage=${status.storageUsedMb.toStringAsFixed(1)}MB/${50}MB (${status.storageCapPercent.toStringAsFixed(1)}%)',
+        );
+
+        // Log alert if either threshold is exceeded
+        if (status.userAlert != null) {
+          unawaited(
+            logSecurityEvent(
+              db.client,
+              action: 'capacity_alert_users',
+              metadata: {
+                'user_count': status.userCount,
+                'user_cap_percent': status.userCapPercent,
+                'alert_level': status.userAlert,
+              },
+            ),
+          );
+          _logger.warning(
+            '[Scheduler] USER CAPACITY ALERT: ${status.userAlert} (${status.userCapPercent.toStringAsFixed(1)}%)',
           );
         }
+
+        if (status.storageAlert != null) {
+          unawaited(
+            logSecurityEvent(
+              db.client,
+              action: 'capacity_alert_storage',
+              metadata: {
+                'storage_used_mb': status.storageUsedMb,
+                'storage_cap_percent': status.storageCapPercent,
+                'alert_level': status.storageAlert,
+              },
+            ),
+          );
+          _logger.warning(
+            '[Scheduler] STORAGE CAPACITY ALERT: ${status.storageAlert} (${status.storageCapPercent.toStringAsFixed(1)}%)',
+          );
+        }
+      } catch (e) {
+        _logger.severe('[Scheduler] Capacity check failed: $e');
       }
     });
 
-    // 5. Press scout: Twice daily at noon and midnight (staggered from cleanup)
-    _cron.schedule(Schedule.parse('0 */12 * * *'), () async {
-      _logger.info('[Scheduler] Starting Press Scout');
-      await pressScout.scoutArticlesForActiveArtists();
-    });
-
-    // 6. Publication RSS poller: Every 4 hours (6x/day)
-    // Serial execution per PublicationPollerService design — one feed at a time.
-    _cron.schedule(Schedule.parse('0 */4 * * *'), () async {
-      _logger.info('[Scheduler] Starting Publication RSS Poll');
-      final result = await publicationPoller.pollAll();
-      _logger.info(
-        '[Scheduler] Publication RSS Poll complete: '
-        'polled=${result['publications_polled']} '
-        'succeeded=${result['succeeded']} '
-        'failed=${result['failed']} '
-        'articles=${result['articles_saved']}',
-      );
-    });
-
-    // 7. Feed cache cleanup: Once daily at 3am (delete items older than 31 days)
-    //    Also purges expired publication articles in the same window.
+    // 8. Feed cache cleanup: Once daily at 3am (delete items older than 31 days)
     _cron.schedule(Schedule.parse('0 3 * * *'), () async {
       _logger.info('[Scheduler] Starting Feed Cache Cleanup');
       await db.deleteOldFeedItems(days: 31);
-      final deleted = await publicationRepo.deleteExpiredArticles();
-      _logger.info(
-        '[Scheduler] Expired publication articles deleted: $deleted',
-      );
     });
 
-    _logger.info('Tiered Scheduler Active (7 jobs registered).');
+    _logger.info('Tiered Scheduler Active (2 active jobs + 3 disabled/manual jobs registered).');
   }
 
   void stop() {

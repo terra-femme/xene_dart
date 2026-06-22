@@ -9,6 +9,7 @@ import 'package:xene_backend/src/repositories/publication_repository.dart';
 import 'package:xene_backend/src/services/api_analytics_service.dart';
 import 'package:xene_backend/src/services/bandcamp_service.dart';
 import 'package:xene_backend/src/services/beatport_service.dart';
+import 'package:xene_backend/src/services/capacity_service.dart';
 import 'package:xene_backend/src/services/discovery_service.dart';
 import 'package:xene_backend/src/services/gemini_key_rotator.dart';
 import 'package:xene_backend/src/services/press_scout_service.dart';
@@ -59,6 +60,7 @@ final bool _isProduction =
 // Global singleton instances
 final _db = DatabaseService();
 final _apiAnalytics = ApiAnalyticsService();
+final _capacity = CapacityService(_db);
 final _soundcloud = SoundCloudService(_db, analytics: _apiAnalytics);
 final _youtube = YouTubeService(_db, analytics: _apiAnalytics);
 final _beatport = BeatportService(_db, analytics: _apiAnalytics);
@@ -107,9 +109,9 @@ final bool _envReady = () {
   print(
     '  LLM discovery: ${_geminiRotator.hasKeys ? "ENABLED ✓ (${_geminiRotator.keyCount} key(s))" : "DISABLED ✗ — set GEMINI_API_KEY"}',
   );
-  print(
-    '  PRESS_SCOUT_BATCH_SIZE: ${Platform.environment['PRESS_SCOUT_BATCH_SIZE'] ?? '10 (default)'}',
-  );
+  print('  Beatport: AVAILABLE (will enable as feed source)');
+  print('  Press Scout: AVAILABLE (manual trigger via dashboard)');
+  print('  Publication Poller: AVAILABLE (manual trigger via dashboard)');
   print('══════════════════════════════════════════════════════');
 
   // SECURITY: Warn loudly when production CORS is misconfigured.
@@ -136,7 +138,7 @@ final _scheduler = SchedulerService(
   bandcamp: _bandcamp,
   pressScout: _pressScout,
   publicationPoller: _publicationPoller,
-  publicationRepo: _publicationRepo,
+  capacity: _capacity,
 )..start();
 
 final middleware = (Handler handler) {
@@ -145,6 +147,7 @@ final middleware = (Handler handler) {
       .use(_corsMiddleware)
       .use(_debugMiddleware)
       .use(provider<DatabaseService>((_) => _db))
+      .use(provider<CapacityService>((_) => _capacity))
       .use(provider<SoundCloudService>((_) => _soundcloud))
       .use(provider<YouTubeService>((_) => _youtube))
       .use(provider<BeatportService>((_) => _beatport))
