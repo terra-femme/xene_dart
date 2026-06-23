@@ -21,21 +21,12 @@ export async function GET(request: NextRequest) {
   const code = searchParams.get('code')
   console.log('[CALLBACK] Code from searchParams:', code ? 'PRESENT' : 'MISSING')
 
-  // Construct baseUrl from x-forwarded headers
-  const xForwardedProto = request.headers.get('x-forwarded-proto')
-  const xForwardedHost = request.headers.get('x-forwarded-host')
-  const hostHeader = request.headers.get('host')
+  // Extract baseUrl from request URL origin (most reliable for Container Apps)
+  const requestUrl = new URL(request.url)
+  const baseUrl = `${requestUrl.protocol}//${requestUrl.host}`
 
-  console.log('[CALLBACK] Header parsing:')
-  console.log(`  x-forwarded-proto: ${xForwardedProto || 'NULL'}`)
-  console.log(`  x-forwarded-host: ${xForwardedHost || 'NULL'}`)
-  console.log(`  host: ${hostHeader || 'NULL'}`)
-
-  const proto = xForwardedProto || 'https'
-  const host = xForwardedHost || hostHeader || 'localhost:3000'
-  const baseUrl = `${proto}://${host}`
-
-  console.log('[CALLBACK] Constructed baseUrl:', baseUrl)
+  console.log('[CALLBACK] Request URL origin:', baseUrl)
+  console.log('[CALLBACK] Full request URL:', request.url)
   console.log('[CALLBACK] Will redirect to:', code ? `${baseUrl}/dashboard` : `${baseUrl}/auth?error=no_code`)
 
   if (!code) {
