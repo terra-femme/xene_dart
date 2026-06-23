@@ -1,34 +1,29 @@
-﻿.git
-.gitignore
-.claude
-**/.dart_tool
-**/build
+﻿# Build context = monorepo root. Keep the context small and never leak secrets
+# or host-generated artifacts into the backend image.
+
+# Generated / resolved artifacts (the image regenerates these)
+**/.dart_tool/
+**/build/
+**/.packages
+**/pubspec_overrides.yaml
+
+# The Flutter app is not part of the backend image
+packages/xene_app/
+
+# VCS, IDE, CI, docs
+.git/
+.github/
+**/.idea/
+**/*.iml
+docs/
+**/docs/
+
+# Secrets must never enter the image (defense in depth — keep .example only)
 **/.env
 **/.env.*
-*.log
-dist/
-node_modules/
+!**/.env.example
+
+# OS / log cruft
+**/*.log
 .DS_Store
 Thumbs.db
-*.swp
-*.swo
-*~
-.vscode
-.idea
-.gradle
-.m2
-.npm
-.cargo
-venv/
-.venv/
-__pycache__
-*.pyc
-target/
-.next/
-.nuxt/
-out/
-.cache/
-.turbo/
-coverage/
-.nyc_output/
-.jest_cache/
