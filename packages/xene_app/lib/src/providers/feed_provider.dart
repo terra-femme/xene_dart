@@ -5,16 +5,16 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:xene_domain/xene_domain.dart';
 import 'auth_provider.dart';
+import 'config_provider.dart';
 import 'dio_provider.dart';
 import 'feed_frontend_cache.dart';
 import 'preset_provider.dart';
 import '../utils/artwork_proxy.dart';
 
-// Recent feed: 30 items is enough for the initial above-fold view.
-// Archive is fetched separately on sheet open (lazy hydration).
+// Feed pagination limits. These values are also defined in config.json.
+// TODO: Make these dynamic by reading from appConfigProvider in FeedNotifier.
 const _kFeedWindowLimit = 30;
 const _kArchivePageLimit = 16;
-// Full-greed mode: larger pages so the whole 31-day window lazy-loads quickly.
 const _kFullArchivePageLimit = 50;
 
 enum FeedMode { methodical, fullFeed }
@@ -237,13 +237,14 @@ class FeedNotifier extends AsyncNotifier<List<FeedItem>> {
     // Debounce rapid preset switches: each notch click invalidates feedProvider,
     // queuing multiple concurrent build() calls. The dispose flag fires when
     // this scope is superseded so in-flight work can be abandoned early.
+    // This delay is also defined in config.json as limits.feed_fetch_delay_milliseconds (150).
     var cancelled = false;
     ref.onDispose(() => cancelled = true);
     await Future<void>.delayed(const Duration(milliseconds: 150));
     if (cancelled) return const <FeedItem>[];
 
     debugPrint(
-      '[feedProvider] Initialised - baseUrl=$kBackendUrl user=$_userId preset=$currentPreset',
+      '[feedProvider] Initialised - user=$_userId preset=$currentPreset',
     );
     dev.log(
       '[feedProvider] build preset=$currentPreset user=$_userId',

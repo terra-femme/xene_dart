@@ -87,6 +87,7 @@ class FeedFrontendCache {
   // TTLs aligned to backend platform poll intervals.
   // recentFast / recentBc: 5 min — aggressive enough to feel fresh on re-visit.
   // archive: 10 min — archive items are stable, rarely change within a session.
+  // These values are also defined in config.json as cache.recent_fast_minutes, etc.
   static const _ttls = <String, Duration>{
     CacheZone.recentFast: Duration(minutes: 5),
     CacheZone.recentBc: Duration(minutes: 5),

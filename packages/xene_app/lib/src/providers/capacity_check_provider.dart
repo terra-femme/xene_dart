@@ -1,10 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-
-const _kBackendUrl = String.fromEnvironment(
-  'BACKEND_URL',
-  defaultValue: 'http://localhost:8080',
-);
+import 'config_provider.dart';
 
 class CapacityCheckResponse {
   const CapacityCheckResponse({
@@ -42,11 +38,22 @@ class CapacityCheckResponse {
 final capacityCheckProvider = FutureProvider<CapacityCheckResponse>((
   ref,
 ) async {
+  final configAsync = ref.watch(appConfigProvider);
+
+  final config = configAsync.whenData((c) => c).asData?.value;
+  if (config == null) {
+    throw Exception('Failed to load app configuration');
+  }
+
   final dio = Dio(
     BaseOptions(
-      baseUrl: _kBackendUrl,
-      connectTimeout: const Duration(seconds: 5),
-      receiveTimeout: const Duration(seconds: 8),
+      baseUrl: config.backendUrl,
+      connectTimeout: Duration(
+        seconds: config.capacityCheckTimeoutConnectSeconds,
+      ),
+      receiveTimeout: Duration(
+        seconds: config.capacityCheckTimeoutReceiveSeconds,
+      ),
     ),
   );
 
@@ -59,10 +66,10 @@ final capacityCheckProvider = FutureProvider<CapacityCheckResponse>((
     throw Exception('Failed to check signup capacity: $e');
   }
 
-  return const CapacityCheckResponse(
+  return CapacityCheckResponse(
     signupsAllowed: true,
     userCount: 0,
-    userCap: 2000,
+    userCap: config.userCap,
     userCapPercent: 0.0,
     message: 'Unable to check capacity',
     canSignUp: true,
@@ -79,11 +86,22 @@ final checkEmailSignupProvider =
         return ref.watch(capacityCheckProvider.future);
       }
 
+      final configAsync = ref.watch(appConfigProvider);
+
+      final config = configAsync.whenData((c) => c).asData?.value;
+      if (config == null) {
+        throw Exception('Failed to load app configuration');
+      }
+
       final dio = Dio(
         BaseOptions(
-          baseUrl: _kBackendUrl,
-          connectTimeout: const Duration(seconds: 5),
-          receiveTimeout: const Duration(seconds: 8),
+          baseUrl: config.backendUrl,
+          connectTimeout: Duration(
+            seconds: config.capacityCheckTimeoutConnectSeconds,
+          ),
+          receiveTimeout: Duration(
+            seconds: config.capacityCheckTimeoutReceiveSeconds,
+          ),
         ),
       );
 
@@ -99,10 +117,10 @@ final checkEmailSignupProvider =
         throw Exception('Failed to check signup eligibility: $e');
       }
 
-      return const CapacityCheckResponse(
+      return CapacityCheckResponse(
         signupsAllowed: true,
         userCount: 0,
-        userCap: 2000,
+        userCap: config.userCap,
         userCapPercent: 0.0,
         message: 'Unable to check eligibility',
         canSignUp: true,
