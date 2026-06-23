@@ -4,6 +4,7 @@
 **/.dart_tool
 **/build
 **/.env
+**/.env.*
 *.log
 dist/
 node_modules/
