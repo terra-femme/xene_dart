@@ -1,4 +1,39 @@
 {
-  "backend_url": "https://xene-backend.yellowwater-2ccd556b.eastus.azurecontainerapps.io",
-  "version": "1.0"
+  "version": "1.0",
+  "backend": {
+    "url": "https://xene-backend.yellowwater-2ccd556b.eastus.azurecontainerapps.io",
+    "auth_redirect_url": "http://localhost:4000"
+  },
+  "config": {
+    "repo_url": "https://raw.githubusercontent.com/terra-femme/xene_dart/main/packages/xene_app/lib/config.json"
+  },
+  "http": {
+    "dio_timeout_connect_seconds": 30,
+    "dio_timeout_receive_seconds": 30,
+    "capacity_check_timeout_connect_seconds": 5,
+    "capacity_check_timeout_receive_seconds": 8,
+    "monitor_timeout_connect_seconds": 5,
+    "monitor_timeout_receive_seconds": 8,
+    "monitor_poll_interval_seconds": 15,
+    "preset_sources_timeout_minutes": 5
+  },
+  "feed": {
+    "window_limit": 30,
+    "archive_page_limit": 16,
+    "full_archive_page_limit": 50
+  },
+  "cache": {
+    "recent_fast_minutes": 5,
+    "recent_bc_minutes": 5,
+    "archive_minutes": 10
+  },
+  "limits": {
+    "user_cap": 2000,
+    "track_analysis_max_attempts": 6,
+    "soundcloud_connection_poll_interval_seconds": 3,
+    "soundcloud_connection_poll_timeout_minutes": 5,
+    "search_debounce_milliseconds": 500,
+    "track_analysis_poll_interval_seconds": 2,
+    "feed_fetch_delay_milliseconds": 150
+  }
 }

@@ -17,6 +17,10 @@ final _logger = Logger('track_analysis_provider');
 /// of staying blank for the whole session. 6 attempts × 2s ≈ a 10s window,
 /// which comfortably covers the typical SC-metadata + waveform-fetch + upsert
 /// latency.
+///
+/// These values are also defined in config.json as:
+/// limits.track_analysis_max_attempts (6)
+/// limits.track_analysis_poll_interval_seconds (2)
 const _maxAttempts = 6;
 const _pollInterval = Duration(seconds: 2);
 

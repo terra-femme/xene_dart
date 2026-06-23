@@ -4,7 +4,10 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'auth_provider.dart';
+import 'config_provider.dart';
 
+// Fallback backend URL for utilities that can't use providers (e.g. artwork_proxy.dart).
+// The main Dio instance uses appConfigProvider for dynamic configuration.
 const kBackendUrl = String.fromEnvironment(
   'BACKEND_URL',
   defaultValue: 'http://localhost:8080',
@@ -43,11 +46,31 @@ const _kAuthRetriedFlag = '__authRetried';
 final authenticatedDioProvider = Provider<Dio>((ref) {
   ref.watch(authStateProvider); // rebuild when session changes
 
+  // Watch config to rebuild if it changes; use 'when' to handle async state.
+  final configAsync = ref.watch(appConfigProvider);
+
+  // Get timeout values from config or use fallbacks.
+  final connectTimeoutSeconds =
+      configAsync
+          .whenData((config) => config.dioTimeoutConnectSeconds)
+          .asData
+          ?.value ??
+      30;
+  final receiveTimeoutSeconds =
+      configAsync
+          .whenData((config) => config.dioTimeoutReceiveSeconds)
+          .asData
+          ?.value ??
+      30;
+  final baseUrl =
+      configAsync.whenData((config) => config.backendUrl).asData?.value ??
+      'http://localhost:8080';
+
   final dio = Dio(
     BaseOptions(
-      baseUrl: kBackendUrl,
-      connectTimeout: const Duration(seconds: 30),
-      receiveTimeout: const Duration(seconds: 30),
+      baseUrl: baseUrl,
+      connectTimeout: Duration(seconds: connectTimeoutSeconds),
+      receiveTimeout: Duration(seconds: receiveTimeoutSeconds),
       headers: {'Accept': 'application/json'},
     ),
   );

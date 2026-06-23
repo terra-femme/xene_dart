@@ -48,6 +48,7 @@ class ScSearchNotifier extends StateNotifier<ScSearchState> {
 
   /// Debounced search — waits 500ms after the last call before hitting the backend.
   /// Prevents a request per keystroke when typing in the search field.
+  /// This value is also defined in config.json as limits.search_debounce_milliseconds (500).
   void search(String query) {
     final q = query.trim();
     if (q.isEmpty) {

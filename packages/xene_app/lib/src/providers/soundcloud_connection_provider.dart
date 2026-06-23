@@ -6,6 +6,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'dio_provider.dart';
 
+// SoundCloud connection polling configuration.
+// These values are also defined in config.json as:
+// limits.soundcloud_connection_poll_interval_seconds (3)
+// limits.soundcloud_connection_poll_timeout_minutes (5)
 const _kPollInterval = Duration(seconds: 3);
 const _kPollTimeout = Duration(minutes: 5);
 

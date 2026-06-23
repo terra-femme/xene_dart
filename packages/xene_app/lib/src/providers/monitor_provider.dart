@@ -1,21 +1,42 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-
-const _kBackendUrl = String.fromEnvironment(
-  'BACKEND_URL',
-  defaultValue: 'http://localhost:8080',
-);
+import 'config_provider.dart';
 
 /// Polls GET /monitor every 15 seconds and yields the latest stats map.
 /// Auto-disposes when the monitor screen is not visible.
 final monitorProvider = StreamProvider.autoDispose<Map<String, dynamic>>((
   ref,
 ) async* {
+  final configAsync = ref.watch(appConfigProvider);
+
+  // Extract config values with fallbacks.
+  final baseUrl =
+      configAsync.whenData((config) => config.backendUrl).asData?.value ??
+      'http://localhost:8080';
+  final connectTimeoutSeconds =
+      configAsync
+          .whenData((config) => config.monitorTimeoutConnectSeconds)
+          .asData
+          ?.value ??
+      5;
+  final receiveTimeoutSeconds =
+      configAsync
+          .whenData((config) => config.monitorTimeoutReceiveSeconds)
+          .asData
+          ?.value ??
+      8;
+  final pollIntervalSeconds =
+      configAsync
+          .whenData((config) => config.monitorPollIntervalSeconds)
+          .asData
+          ?.value ??
+      15;
+
   final dio = Dio(
     BaseOptions(
-      baseUrl: _kBackendUrl,
-      connectTimeout: const Duration(seconds: 5),
-      receiveTimeout: const Duration(seconds: 8),
+      baseUrl: baseUrl,
+      connectTimeout: Duration(seconds: connectTimeoutSeconds),
+      receiveTimeout: Duration(seconds: receiveTimeoutSeconds),
     ),
   );
   while (true) {
@@ -25,6 +46,6 @@ final monitorProvider = StreamProvider.autoDispose<Map<String, dynamic>>((
     } catch (_) {
       yield {};
     }
-    await Future<void>.delayed(const Duration(seconds: 15));
+    await Future<void>.delayed(Duration(seconds: pollIntervalSeconds));
   }
 });

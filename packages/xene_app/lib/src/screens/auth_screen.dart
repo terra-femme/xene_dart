@@ -4,12 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../providers/capacity_check_provider.dart';
+import '../providers/config_provider.dart';
 import '../theme/xene_theme.dart';
 
-const _kWebRedirectUrl = String.fromEnvironment(
-  'AUTH_REDIRECT_URL',
-  defaultValue: 'http://localhost:4000',
-);
 const _kMobileRedirectUrl = 'com.xene.app://auth/callback';
 
 class AuthScreen extends ConsumerStatefulWidget {
@@ -59,10 +56,19 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
         return;
       }
 
+      // Get redirect URL from config
+      final configAsync = ref.read(appConfigProvider);
+      final webRedirectUrl =
+          configAsync
+              .whenData((config) => config.authRedirectUrl)
+              .asData
+              ?.value ??
+          'http://localhost:4000';
+
       // If can sign up, send the magic link
       await Supabase.instance.client.auth.signInWithOtp(
         email: email,
-        emailRedirectTo: kIsWeb ? _kWebRedirectUrl : _kMobileRedirectUrl,
+        emailRedirectTo: kIsWeb ? webRedirectUrl : _kMobileRedirectUrl,
       );
       if (mounted) setState(() => _sent = true);
     } on AuthException catch (e) {

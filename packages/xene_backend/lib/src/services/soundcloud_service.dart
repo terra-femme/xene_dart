@@ -54,10 +54,7 @@ class SoundCloudService {
       baseUrl: 'https://api.soundcloud.com',
       connectTimeout: const Duration(seconds: 15),
       receiveTimeout: const Duration(seconds: 20),
-      headers: {
-        'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      },
+      headers: {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'},
     ),
   )..httpClientAdapter = pooledKeepAliveAdapter();
 
@@ -170,10 +167,7 @@ class SoundCloudService {
         'https://secure.soundcloud.com/sign-out',
         data: jsonEncode({'access_token': accessToken}),
         options: Options(
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          },
+          headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
           // SC returns 401 when the token is already invalid. Treat <500 as
           // "handled" so an already-dead token is not surfaced as a Dio error.
           validateStatus: (status) => status != null && status < 500,
@@ -194,9 +188,7 @@ class SoundCloudService {
         );
         return true;
       }
-      _logger.warning(
-        '[sc] revokeUserToken: unexpected status=$status body=${response.data}',
-      );
+      _logger.warning('[sc] revokeUserToken: unexpected status=$status body=${response.data}');
       return false;
     } catch (e) {
       _logger.warning('[sc] revokeUserToken: revoke request failed: $e');
@@ -205,6 +197,9 @@ class SoundCloudService {
   }
 
   /// Resolve a username to a User ID.
+  /// Accepts either a plain username (e.g., "ghostemane") or a full SoundCloud
+  /// profile URL (e.g., "https://soundcloud.com/ghostemane"). Validates URLs
+  /// are legitimate SoundCloud domains to prevent SSRF attacks.
   Future<Map<String, dynamic>?> _resolveUserInfo(String username) async {
     final token = await _getToken();
     if (token == null) return null;
@@ -212,19 +207,26 @@ class SoundCloudService {
     // Normalize username
     var cleanUsername = username;
     if (username.contains('soundcloud.com/')) {
+      // If a full URL was provided, validate it's a legitimate SoundCloud URL
+      if (!isSoundCloudProfileUrl(username)) {
+        _logger.warning('[sc] _resolveUserInfo: rejected non-SoundCloud URL: $username');
+        return null;
+      }
       try {
         final uri = Uri.parse(username);
         cleanUsername = uri.path.split('/').where((p) => p.isNotEmpty).first;
-      } catch (_) {}
+      } catch (_) {
+        return null;
+      }
     } else if (username.contains('/')) {
+      // Reject URLs with paths that don't look like SoundCloud usernames
       cleanUsername = username.split('/').where((p) => p.isNotEmpty).first;
     }
 
     // Check in-memory user cache (7-day TTL — mirrors soundcloud.py _user_id_cache).
     final userCached = _userCache[cleanUsername];
     if (userCached != null &&
-        DateTime.now().toUtc().difference(userCached.fetchedAt) <
-            _userCacheTtl) {
+        DateTime.now().toUtc().difference(userCached.fetchedAt) < _userCacheTtl) {
       _logger.info('[sc] User cache HIT for $cleanUsername');
       return userCached.data;
     }
@@ -238,10 +240,7 @@ class SoundCloudService {
       );
 
       if (response.data != null) {
-        _userCache[cleanUsername] = _ScUserCacheEntry(
-          response.data!,
-          DateTime.now().toUtc(),
-        );
+        _userCache[cleanUsername] = _ScUserCacheEntry(response.data!, DateTime.now().toUtc());
       }
       return response.data;
     } catch (e) {
@@ -289,10 +288,7 @@ class SoundCloudService {
 
       for (final p in (response.data ?? [])) {
         final profile = p as Map<String, dynamic>;
-        var network = (profile['network'] ?? '')
-            .toString()
-            .trim()
-            .toLowerCase();
+        var network = (profile['network'] ?? '').toString().trim().toLowerCase();
         final purl = (profile['url'] ?? '').toString().trim();
 
         if (purl.isEmpty) continue;
@@ -342,7 +338,15 @@ class SoundCloudService {
   }
 
   /// Resolve a full SC profile URL and return the user object.
+  /// Resolve a SoundCloud profile URL to user metadata.
+  /// Validates the URL is a legitimate SoundCloud domain before making any
+  /// HTTP request to prevent SSRF attacks.
   Future<Map<String, dynamic>?> resolveProfileUrl(String scUrl) async {
+    if (!isSoundCloudProfileUrl(scUrl)) {
+      _logger.warning('[sc] resolveProfileUrl: rejected non-SoundCloud URL: $scUrl');
+      throw ArgumentError('URL must be a valid soundcloud.com profile URL');
+    }
+
     final token = await _getToken();
     if (token == null) return null;
 
@@ -374,11 +378,8 @@ class SoundCloudService {
     final trackCached = _trackCache[username];
     if (!bypassMemoryCache &&
         trackCached != null &&
-        DateTime.now().toUtc().difference(trackCached.fetchedAt) <
-            _trackCacheTtl) {
-      _logger.info(
-        '[sc] Track cache HIT for $username (${trackCached.items.length} items)',
-      );
+        DateTime.now().toUtc().difference(trackCached.fetchedAt) < _trackCacheTtl) {
+      _logger.info('[sc] Track cache HIT for $username (${trackCached.items.length} items)');
       return trackCached.items;
     }
 
@@ -390,9 +391,10 @@ class SoundCloudService {
 
     final userId = userData['id'].toString();
     final artistDisplayName = displayName ?? userData['username'];
-    final avatarUrl = (userData['avatar_url'] as String?)
-        .toString()
-        .replaceFirst('-large.', '-t500x500.');
+    final avatarUrl = (userData['avatar_url'] as String?).toString().replaceFirst(
+      '-large.',
+      '-t500x500.',
+    );
 
     final items = <FeedItem>[];
     final repostMetaById = <String, _ScRepostMeta>{};
@@ -465,9 +467,7 @@ class SoundCloudService {
     // Sort, trim to window, save.
     // Pre-orders (future publishedAt) are kept; only past-31d items are dropped.
     items.sort((a, b) => b.publishedAt.compareTo(a.publishedAt));
-    final windowItems = items
-        .where((i) => i.publishedAt.isAfter(cutoff))
-        .toList();
+    final windowItems = items.where((i) => i.publishedAt.isAfter(cutoff)).toList();
 
     final dbItems = windowItems.map((i) {
       final repostMeta = repostMetaById[i.id];
@@ -499,33 +499,24 @@ class SoundCloudService {
     // Uses the canonical SC username from the API (userData['username']) which
     // matches the soundcloud_username key stored in the artists table.
     // Non-fatal — genre update failure must never abort the feed fetch.
-    final scApiUsername = (userData['username'] as String?)
-        ?.toLowerCase()
-        .trim();
+    final scApiUsername = (userData['username'] as String?)?.toLowerCase().trim();
     if (scApiUsername != null) {
       final scGenre = userData['genre'] as String?;
       final scTagList = userData['tag_list'] as String?;
       final genreTags = _parseScGenreTags(scGenre, scTagList);
       if (genreTags.isNotEmpty) {
         _logger.info('[sc] Genre tags for $scApiUsername: $genreTags');
-        await _db
-            .updateArtistGenreTags(genreTags, soundcloudUsername: scApiUsername)
-            .catchError((Object e) {
-              _logger.warning(
-                '[sc] Genre tags update skipped for $scApiUsername: $e',
-              );
-            });
+        await _db.updateArtistGenreTags(genreTags, soundcloudUsername: scApiUsername).catchError((
+          Object e,
+        ) {
+          _logger.warning('[sc] Genre tags update skipped for $scApiUsername: $e');
+        });
       }
     }
 
     // Write to in-memory track cache.
-    _trackCache[username] = _ScTrackCacheEntry(
-      windowItems,
-      DateTime.now().toUtc(),
-    );
-    _logger.info(
-      '[sc] Track cache WRITE for $username (${windowItems.length} items)',
-    );
+    _trackCache[username] = _ScTrackCacheEntry(windowItems, DateTime.now().toUtc());
+    _logger.info('[sc] Track cache WRITE for $username (${windowItems.length} items)');
 
     return windowItems;
   }
@@ -548,10 +539,7 @@ class SoundCloudService {
 
     try {
       String? nextPath = path;
-      Map<String, dynamic>? queryParameters = {
-        'linked_partitioning': true,
-        'limit': pageLimit,
-      };
+      Map<String, dynamic>? queryParameters = {'linked_partitioning': true, 'limit': pageLimit};
 
       for (var page = 0; page < maxPages && nextPath != null; page++) {
         pagesActual = page + 1;
@@ -630,25 +618,17 @@ class SoundCloudService {
   }
 
   /// Search SoundCloud users by name — used as the source-of-truth lookup.
-  Future<List<Map<String, dynamic>>> searchUsers(
-    String query, {
-    int limit = 10,
-  }) async {
+  Future<List<Map<String, dynamic>>> searchUsers(String query, {int limit = 10}) async {
     final token = await _getToken();
     if (token == null) return [];
 
     try {
       final response = await _dio.get<Map<String, dynamic>>(
         '/users',
-        queryParameters: {
-          'q': query,
-          'limit': limit,
-          'linked_partitioning': true,
-        },
+        queryParameters: {'q': query, 'limit': limit, 'linked_partitioning': true},
         options: Options(headers: {'Authorization': 'OAuth $token'}),
       );
-      final collection = (response.data?['collection'] as List? ?? [])
-          .cast<Map<String, dynamic>>();
+      final collection = (response.data?['collection'] as List? ?? []).cast<Map<String, dynamic>>();
       _logger.info('[sc] searchUsers "$query": ${collection.length} results');
       return collection;
     } catch (e) {
@@ -659,25 +639,17 @@ class SoundCloudService {
 
   /// Search SoundCloud tracks by query string.
   /// Returns up to [limit] track objects with the fields needed for party submission.
-  Future<List<Map<String, dynamic>>> searchTracks(
-    String query, {
-    int limit = 10,
-  }) async {
+  Future<List<Map<String, dynamic>>> searchTracks(String query, {int limit = 10}) async {
     final token = await _getToken();
     if (token == null) return [];
 
     try {
       final response = await _dio.get<Map<String, dynamic>>(
         '/tracks',
-        queryParameters: {
-          'q': query,
-          'limit': limit,
-          'linked_partitioning': true,
-        },
+        queryParameters: {'q': query, 'limit': limit, 'linked_partitioning': true},
         options: Options(headers: {'Authorization': 'OAuth $token'}),
       );
-      final collection = (response.data?['collection'] as List? ?? [])
-          .cast<Map<String, dynamic>>();
+      final collection = (response.data?['collection'] as List? ?? []).cast<Map<String, dynamic>>();
       _logger.info('[sc] searchTracks "$query": ${collection.length} results');
 
       return collection.map((t) {
@@ -739,9 +711,7 @@ class SoundCloudService {
 
     if (tracks.isEmpty) return null;
 
-    _logger.info(
-      '[sc] createScPlaylist title="$title" tracks=${tracks.length}',
-    );
+    _logger.info('[sc] createScPlaylist title="$title" tracks=${tracks.length}');
 
     // Explicitly encode to JSON string so Dio sends the body as-is.
     // Passing a Map with a custom contentType can cause Dio to form-encode
@@ -790,8 +760,7 @@ class SoundCloudService {
     if (playlistId == null) return null;
 
     final existingTrackIds = _extractPlaylistTrackIds(playlist).toList();
-    final mergedTrackIds = LinkedHashSet<String>.from(existingTrackIds)
-      ..addAll(newTrackIds);
+    final mergedTrackIds = LinkedHashSet<String>.from(existingTrackIds)..addAll(newTrackIds);
     final tracks = mergedTrackIds.map((id) => {'id': id}).toList();
 
     _logger.info(
@@ -801,11 +770,7 @@ class SoundCloudService {
     );
 
     final body = jsonEncode({
-      'playlist': {
-        'title': _xenePlaylistTitle,
-        'sharing': 'private',
-        'tracks': tracks,
-      },
+      'playlist': {'title': _xenePlaylistTitle, 'sharing': 'private', 'tracks': tracks},
     });
 
     final response = await _dio.put<Map<String, dynamic>>(
@@ -907,11 +872,7 @@ class SoundCloudService {
 
     final initialTracks = initialTrackIds.map((id) => {'id': id}).toList();
     final body = jsonEncode({
-      'playlist': {
-        'title': title,
-        'sharing': 'private',
-        'tracks': initialTracks,
-      },
+      'playlist': {'title': title, 'sharing': 'private', 'tracks': initialTracks},
     });
 
     final response = await _dio.post<Map<String, dynamic>>(
@@ -942,9 +903,7 @@ class SoundCloudService {
     required String userId,
     required String cachePrefix,
   }) async {
-    final cached = await _db.getSystemCache(
-      _playlistCacheKey(cachePrefix, userId),
-    );
+    final cached = await _db.getSystemCache(_playlistCacheKey(cachePrefix, userId));
     final playlistId = _resourceIdText(cached?['playlist_id']);
     if (playlistId == null) return null;
 
@@ -966,19 +925,14 @@ class SoundCloudService {
       return playlist;
     } on DioException catch (e) {
       if (e.response?.statusCode == 404) {
-        _logger.warning(
-          '[sc] Cached Xene playlist $playlistId not found; recreating',
-        );
+        _logger.warning('[sc] Cached Xene playlist $playlistId not found; recreating');
         return null;
       }
       rethrow;
     }
   }
 
-  Future<void> _cacheXenePlaylist(
-    String userId,
-    Map<String, dynamic>? playlist,
-  ) => _cachePlaylist(
+  Future<void> _cacheXenePlaylist(String userId, Map<String, dynamic>? playlist) => _cachePlaylist(
     cachePrefix: 'soundcloud:xene_playlist',
     userId: userId,
     playlist: playlist,
@@ -1001,8 +955,7 @@ class SoundCloudService {
     });
   }
 
-  String _playlistCacheKey(String cachePrefix, String userId) =>
-      '$cachePrefix:$userId';
+  String _playlistCacheKey(String cachePrefix, String userId) => '$cachePrefix:$userId';
 
   String? _playlistUrl(Map<String, dynamic>? playlist) {
     final permalinkUrl = playlist?['permalink_url'] as String?;
@@ -1013,19 +966,11 @@ class SoundCloudService {
 
     final uri = Uri.parse(permalinkUrl);
     return uri
-        .replace(
-          queryParameters: {
-            ...uri.queryParameters,
-            'secret_token': secretToken,
-          },
-        )
+        .replace(queryParameters: {...uri.queryParameters, 'secret_token': secretToken})
         .toString();
   }
 
-  Future<List<String>> _expandScTrackIds(
-    String accessToken,
-    List<String> rawIds,
-  ) async {
+  Future<List<String>> _expandScTrackIds(String accessToken, List<String> rawIds) async {
     final ids = LinkedHashSet<String>();
 
     for (final raw in rawIds) {
@@ -1053,10 +998,7 @@ class SoundCloudService {
     return ids.toList();
   }
 
-  Future<List<String>> _resolveTrackIdsFromUrl(
-    String accessToken,
-    String url,
-  ) async {
+  Future<List<String>> _resolveTrackIdsFromUrl(String accessToken, String url) async {
     try {
       final response = await _dio.get<Map<String, dynamic>>(
         '/resolve',
@@ -1081,10 +1023,7 @@ class SoundCloudService {
     return const [];
   }
 
-  Future<List<String>> _getPlaylistTrackIds(
-    String accessToken,
-    String playlistId,
-  ) async {
+  Future<List<String>> _getPlaylistTrackIds(String accessToken, String playlistId) async {
     try {
       final tracksResponse = await _dio.get<dynamic>(
         '/playlists/$playlistId/tracks',
@@ -1100,16 +1039,12 @@ class SoundCloudService {
       );
       return _extractPlaylistTrackIds(playlistResponse.data).toList();
     } catch (e) {
-      _logger.warning(
-        '[sc] Failed to expand playlist $playlistId for export: $e',
-      );
+      _logger.warning('[sc] Failed to expand playlist $playlistId for export: $e');
       return const [];
     }
   }
 
-  Iterable<String> _extractPlaylistTrackIds(
-    Map<String, dynamic>? playlist,
-  ) sync* {
+  Iterable<String> _extractPlaylistTrackIds(Map<String, dynamic>? playlist) sync* {
     final tracks = playlist?['tracks'];
     yield* _extractTrackIds(tracks);
   }
@@ -1141,8 +1076,7 @@ class SoundCloudService {
     for (var trackData in data) {
       try {
         // 1. Unwrap Repost Wrapper if present
-        final isRepost =
-            trackData['type'] == 'track-repost' || trackData['track'] != null;
+        final isRepost = trackData['type'] == 'track-repost' || trackData['track'] != null;
         final Map<String, dynamic> track = isRepost
             ? trackData['track'] as Map<String, dynamic>
             : trackData as Map<String, dynamic>;
@@ -1164,9 +1098,7 @@ class SoundCloudService {
           continue;
         }
 
-        final String? repostCreatedAt = isRepost
-            ? trackData['created_at'] as String?
-            : null;
+        final String? repostCreatedAt = isRepost ? trackData['created_at'] as String? : null;
         final repostedAt = _parseSoundCloudDate(repostCreatedAt);
         final publishedAt = isRepost
             ? repostedAt ?? _parsePublicTrackDate(track)
@@ -1178,9 +1110,7 @@ class SoundCloudService {
         // 3. Mandatory Title Augmentation: "Producer - Title"
         var title = track['title'] as String? ?? '';
         if (title.trim().isEmpty) {
-          _logger.warning(
-            '[sc] Dropping track with blank title id=${track['id']}',
-          );
+          _logger.warning('[sc] Dropping track with blank title id=${track['id']}');
           continue;
         }
         if (!title.toLowerCase().contains(producerName.toLowerCase())) {
@@ -1206,12 +1136,9 @@ class SoundCloudService {
             repostedBy: isRepost ? artistName : null,
           ),
           artworkUrl:
-              ((track['artwork_url'] as String?)?.replaceFirst(
-                '-large.',
-                '-t500x500.',
-              )) ??
+              ((track['artwork_url'] as String?)?.replaceFirst('-large.', '-t500x500.')) ??
               avatarUrl,
-          externalUrl: track['permalink_url'] as String,
+          externalUrl: _validateTrackUrl(track['permalink_url']) as String,
           publishedAt: publishedAt,
           durationSeconds: (track['duration'] as int) ~/ 1000,
           playCount: track['playback_count'] as int?,
@@ -1247,8 +1174,7 @@ class SoundCloudService {
     for (var plData in data) {
       try {
         // 1. Unwrap Repost Wrapper if present
-        final isRepost =
-            plData['type'] == 'playlist-repost' || plData['playlist'] != null;
+        final isRepost = plData['type'] == 'playlist-repost' || plData['playlist'] != null;
         final Map<String, dynamic> pl = isRepost
             ? plData['playlist'] as Map<String, dynamic>
             : plData as Map<String, dynamic>;
@@ -1258,15 +1184,12 @@ class SoundCloudService {
 
         // Guard: skip blank-title playlists.
         if (title.trim().isEmpty) {
-          _logger.warning(
-            '[sc] Dropping playlist with blank title id=${pl['id']}',
-          );
+          _logger.warning('[sc] Dropping playlist with blank title id=${pl['id']}');
           continue;
         }
 
         // Filter: if not uploader, artist name must be in title
-        if (uploader != artistLower &&
-            !title.toLowerCase().contains(artistLower)) {
+        if (uploader != artistLower && !title.toLowerCase().contains(artistLower)) {
           auditSink?.add({
             'type': 'fetch_drop',
             'reason': 'playlist_title_filter',
@@ -1282,9 +1205,7 @@ class SoundCloudService {
         // Guard: skip empty playlists — track_count=0 means nothing to play.
         final trackCount = pl['track_count'] as int? ?? 0;
         if (trackCount == 0) {
-          _logger.warning(
-            '[sc] Dropping empty playlist "$title" (track_count=0) id=${pl['id']}',
-          );
+          _logger.warning('[sc] Dropping empty playlist "$title" (track_count=0) id=${pl['id']}');
           auditSink?.add({
             'type': 'fetch_drop',
             'reason': 'empty_playlist',
@@ -1296,9 +1217,7 @@ class SoundCloudService {
           continue;
         }
 
-        final String? repostCreatedAt = isRepost
-            ? plData['created_at'] as String?
-            : null;
+        final String? repostCreatedAt = isRepost ? plData['created_at'] as String? : null;
         final repostedAt = _parseSoundCloudDate(repostCreatedAt);
         final publishedAt = isRepost
             ? repostedAt ?? _parsePublicTrackDate(pl)
@@ -1332,16 +1251,12 @@ class SoundCloudService {
               repostedBy: isRepost ? artistName : null,
             ),
             artworkUrl:
-                ((pl['artwork_url'] as String?)?.replaceFirst(
-                  '-large.',
-                  '-t500x500.',
-                )) ??
+                ((pl['artwork_url'] as String?)?.replaceFirst('-large.', '-t500x500.')) ??
                 avatarUrl,
-            externalUrl: pl['permalink_url'] as String,
+            externalUrl: _validateTrackUrl(pl['permalink_url']) as String,
             publishedAt: publishedAt,
             trackCount: pl['track_count'] as int?,
-            durationSeconds:
-                pl['duration'] is int && (pl['duration'] as int) > 0
+            durationSeconds: pl['duration'] is int && (pl['duration'] as int) > 0
                 ? (pl['duration'] as int) ~/ 1000
                 : null,
           ),
@@ -1363,10 +1278,48 @@ class SoundCloudService {
     }
   }
 
-  String? _cardBody({
-    required String? description,
-    required String? repostedBy,
-  }) {
+  /// Validate that the provided URL is a legitimate SoundCloud profile URL.
+  /// Returns true if the URL is HTTPS and points to soundcloud.com or
+  /// www.soundcloud.com; false otherwise. Prevents SSRF attacks by rejecting
+  /// arbitrary URLs before making upstream HTTP requests.
+  /// Static so it can be tested independently.
+  static bool isSoundCloudProfileUrl(String url) {
+    // Reject URLs with control characters (newlines, tabs, null bytes, etc.)
+    // which could indicate header injection or similar attacks
+    if (url.contains(RegExp(r'[\x00-\x1f\x7f]'))) {
+      return false;
+    }
+
+    try {
+      final uri = Uri.parse(url);
+      if (uri.scheme != 'https') return false;
+      final host = uri.host.toLowerCase();
+      return host == 'soundcloud.com' || host == 'www.soundcloud.com';
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Validate track permalink URL from SoundCloud API before storing.
+  /// Ensures the URL is a valid SoundCloud track URL (HTTPS + soundcloud.com domain).
+  /// Logs warnings if URL is malformed, then returns it anyway to avoid breaking
+  /// the feed if the API returns unexpected data.
+  String _validateTrackUrl(dynamic urlValue) {
+    final url = urlValue as String? ?? '';
+    try {
+      final uri = Uri.parse(url);
+      if (uri.scheme != 'https' ||
+          (uri.host.toLowerCase() != 'soundcloud.com' &&
+              uri.host.toLowerCase() != 'www.soundcloud.com')) {
+        _logger.warning('[sc] Track URL from API does not match expected SoundCloud domain: $url');
+      }
+    } catch (e) {
+      _logger.warning('[sc] Failed to validate track URL: $url, error: $e');
+    }
+    return url;
+  }
+
+  String? _cardBody({required String? description, required String? repostedBy}) {
     final cleanDescription = description?.trim();
     if (repostedBy == null || repostedBy.trim().isEmpty) {
       return cleanDescription?.isEmpty == true ? null : cleanDescription;
@@ -1394,8 +1347,7 @@ class SoundCloudService {
     final rd = track['release_day'];
     String? releaseYmd;
     if (ry is int && rm is int && rd is int) {
-      releaseYmd =
-          '$ry-${rm.toString().padLeft(2, '0')}-${rd.toString().padLeft(2, '0')}';
+      releaseYmd = '$ry-${rm.toString().padLeft(2, '0')}-${rd.toString().padLeft(2, '0')}';
     }
 
     // Reconstruct which candidate won the max-date selection.
@@ -1438,8 +1390,7 @@ class SoundCloudService {
       usedField = candidates.entries
           .reduce(
             (a, b) =>
-                (a.value.difference(publishedAt).abs() <
-                    b.value.difference(publishedAt).abs())
+                (a.value.difference(publishedAt).abs() < b.value.difference(publishedAt).abs())
                 ? a
                 : b,
           )
@@ -1543,19 +1494,9 @@ class SoundCloudService {
       final sign = match.group(7) == '-' ? -1 : 1;
       final offsetHours = int.parse(match.group(8)!);
       final offsetMinutes = int.parse(match.group(9)!);
-      final offset = Duration(
-        hours: sign * offsetHours,
-        minutes: sign * offsetMinutes,
-      );
+      final offset = Duration(hours: sign * offsetHours, minutes: sign * offsetMinutes);
 
-      return DateTime.utc(
-        year,
-        month,
-        day,
-        hour,
-        minute,
-        second,
-      ).subtract(offset);
+      return DateTime.utc(year, month, day, hour, minute, second).subtract(offset);
     }
   }
 
