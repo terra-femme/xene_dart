@@ -1,6 +1,6 @@
 import 'package:dart_frog/dart_frog.dart';
 import 'package:logging/logging.dart';
-import 'package:supabase/supabase.dart';
+import 'package:supabase/supabase.dart' hide HttpMethod;
 
 final _logger = Logger('auth.email_exists');
 
@@ -24,15 +24,15 @@ Future<Response> onRequest(RequestContext context) async {
   try {
     final supabase = context.read<SupabaseClient>();
 
-    final res = await supabase.auth.admin.listUsersByEmail(email);
-
-    final exists = res.isNotEmpty;
+    // Use RPC function to check if email exists
+    final exists =
+        await supabase.rpc('check_user_exists', params: {'user_email': email})
+            as bool? ??
+        false;
 
     _logger.info('[email_exists] email=$email exists=$exists');
 
-    return Response.json(
-      body: {'exists': exists},
-    );
+    return Response.json(body: {'exists': exists});
   } catch (e) {
     _logger.warning('[email_exists] Error checking email: $e');
     return Response.json(

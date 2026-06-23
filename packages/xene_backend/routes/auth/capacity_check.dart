@@ -1,6 +1,6 @@
 import 'package:dart_frog/dart_frog.dart';
 import 'package:logging/logging.dart';
-import 'package:supabase/supabase.dart';
+import 'package:supabase/supabase.dart' hide HttpMethod;
 import 'package:xene_backend/src/services/capacity_service.dart';
 
 final _logger = Logger('auth.capacity_check');

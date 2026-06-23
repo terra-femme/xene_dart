@@ -130,7 +130,13 @@ Future<List<FeedItem>> fetchWithCache(
       '[feed_cache] Coalescing in-flight fetch for $platform/$artistName (via DragonflyDB)',
     );
     // Wait for marker to disappear (up to 10s, its TTL).
-    return await _waitForCoalescedFetch(db, platform, artistName, cacheDays, ttl);
+    return await _waitForCoalescedFetch(
+      db,
+      platform,
+      artistName,
+      cacheDays,
+      ttl,
+    );
   }
 
   // Check local in-process map (same replica, current request cycle).
@@ -191,7 +197,11 @@ Future<List<FeedItem>> fetchWithCache(
   }
 
   // Mark as in-flight in distributed cache (10s TTL, tells other replicas we're fetching).
-  await _cache.set(_inflightMarkerKey(inflightKey), 'fetching', expirySeconds: 10);
+  await _cache.set(
+    _inflightMarkerKey(inflightKey),
+    'fetching',
+    expirySeconds: 10,
+  );
 
   final liveWork = _runLiveFetch(
     db,
@@ -356,7 +366,7 @@ void _backgroundRefresh(
 }) {
   // Skip if a synchronous live fetch is already in flight for this key.
   final inflightKey = '$platform:$artistName';
-  if (_inFlight.containsKey(inflightKey)) {
+  if (_inFlightLocal.containsKey(inflightKey)) {
     _logger.fine(
       '[feed_cache] Background refresh skipped - live fetch already in flight for $platform/$artistName',
     );

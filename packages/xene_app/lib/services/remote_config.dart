@@ -6,7 +6,6 @@ class RemoteConfig {
   static const String _configUrl =
       'https://raw.githubusercontent.com/terra-femme/xene_dart/main/packages/xene_app/lib/config.json';
   static const String _cacheKey = 'xene_remote_config';
-  static const Duration _cacheTtl = Duration(hours: 24);
 
   static final _dio = Dio();
 
@@ -14,9 +13,14 @@ class RemoteConfig {
     // DEVELOPMENT: If running with --define=LOCAL_BACKEND=true,
     // connect to local backend instead of remote.
     // Usage: flutter run -d web --define=LOCAL_BACKEND=true
-    const bool isLocalBackend = bool.fromEnvironment('LOCAL_BACKEND', defaultValue: false);
+    const bool isLocalBackend = bool.fromEnvironment(
+      'LOCAL_BACKEND',
+      defaultValue: false,
+    );
     if (isLocalBackend) {
-      print('[RemoteConfig] LOCAL_BACKEND mode enabled — using http://localhost:8080');
+      print(
+        '[RemoteConfig] LOCAL_BACKEND mode enabled — using http://localhost:8080',
+      );
       return 'http://localhost:8080';
     }
 
