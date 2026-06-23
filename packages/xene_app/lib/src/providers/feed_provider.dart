@@ -5,7 +5,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:xene_domain/xene_domain.dart';
 import 'auth_provider.dart';
-import 'config_provider.dart';
 import 'dio_provider.dart';
 import 'feed_frontend_cache.dart';
 import 'preset_provider.dart';
