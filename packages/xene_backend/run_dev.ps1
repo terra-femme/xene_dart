@@ -1,18 +1,45 @@
-# Load workspace .env and start dart_frog dev
+# Load workspace .env and .env.local (local overrides workspace)
+# .env.local is for local development secrets and should NOT be committed.
 $envFile = Join-Path $PSScriptRoot "..\..\\.env"
+$envLocalFile = Join-Path $PSScriptRoot ".\.env.local"
 
 if (-not (Test-Path $envFile)) {
     Write-Error ".env not found at $envFile"
     exit 1
 }
 
+Write-Host "Loading environment from: $envFile"
 Get-Content $envFile | Where-Object { $_ -notmatch "^\s*#" -and $_ -match "=" } | ForEach-Object {
     $key, $value = $_ -split "=", 2
     $key = $key.Trim()
     $value = $value.Trim()
     if ($key) {
         [System.Environment]::SetEnvironmentVariable($key, $value, "Process")
-        Write-Host "  SET $key"
+    }
+}
+
+# Load .env.local if it exists (overrides .env)
+if (Test-Path $envLocalFile) {
+    Write-Host "Loading local overrides from: $envLocalFile"
+    Get-Content $envLocalFile | Where-Object { $_ -notmatch "^\s*#" -and $_ -match "=" } | ForEach-Object {
+        $key, $value = $_ -split "=", 2
+        $key = $key.Trim()
+        $value = $value.Trim()
+        if ($key) {
+            [System.Environment]::SetEnvironmentVariable($key, $value, "Process")
+            Write-Host "  OVERRIDE $key = $value"
+        }
+    }
+} else {
+    Write-Host "Note: .env.local not found (optional for local development)"
+}
+
+# Print what we loaded
+Write-Host "`nEnvironment variables set:"
+@("XENE_ENV", "ALLOWED_ORIGINS") | ForEach-Object {
+    $val = [System.Environment]::GetEnvironmentVariable($_)
+    if ($val) {
+        Write-Host "  $_ = $val"
     }
 }
 
