@@ -1,0 +1,10 @@
+.git
+.gitignore
+.claude
+.dart_tool
+build/
+dist/
+*.log
+.env
+.env.*
+node_modules/
