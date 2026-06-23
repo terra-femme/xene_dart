@@ -14,6 +14,15 @@ class DragonflyCache {
   late int _port;
   bool _connected = false;
 
+  // Metrics tracking
+  int _getHits = 0;
+  int _getMisses = 0;
+  int _setOperations = 0;
+  int _deleteOperations = 0;
+  int _totalLatencyMs = 0;
+  int _operationCount = 0;
+  DateTime _metricsStartTime = DateTime.now();
+
   factory DragonflyCache() {
     _instance ??= DragonflyCache._();
     return _instance!;
@@ -23,7 +32,8 @@ class DragonflyCache {
 
   /// Initialize connection to DragonflyDB. Call once at app startup.
   Future<bool> init({bool failOpen = true}) async {
-    final urlStr = Platform.environment['DRAGONFLY_URL'] ?? 'redis://localhost:6379';
+    final urlStr =
+        Platform.environment['DRAGONFLY_URL'] ?? 'redis://localhost:6379';
 
     try {
       final uri = Uri.parse(urlStr);
@@ -62,6 +72,7 @@ class DragonflyCache {
           : ['SET', key, value];
       final result = await _sendCommand(cmd);
       if (result == 'OK') {
+        _setOperations++;
         _logger.fine('[dragonfly_cache] SET $key');
         return true;
       }
@@ -79,7 +90,11 @@ class DragonflyCache {
     try {
       final value = await _sendCommand(['GET', key]) as String?;
       if (value != null) {
+        _getHits++;
         _logger.fine('[dragonfly_cache] GET $key (hit)');
+      } else {
+        _getMisses++;
+        _logger.fine('[dragonfly_cache] GET $key (miss)');
       }
       return value;
     } catch (e) {
@@ -107,7 +122,11 @@ class DragonflyCache {
     if (!_connected) return false;
     try {
       final result = await _sendCommand(['DEL', key]);
-      return (result as int) > 0;
+      if ((result as int) > 0) {
+        _deleteOperations++;
+        return true;
+      }
+      return false;
     } catch (e) {
       _logger.warning('[dragonfly_cache] DEL $key failed: $e');
       _connected = false;
@@ -145,9 +164,75 @@ class DragonflyCache {
   /// Check if connected.
   bool get isConnected => _connected;
 
+  /// Get cache metrics.
+  Future<Map<String, dynamic>> getMetrics() async {
+    double hitRatio = 0.0;
+    final totalGets = _getHits + _getMisses;
+    if (totalGets > 0) {
+      hitRatio =
+          (_getHits / totalGets * 100)
+                  .toStringAsFixed(2)
+                  .split('.')
+                  .join('.')
+                  .replaceFirst('.', '.')
+              as dynamic;
+      hitRatio = double.parse((_getHits / totalGets * 100).toStringAsFixed(2));
+    }
+
+    double avgLatencyMs = 0.0;
+    if (_operationCount > 0) {
+      avgLatencyMs = double.parse(
+        (_totalLatencyMs / _operationCount).toStringAsFixed(2),
+      );
+    }
+
+    // Fetch memory info from Redis
+    int usedMemory = 0;
+    if (_connected) {
+      try {
+        final infoStr = await _sendCommand(['INFO', 'memory']) as String?;
+        if (infoStr != null) {
+          final lines = infoStr.split('\r\n');
+          for (final line in lines) {
+            if (line.startsWith('used_memory:')) {
+              final parts = line.split(':');
+              if (parts.length > 1) {
+                usedMemory = int.tryParse(parts[1]) ?? 0;
+              }
+              break;
+            }
+          }
+        }
+      } catch (e) {
+        _logger.warning('[dragonfly_cache] Failed to fetch INFO: $e');
+      }
+    }
+
+    final uptime = DateTime.now().difference(_metricsStartTime);
+
+    return {
+      'connected': _connected,
+      'uptime_seconds': uptime.inSeconds,
+      'total_operations': _operationCount,
+      'get_hits': _getHits,
+      'get_misses': _getMisses,
+      'hit_ratio_percent': hitRatio,
+      'set_operations': _setOperations,
+      'delete_operations': _deleteOperations,
+      'average_latency_ms': avgLatencyMs,
+      'total_latency_ms': _totalLatencyMs,
+      'memory_used_bytes': usedMemory,
+      'memory_used_mb': (usedMemory / (1024 * 1024)).toStringAsFixed(2),
+    };
+  }
+
   /// Send a command to Redis using RESP protocol.
-  Future<dynamic> _sendCommand(List<String> command, {Duration timeout = const Duration(seconds: 5)}) async {
+  Future<dynamic> _sendCommand(
+    List<String> command, {
+    Duration timeout = const Duration(seconds: 5),
+  }) async {
     late Socket socket;
+    final startTime = DateTime.now();
     try {
       socket = await Socket.connect(_host, _port, timeout: timeout);
 
@@ -167,46 +252,52 @@ class DragonflyCache {
       final completer = Completer<dynamic>();
       late StreamSubscription subscription;
 
-      subscription = socket.timeout(timeout).listen(
-        (data) {
-          responseData.addAll(data);
-          // Try to parse as we go
-          try {
-            final parsed = _parseResp(responseData);
-            if (parsed != null) {
+      subscription = socket
+          .timeout(timeout)
+          .listen(
+            (data) {
+              responseData.addAll(data);
+              // Try to parse as we go
+              try {
+                final parsed = _parseResp(responseData);
+                if (parsed != null) {
+                  subscription.cancel();
+                  socket.destroy();
+                  completer.complete(parsed['value']);
+                }
+              } catch (_) {
+                // Keep reading
+              }
+            },
+            onError: (e) {
               subscription.cancel();
               socket.destroy();
-              completer.complete(parsed['value']);
-            }
-          } catch (_) {
-            // Keep reading
-          }
-        },
-        onError: (e) {
-          subscription.cancel();
-          socket.destroy();
-          completer.completeError(e);
-        },
-        onDone: () {
-          subscription.cancel();
-          socket.destroy();
-          if (!completer.isCompleted) {
-            try {
-              final parsed = _parseResp(responseData);
-              if (parsed != null) {
-                completer.complete(parsed['value']);
-              } else {
-                completer.completeError('Incomplete RESP response');
-              }
-            } catch (e) {
               completer.completeError(e);
-            }
-          }
-        },
-        cancelOnError: true,
-      );
+            },
+            onDone: () {
+              subscription.cancel();
+              socket.destroy();
+              if (!completer.isCompleted) {
+                try {
+                  final parsed = _parseResp(responseData);
+                  if (parsed != null) {
+                    completer.complete(parsed['value']);
+                  } else {
+                    completer.completeError('Incomplete RESP response');
+                  }
+                } catch (e) {
+                  completer.completeError(e);
+                }
+              }
+            },
+            cancelOnError: true,
+          );
 
-      return completer.future;
+      final result = await completer.future;
+      final latencyMs = DateTime.now().difference(startTime).inMilliseconds;
+      _totalLatencyMs += latencyMs;
+      _operationCount++;
+      return result;
     } catch (e) {
       try {
         socket.destroy();
@@ -275,7 +366,8 @@ class DragonflyCache {
   /// Find \r\n in buffer starting at position.
   int _findCrLf(List<int> buffer, int start) {
     for (int i = start; i < buffer.length - 1; i++) {
-      if (buffer[i] == 13 && buffer[i + 1] == 10) { // \r\n
+      if (buffer[i] == 13 && buffer[i + 1] == 10) {
+        // \r\n
         return i;
       }
     }
