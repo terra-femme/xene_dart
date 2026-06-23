@@ -6,6 +6,13 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'auth_provider.dart';
 import 'config_provider.dart';
 
+// Fallback backend URL for utilities that can't use providers (e.g. artwork_proxy.dart).
+// The main Dio instance uses appConfigProvider for dynamic configuration.
+const kBackendUrl = String.fromEnvironment(
+  'BACKEND_URL',
+  defaultValue: 'http://localhost:8080',
+);
+
 // Refresh proactively when the access token is within this window of expiry, so
 // a request doesn't go out carrying a token that lapses mid-flight.
 const _kProactiveRefreshWindow = Duration(seconds: 60);
