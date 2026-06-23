@@ -4,12 +4,18 @@ import 'dart:math';
 import 'package:logging/logging.dart';
 import 'package:xene_domain/xene_domain.dart';
 import 'database.dart';
+import 'services/dragonfly_cache_service.dart';
 
 final _logger = Logger('feed_cache');
 
-// In-process coalescing: prevents concurrent requests from each launching an
-// independent live scrape for the same platform/artist.
-final _inFlight = <String, Future<List<FeedItem>>>{};
+// Distributed request coalescing via DragonflyDB: prevents concurrent requests
+// across multiple replicas from each launching independent live scrapes.
+// Stores Future objects as JSON serialized state in cache with 10s TTL.
+final _cache = DragonflyCache();
+
+// In-process fallback for in-flight futures during this request cycle.
+// (Can't serialize Future across network, so we keep local refs and sync via cache presence.)
+final _inFlightLocal = <String, Future<List<FeedItem>>>{};
 
 final _random = Random();
 
@@ -117,11 +123,22 @@ Future<List<FeedItem>> fetchWithCache(
 
   // Live fetch - coalesced so concurrent requests share one scrape.
   final inflightKey = '$platform:$artistName';
-  if (_inFlight.containsKey(inflightKey)) {
+
+  // Check distributed cache first (detects in-flight on other replicas).
+  if (await _cache.exists(_inflightMarkerKey(inflightKey))) {
     _logger.info(
-      '[feed_cache] Coalescing in-flight fetch for $platform/$artistName',
+      '[feed_cache] Coalescing in-flight fetch for $platform/$artistName (via DragonflyDB)',
     );
-    return await _inFlight[inflightKey]!;
+    // Wait for marker to disappear (up to 10s, its TTL).
+    return await _waitForCoalescedFetch(db, platform, artistName, cacheDays, ttl);
+  }
+
+  // Check local in-process map (same replica, current request cycle).
+  if (_inFlightLocal.containsKey(inflightKey)) {
+    _logger.info(
+      '[feed_cache] Coalescing in-flight fetch for $platform/$artistName (local)',
+    );
+    return await _inFlightLocal[inflightKey]!;
   }
 
   final leaseKey = _refreshLeaseCacheKey(platform, artistName);
@@ -173,6 +190,9 @@ Future<List<FeedItem>> fetchWithCache(
     return [];
   }
 
+  // Mark as in-flight in distributed cache (10s TTL, tells other replicas we're fetching).
+  await _cache.set(_inflightMarkerKey(inflightKey), 'fetching', expirySeconds: 10);
+
   final liveWork = _runLiveFetch(
     db,
     platform,
@@ -182,12 +202,14 @@ Future<List<FeedItem>> fetchWithCache(
     ttl,
     leaseKey: leaseKey,
     leaseOwner: leaseOwner,
+    inflightKey: inflightKey,
   );
-  _inFlight[inflightKey] = liveWork;
+  _inFlightLocal[inflightKey] = liveWork;
   try {
     return await liveWork;
   } finally {
-    _inFlight.remove(inflightKey);
+    _inFlightLocal.remove(inflightKey);
+    await _cache.delete(_inflightMarkerKey(inflightKey));
   }
 }
 
@@ -201,6 +223,7 @@ Future<List<FeedItem>> _runLiveFetch(
   Duration ttl, {
   String? leaseKey,
   String? leaseOwner,
+  String? inflightKey,
 }) async {
   final now = DateTime.now().toUtc();
   var completed = false;
@@ -258,6 +281,50 @@ Future<List<FeedItem>> _runLiveFetch(
     }
   }
 }
+
+/// Wait for a distributed in-flight fetch to complete by polling cache presence.
+/// If marker disappears (fetch done) or timeout (10s), serve stale cache.
+Future<List<FeedItem>> _waitForCoalescedFetch(
+  DatabaseService db,
+  String platform,
+  String artistName,
+  int cacheDays,
+  Duration ttl,
+) async {
+  const maxWaitMs = 10000;
+  const pollIntervalMs = 100;
+  var elapsed = 0;
+
+  while (elapsed < maxWaitMs) {
+    if (!await _cache.exists(_inflightMarkerKey('$platform:$artistName'))) {
+      _logger.info(
+        '[feed_cache] Coalesced fetch completed for $platform/$artistName, '
+        'returning fresh cache (elapsed=${elapsed}ms)',
+      );
+      final rows = await db.getCachedFeedItems(
+        platform: platform,
+        artistName: artistName,
+        days: cacheDays,
+      );
+      return rows.map(feedItemFromRow).whereType<FeedItem>().toList();
+    }
+    await Future.delayed(Duration(milliseconds: pollIntervalMs));
+    elapsed += pollIntervalMs;
+  }
+
+  _logger.warning(
+    '[feed_cache] Coalesced fetch timeout for $platform/$artistName '
+    'after ${maxWaitMs}ms, serving stale cache',
+  );
+  final rows = await db.getCachedFeedItems(
+    platform: platform,
+    artistName: artistName,
+    days: cacheDays,
+  );
+  return rows.map(feedItemFromRow).whereType<FeedItem>().toList();
+}
+
+String _inflightMarkerKey(String key) => 'feed_inflight:$key';
 
 String _emptyWindowCacheKey(
   String platform,

@@ -22,6 +22,7 @@ import 'package:xene_backend/src/services/discogs_service.dart';
 import 'package:xene_backend/src/services/analysis_service.dart';
 import 'package:xene_backend/src/services/game_service.dart';
 import 'package:xene_backend/src/services/daily_inbox_service.dart';
+import 'package:xene_backend/src/services/dragonfly_cache_service.dart';
 
 // Wire up the logging package — must run before any route handler.
 // Top-level vars in Dart are lazily initialized, so we reference _loggingReady
@@ -58,6 +59,7 @@ final bool _isProduction =
 
 // Global singleton instances
 final _db = DatabaseService();
+final _cache = DragonflyCache();
 final _apiAnalytics = ApiAnalyticsService();
 final _soundcloud = SoundCloudService(_db, analytics: _apiAnalytics);
 final _youtube = YouTubeService(_db, analytics: _apiAnalytics);
@@ -97,6 +99,20 @@ final _discovery = DiscoveryService(
   rotator: _geminiRotator,
   analytics: _apiAnalytics,
 );
+
+// Initialize distributed cache at server startup.
+final bool _cacheReady = () {
+  _cache.init(failOpen: true).then((ok) {
+    if (ok) {
+      print('[STARTUP] DragonflyDB cache initialized ✓');
+    } else {
+      print('[STARTUP] DragonflyDB cache disabled (will fall back gracefully)');
+    }
+  }).catchError((e) {
+    print('[STARTUP] DragonflyDB init error (fail-open): $e');
+  });
+  return true;
+}();
 
 // Print env key status at server startup — visible before any request.
 final bool _envReady = () {
@@ -145,6 +161,7 @@ final middleware = (Handler handler) {
       .use(_corsMiddleware)
       .use(_debugMiddleware)
       .use(provider<DatabaseService>((_) => _db))
+      .use(provider<DragonflyCache>((_) => _cache))
       .use(provider<SoundCloudService>((_) => _soundcloud))
       .use(provider<YouTubeService>((_) => _youtube))
       .use(provider<BeatportService>((_) => _beatport))
@@ -225,6 +242,7 @@ Handler _corsMiddleware(Handler handler) {
 Handler _debugMiddleware(Handler handler) {
   return (context) async {
     _loggingReady; // triggers lazy init of the logging listener on first request
+    _cacheReady; // triggers DragonflyDB init on first request
     _envReady; // triggers env print on first request if startup didn't fire it
     _logger.fine('${context.request.method.value} ${context.request.uri.path}');
     return handler(context);

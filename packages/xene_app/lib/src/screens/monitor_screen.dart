@@ -94,6 +94,155 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen> {
   }
 }
 
+// ── Capacity card ────────────────────────────────────────────────────────
+
+class _CapacityCard extends StatelessWidget {
+  const _CapacityCard({required this.capacity});
+  final Map<String, dynamic> capacity;
+
+  @override
+  Widget build(BuildContext context) {
+    final users = capacity['users'] as Map<String, dynamic>? ?? {};
+    final storage = capacity['storage'] as Map<String, dynamic>? ?? {};
+
+    final userCurrent = users['current'] as int? ?? 0;
+    final userCap = users['cap'] as int? ?? 2000;
+    final userPercent = users['percentUsed'] as double? ?? 0.0;
+    final userAlert = users['alert'] as String?;
+
+    final storageCurrent = storage['used_mb'] as double? ?? 0.0;
+    final storageCap = storage['cap_mb'] as double? ?? 50.0;
+    final storagePercent = storage['percentUsed'] as double? ?? 0.0;
+    final storageAlert = storage['alert'] as String?;
+
+    Color _alertColor(String? alert) {
+      if (alert == 'CRITICAL') return Colors.redAccent;
+      if (alert == 'WARNING') return _kOrange;
+      return _kTeal;
+    }
+
+    IconData _alertIcon(String? alert) {
+      if (alert == 'CRITICAL') return Icons.error_outline;
+      if (alert == 'WARNING') return Icons.warning_amber_rounded;
+      return Icons.check_circle_outline;
+    }
+
+    return _Card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.storage, color: _kTeal, size: 18),
+              const SizedBox(width: 8),
+              _SectionLabel('CAPACITY'),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // Users
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          'USERS',
+                          style: GoogleFonts.teko(
+                            color: Colors.white,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Icon(
+                          _alertIcon(userAlert),
+                          size: 14,
+                          color: _alertColor(userAlert),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: LinearProgressIndicator(
+                        minHeight: 6,
+                        value: userPercent / 100,
+                        backgroundColor: const Color(0xFF2A2A2A),
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                          _alertColor(userAlert),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '$userCurrent / $userCap (${userPercent.toStringAsFixed(1)}%)',
+                      style: GoogleFonts.teko(
+                        color: Colors.white70,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          'STORAGE',
+                          style: GoogleFonts.teko(
+                            color: Colors.white,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Icon(
+                          _alertIcon(storageAlert),
+                          size: 14,
+                          color: _alertColor(storageAlert),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: LinearProgressIndicator(
+                        minHeight: 6,
+                        value: storagePercent / 100,
+                        backgroundColor: const Color(0xFF2A2A2A),
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                          _alertColor(storageAlert),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${storageCurrent.toStringAsFixed(1)} / ${storageCap.toStringAsFixed(0)} MB (${storagePercent.toStringAsFixed(1)}%)',
+                      style: GoogleFonts.teko(
+                        color: Colors.white70,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // ── Top bar ───────────────────────────────────────────────────────────────
 
 class _TopBar extends StatelessWidget {
@@ -146,6 +295,7 @@ class _Dashboard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final gemini = data['gemini'] as Map<String, dynamic>? ?? {};
+    final capacity = data['capacity'] as Map<String, dynamic>? ?? {};
     final onboarding = data['onboarding'] as Map<String, dynamic>? ?? {};
     final upkeep = data['upkeep'] as Map<String, dynamic>? ?? {};
     final perKey =
@@ -166,6 +316,10 @@ class _Dashboard extends StatelessWidget {
       children: [
         _GeminiKeySection(gemini: gemini),
         const SizedBox(height: 12),
+        if (capacity.isNotEmpty) ...[
+          _CapacityCard(capacity: capacity),
+          const SizedBox(height: 12),
+        ],
         LayoutBuilder(
           builder: (context, constraints) {
             final isNarrow = constraints.maxWidth < 520;

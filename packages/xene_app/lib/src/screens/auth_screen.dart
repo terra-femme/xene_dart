@@ -3,12 +3,9 @@ import 'package:flutter/foundation.dart' show kIsWeb, kDebugMode;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../providers/capacity_check_provider.dart';
 import '../theme/xene_theme.dart';
 
-// Web: Supabase redirects back to this URL after the magic link is clicked.
-// The browser loads it and supabase_flutter picks up the session from the
-// URL hash automatically. Must match a URL in Supabase dashboard → Redirect URLs.
-// Mobile: uses the custom URL scheme so the OS reopens the app.
 const _kWebRedirectUrl = String.fromEnvironment(
   'AUTH_REDIRECT_URL',
   defaultValue: 'http://localhost:4000',
@@ -28,6 +25,8 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
   bool _sent = false;
   String? _error;
   bool _anonLoading = false;
+  bool _showCapacitySlideUp = false;
+  CapacityCheckResponse? _capacityCheckResult;
 
   @override
   void dispose() {
@@ -35,16 +34,32 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
     super.dispose();
   }
 
-  Future<void> _sendMagicLink() async {
+  Future<void> _checkEmailAndSendLink() async {
     final email = _emailController.text.trim();
     if (email.isEmpty) return;
 
     setState(() {
       _loading = true;
       _error = null;
+      _showCapacitySlideUp = false;
     });
 
     try {
+      // Check if this email can sign up
+      // Existing users can always sign in; new users blocked if at capacity
+      final checkResult = await ref.read(
+        checkEmailSignupProvider(email).future,
+      );
+
+      setState(() => _capacityCheckResult = checkResult);
+
+      // If can't sign up, show slide-up instead of sending link
+      if (!checkResult.canSignUp) {
+        setState(() => _showCapacitySlideUp = true);
+        return;
+      }
+
+      // If can sign up, send the magic link
       await Supabase.instance.client.auth.signInWithOtp(
         email: email,
         emailRedirectTo: kIsWeb ? _kWebRedirectUrl : _kMobileRedirectUrl,
@@ -52,7 +67,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
       if (mounted) setState(() => _sent = true);
     } on AuthException catch (e) {
       if (mounted) setState(() => _error = e.message);
-    } catch (_) {
+    } catch (e) {
       if (mounted) setState(() => _error = 'Something went wrong. Try again.');
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -74,6 +89,8 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final capacityCheck = ref.watch(capacityCheckProvider);
+
     return Scaffold(
       backgroundColor: Colors.white,
       body: SafeArea(
@@ -82,20 +99,154 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
             constraints: const BoxConstraints(maxWidth: 400),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 32),
-              child: _sent
-                  ? _ConfirmationView(email: _emailController.text.trim())
-                  : _EmailForm(
-                      controller: _emailController,
-                      loading: _loading,
-                      anonLoading: _anonLoading,
-                      error: _error,
-                      onSubmit: _sendMagicLink,
-                      onAnonSignIn: kDebugMode ? _signInAnonymously : null,
-                    ),
+              child: capacityCheck.when(
+                loading: () => Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const CircularProgressIndicator(color: XeneTheme.orange),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Loading...',
+                        style: GoogleFonts.archivo(
+                          fontSize: 14,
+                          color: XeneTheme.muted,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                error: (_, __) => _buildAuthWithHealthBar(null),
+                data: (capacity) => _buildAuthWithHealthBar(capacity),
+              ),
             ),
           ),
         ),
       ),
+      bottomSheet: _showCapacitySlideUp && _capacityCheckResult != null
+          ? _CapacitySlideUp(
+              capacity: _capacityCheckResult!,
+              onDismiss: () => setState(() => _showCapacitySlideUp = false),
+            )
+          : null,
+    );
+  }
+
+  Widget _buildAuthWithHealthBar(CapacityCheckResponse? capacity) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (capacity != null)
+          _CapacityHealthBar(percent: capacity.userCapPercent)
+        else
+          const SizedBox.shrink(),
+        if (capacity != null) const SizedBox(height: 24),
+        if (_sent)
+          _ConfirmationView(email: _emailController.text.trim())
+        else
+          _EmailForm(
+            controller: _emailController,
+            loading: _loading,
+            error: _error,
+            onSubmit: _checkEmailAndSendLink,
+            onAnonSignIn: kDebugMode ? _signInAnonymously : null,
+            anonLoading: _anonLoading,
+          ),
+      ],
+    );
+  }
+}
+
+class _CapacityHealthBar extends StatelessWidget {
+  const _CapacityHealthBar({required this.percent});
+  final double percent;
+
+  Color _barColor() {
+    if (percent >= 90) {
+      return Color.lerp(
+        Colors.red.shade700,
+        Colors.red.shade400,
+        ((percent - 90) / 10).clamp(0, 1),
+      )!;
+    }
+    if (percent >= 80) {
+      return Color.lerp(
+        Colors.orange.shade600,
+        Colors.red.shade700,
+        ((percent - 80) / 10),
+      )!;
+    }
+    if (percent >= 50) {
+      return Color.lerp(
+        Colors.yellow.shade700,
+        Colors.orange.shade600,
+        ((percent - 50) / 30),
+      )!;
+    }
+    return Colors.green.shade500;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final displayPercent = (percent / 100).clamp(0.0, 1.0);
+
+    return Column(
+      children: [
+        Container(
+          width: double.infinity,
+          height: 8,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(color: XeneTheme.border, width: 1),
+            color: const Color(0xFFF5F5F5),
+          ),
+          child: Stack(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(3),
+                child: LinearProgressIndicator(
+                  minHeight: 6,
+                  value: displayPercent,
+                  backgroundColor: Colors.transparent,
+                  valueColor: AlwaysStoppedAnimation<Color>(_barColor()),
+                ),
+              ),
+              if (displayPercent > 0.02)
+                Positioned(
+                  left: (displayPercent * 100).clamp(6, double.infinity),
+                  top: 0,
+                  child: Container(
+                    width: 2,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.7),
+                      boxShadow: [
+                        BoxShadow(
+                          color: _barColor().withValues(alpha: 0.4),
+                          blurRadius: 3,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          percent >= 90
+              ? 'Xene is reaching capacity'
+              : percent >= 70
+              ? 'Filling up...'
+              : 'Room to grow',
+          style: GoogleFonts.archivo(
+            fontSize: 11,
+            color: XeneTheme.muted,
+            fontStyle: FontStyle.italic,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -269,6 +420,106 @@ class _ConfirmationView extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _CapacitySlideUp extends StatelessWidget {
+  const _CapacitySlideUp({required this.capacity, required this.onDismiss});
+
+  final CapacityCheckResponse capacity;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black12,
+            blurRadius: 8,
+            offset: Offset(0, -2),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.fromLTRB(32, 24, 32, 40),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Xene at Capacity',
+                style: GoogleFonts.teko(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.black,
+                  letterSpacing: 0.8,
+                ),
+              ),
+              GestureDetector(
+                onTap: onDismiss,
+                child: const Icon(
+                  Icons.close,
+                  size: 24,
+                  color: XeneTheme.muted,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'We\'re growing fast! New signups are temporarily paused.',
+            style: GoogleFonts.archivo(
+              fontSize: 14,
+              color: const Color(0xFF666666),
+              height: 1.6,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF5F0),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFFFFE0D0), width: 1),
+            ),
+            child: Text(
+              '${capacity.userCount} users are already enjoying Xene. Try again soon!',
+              style: GoogleFonts.archivo(
+                fontSize: 12,
+                color: const Color(0xFF555555),
+                height: 1.5,
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          SizedBox(
+            height: 44,
+            child: OutlinedButton(
+              onPressed: onDismiss,
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: XeneTheme.border),
+                shape: const RoundedRectangleBorder(
+                  borderRadius: BorderRadius.all(Radius.circular(4)),
+                ),
+              ),
+              child: Text(
+                'GOT IT',
+                style: GoogleFonts.teko(
+                  fontSize: 14,
+                  letterSpacing: 1,
+                  color: XeneTheme.muted,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
