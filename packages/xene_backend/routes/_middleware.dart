@@ -57,6 +57,12 @@ final _allowedOrigins = () {
 final bool _isProduction =
     (Platform.environment['XENE_ENV'] ?? 'development') == 'production';
 
+// True when ALLOW_DEV_ORIGINS=true. Allows pattern-matched dev origins (private IPs)
+// even in production, useful for testing on local networks. Set this in Azure when
+// testing from local machine, remove for production-only security.
+final bool _allowDevOrigins =
+    (Platform.environment['ALLOW_DEV_ORIGINS'] ?? 'false').toLowerCase() == 'true';
+
 // Global singleton instances
 final _db = DatabaseService();
 final _cache = DragonflyCache();
@@ -140,6 +146,15 @@ final bool _envReady = () {
     print('╚══════════════════════════════════════════════════════╝');
   }
 
+  // Warn when dev origins are enabled in production
+  if (xeneEnv == 'production' && _allowDevOrigins) {
+    print('');
+    print('⚠️  ALLOW_DEV_ORIGINS=true in production');
+    print('    Local network IPs (192.168.*, 10.*, 172.16-31.*) will be accepted');
+    print('    REMOVE this for production-only deployments');
+    print('');
+  }
+
   print('');
   return true;
 }();
@@ -157,9 +172,11 @@ final _scheduler = SchedulerService(
 
 // Helper: Check if origin matches a development pattern.
 // In development mode, allow any port on localhost, 127.0.0.1, and private IP ranges.
+// In production, only allow these if ALLOW_DEV_ORIGINS=true (for local network testing on Azure).
 // This avoids hardcoding exact ports when running dev servers on custom ports.
 bool _isDevAllowedOrigin(String origin) {
-  if (_isProduction) return false; // Never pattern-match in production.
+  // Never pattern-match in production unless explicitly enabled
+  if (_isProduction && !_allowDevOrigins) return false;
 
   // Remove http:// or https:// prefix
   String host = origin.replaceFirst(RegExp(r'^https?://'), '');
