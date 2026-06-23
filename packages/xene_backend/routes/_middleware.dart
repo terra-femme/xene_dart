@@ -155,6 +155,37 @@ final _scheduler = SchedulerService(
   publicationRepo: _publicationRepo,
 )..start();
 
+// Helper: Check if origin matches a development pattern.
+// In development mode, allow any port on localhost, 127.0.0.1, and private IP ranges.
+// This avoids hardcoding exact ports when running dev servers on custom ports.
+bool _isDevAllowedOrigin(String origin) {
+  if (_isProduction) return false; // Never pattern-match in production.
+
+  // Remove http:// or https:// prefix
+  String host = origin.replaceFirst(RegExp(r'^https?://'), '');
+  // Remove port if present (e.g., "192.168.1.100:9000" → "192.168.1.100")
+  String ip = host.split(':')[0];
+
+  // Allow localhost and loopback (any port)
+  if (ip == 'localhost' || ip == '127.0.0.1') return true;
+
+  // Allow private IP ranges (any port) — common in local networks
+  // 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+  if (ip.startsWith('10.')) return true;
+  if (ip.startsWith('192.168.')) return true;
+  if (ip.startsWith('172.') && _isIn172Range(ip)) return true;
+
+  return false;
+}
+
+// Helper: Check if IP is in 172.16.0.0/12 range (172.16.0.0 to 172.31.255.255)
+bool _isIn172Range(String ip) {
+  final parts = ip.split('.');
+  if (parts.length != 4) return false;
+  final secondOctet = int.tryParse(parts[1]) ?? 0;
+  return secondOctet >= 16 && secondOctet <= 31;
+}
+
 final middleware = (Handler handler) {
   return handler
       .use(_jwtMiddleware)
@@ -191,12 +222,13 @@ Handler _corsMiddleware(Handler handler) {
     // or fall back to '*' so localhost dev still works without any env setup.
     String effectiveOrigin;
     if (_allowedOrigins.isNotEmpty) {
-      // Allowlist configured: echo the origin only if it's on the list,
-      // otherwise send a non-matching origin so the browser blocks it.
-      effectiveOrigin =
-          (requestOrigin != null && _allowedOrigins.contains(requestOrigin))
-          ? requestOrigin
-          : _allowedOrigins.first;
+      // Allowlist configured: check for exact match first, then pattern match
+      // for development (any port on localhost/127.0.0.1/private IPs).
+      bool originAllowed = requestOrigin != null && (
+          _allowedOrigins.contains(requestOrigin) ||
+          (_isDevAllowedOrigin(requestOrigin))
+      );
+      effectiveOrigin = originAllowed ? requestOrigin! : _allowedOrigins.first;
     } else if (_isProduction) {
       // Fail CLOSED in production when no allowlist is set: never echo an
       // arbitrary origin or '*'. 'null' matches no real origin, so the browser
