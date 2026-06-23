@@ -245,7 +245,7 @@ Handler _corsMiddleware(Handler handler) {
           _allowedOrigins.contains(requestOrigin) ||
           (_isDevAllowedOrigin(requestOrigin))
       );
-      effectiveOrigin = originAllowed ? requestOrigin! : _allowedOrigins.first;
+      effectiveOrigin = originAllowed ? requestOrigin : _allowedOrigins.first;
     } else if (_isProduction) {
       // Fail CLOSED in production when no allowlist is set: never echo an
       // arbitrary origin or '*'. 'null' matches no real origin, so the browser
