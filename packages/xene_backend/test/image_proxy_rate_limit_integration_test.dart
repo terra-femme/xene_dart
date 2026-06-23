@@ -1,4 +1,3 @@
-import 'package:dart_frog/dart_frog.dart';
 import 'package:test/test.dart';
 import 'package:xene_backend/src/utils/rate_limiter.dart';
 
@@ -6,7 +5,6 @@ void main() {
   group('Image Proxy Rate Limiting Integration', () {
     test('imageProxyRateLimiter enforces 200 req/min per IP', () {
       // Simulate the rate limiting logic from routes/proxy/image.dart
-      final clientIp = '203.0.113.42'; // Example client IP
       final stats = imageProxyRateLimiter.stats;
 
       // Verify configuration

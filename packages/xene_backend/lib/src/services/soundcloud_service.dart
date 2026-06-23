@@ -1138,7 +1138,7 @@ class SoundCloudService {
           artworkUrl:
               ((track['artwork_url'] as String?)?.replaceFirst('-large.', '-t500x500.')) ??
               avatarUrl,
-          externalUrl: _validateTrackUrl(track['permalink_url']) as String,
+          externalUrl: _validateTrackUrl(track['permalink_url']),
           publishedAt: publishedAt,
           durationSeconds: (track['duration'] as int) ~/ 1000,
           playCount: track['playback_count'] as int?,
@@ -1253,7 +1253,7 @@ class SoundCloudService {
             artworkUrl:
                 ((pl['artwork_url'] as String?)?.replaceFirst('-large.', '-t500x500.')) ??
                 avatarUrl,
-            externalUrl: _validateTrackUrl(pl['permalink_url']) as String,
+            externalUrl: _validateTrackUrl(pl['permalink_url']),
             publishedAt: publishedAt,
             trackCount: pl['track_count'] as int?,
             durationSeconds: pl['duration'] is int && (pl['duration'] as int) > 0
