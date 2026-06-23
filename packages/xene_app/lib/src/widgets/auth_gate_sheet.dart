@@ -1,7 +1,9 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../providers/capacity_check_provider.dart';
 import '../theme/xene_theme.dart';
 
 const _kWebRedirectUrl = String.fromEnvironment(
@@ -24,15 +26,15 @@ void showAuthGate(BuildContext context, {required String featureHint}) {
   );
 }
 
-class _AuthGateSheet extends StatefulWidget {
+class _AuthGateSheet extends ConsumerStatefulWidget {
   const _AuthGateSheet({required this.featureHint});
   final String featureHint;
 
   @override
-  State<_AuthGateSheet> createState() => _AuthGateSheetState();
+  ConsumerState<_AuthGateSheet> createState() => _AuthGateSheetState();
 }
 
-class _AuthGateSheetState extends State<_AuthGateSheet> {
+class _AuthGateSheetState extends ConsumerState<_AuthGateSheet> {
   final _emailController = TextEditingController();
   bool _loading = false;
   bool _sent = false;
@@ -52,6 +54,24 @@ class _AuthGateSheetState extends State<_AuthGateSheet> {
       _error = null;
     });
     try {
+      // Check if email can sign up (existing users allowed; new users blocked if full)
+      final checkResult = await ref.read(
+        checkEmailSignupProvider(email).future,
+      );
+
+      if (!checkResult.canSignUp) {
+        if (mounted) {
+          Navigator.pop(context);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(checkResult.message),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
+
       await Supabase.instance.client.auth.signInWithOtp(
         email: email,
         emailRedirectTo: kIsWeb ? _kWebRedirectUrl : _kMobileRedirectUrl,

@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  dragonfly:
+    image: 'ghcr.io/dragonflydb/dragonfly:latest'
+    container_name: xene-dragonfly
+    ports:
+      - '6379:6379'
+    environment:
+      - DRAGONFLY_LOGTOSTDERR=true
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    volumes:
+      - dragonfly-data:/data
+    command: 'dragonfly --bind=0.0.0.0 --port=6379'
+
+volumes:
+  dragonfly-data:
+    driver: local

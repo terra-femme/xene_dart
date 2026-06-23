@@ -2,6 +2,7 @@ import 'package:dart_frog/dart_frog.dart';
 import 'package:logging/logging.dart';
 import 'package:xene_backend/src/database.dart';
 import 'package:xene_backend/src/services/api_analytics_service.dart';
+import 'package:xene_backend/src/services/capacity_service.dart';
 import 'package:xene_backend/src/services/gemini_key_rotator.dart';
 import 'package:xene_backend/src/utils/auth_utils.dart';
 import 'package:xene_backend/src/utils/rate_limiter.dart';
@@ -38,11 +39,15 @@ Future<Response> onRequest(RequestContext context) async {
 
   final rotator = context.read<GeminiKeyRotator>();
   final apiAnalytics = context.read<ApiAnalyticsService>();
+  final capacity = context.read<CapacityService>();
+
+  final capacityStatus = await capacity.getStatus();
 
   return Response.json(
     body: {
       ...rotator.stats,
       'api': apiAnalytics.stats,
+      'capacity': capacityStatus.toJson(),
       'rateLimits': {
         'feedMerged': feedMergedRateLimiter.stats,
         'forceRefresh': forceRefreshRateLimiter.stats,
