@@ -23,6 +23,7 @@ import 'package:xene_backend/src/services/analysis_service.dart';
 import 'package:xene_backend/src/services/game_service.dart';
 import 'package:xene_backend/src/services/daily_inbox_service.dart';
 import 'package:xene_backend/src/services/dragonfly_cache_service.dart';
+import 'package:xene_backend/src/services/capacity_service.dart';
 
 // Wire up the logging package — must run before any route handler.
 // Top-level vars in Dart are lazily initialized, so we reference _loggingReady
@@ -77,6 +78,7 @@ final _discogs = DiscogsService(analytics: _apiAnalytics);
 final _analysis = AnalysisService(_db, analytics: _apiAnalytics);
 final _game = GameService(_db);
 final _dailyInbox = DailyInboxService(_db);
+final _capacity = CapacityService(_db);
 
 // Shared Gemini key rotator — one instance for all services so key state is global.
 final _geminiRotator = GeminiKeyRotator(analytics: _apiAnalytics);
@@ -226,7 +228,8 @@ final middleware = (Handler handler) {
       .use(provider<PublicationPollerService>((_) => _publicationPoller))
       .use(provider<AnalysisService>((_) => _analysis))
       .use(provider<GameService>((_) => _game))
-      .use(provider<DailyInboxService>((_) => _dailyInbox));
+      .use(provider<DailyInboxService>((_) => _dailyInbox))
+      .use(provider<CapacityService>((_) => _capacity));
 };
 
 Handler _corsMiddleware(Handler handler) {
