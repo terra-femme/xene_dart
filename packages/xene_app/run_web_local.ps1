@@ -53,17 +53,15 @@ if ($backendResponse -and $backendResponse.StatusCode -eq 200) {
 
 Write-Host ""
 
+# Supabase credentials (from .env)
+$supabaseUrl = "https://zwhabeyrhiqwzzttwfrk.supabase.co"
+$supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp3aGFiZXlyaGlxd3p6dHR3ZnJrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1NTU0NDMsImV4cCI6MjA5MjEzMTQ0M30.-w5Iuke6u2CKSsCJ3MXsmdkEWQhipBnCak1wOHpQUI4"
+
 # Start dev server
 if ($useLocalBackend) {
     Write-Host "🚀 Starting Flutter web (with local backend)..." -ForegroundColor Cyan
-    & flutter run -d web `
-        --web-hostname 0.0.0.0 `
-        --web-port $port `
-        --dart-define=BACKEND_URL=http://$localIP`:8080
+    flutter run -d chrome --web-hostname $localIP --web-port $port --dart-define=BACKEND_URL=http://$localIP`:8080 --dart-define=SUPABASE_URL=$supabaseUrl --dart-define=SUPABASE_ANON_KEY=$supabaseAnonKey
 } else {
     Write-Host "🚀 Starting Flutter web (with production backend)..." -ForegroundColor Cyan
-    & flutter run -d web `
-        --web-hostname 0.0.0.0 `
-        --web-port $port `
-        --dart-define=BACKEND_URL=https://xene-backend.yellowwater-2ccd556b.eastus.azurecontainerapps.io
+    flutter run -d chrome --web-hostname $localIP --web-port $port --dart-define=BACKEND_URL=https://xene-backend.yellowwater-2ccd556b.eastus.azurecontainerapps.io --dart-define=SUPABASE_URL=$supabaseUrl --dart-define=SUPABASE_ANON_KEY=$supabaseAnonKey
 }
