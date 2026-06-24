@@ -40,17 +40,23 @@ class DragonflyCache {
       _host = uri.host.isEmpty ? 'localhost' : uri.host;
       _port = uri.port == 0 ? 6379 : uri.port;
 
+      print('[DRAGONFLY_CACHE] INIT: DRAGONFLY_URL env = $urlStr');
+      print('[DRAGONFLY_CACHE] INIT: Parsed host=$_host, port=$_port');
       _logger.info('[dragonfly_cache] Testing connection to $_host:$_port');
 
       final pingResult = await _sendCommand(['PING']);
+      print('[DRAGONFLY_CACHE] INIT: PING response = $pingResult');
       if (pingResult == 'PONG') {
+        print('[DRAGONFLY_CACHE] INIT: Connection SUCCESS ✓');
         _logger.info('[dragonfly_cache] Connected successfully ✓');
         _connected = true;
         return true;
       }
       throw 'PING did not return PONG: $pingResult';
-    } catch (e) {
-      _logger.warning('[dragonfly_cache] Connection failed: $e');
+    } catch (e, stack) {
+      print('[DRAGONFLY_CACHE] INIT: Connection FAILED: $e');
+      print('[DRAGONFLY_CACHE] INIT: Stack trace: $stack');
+      _logger.warning('[dragonfly_cache] Connection failed: $e', e, stack);
       _connected = false;
       if (!failOpen) rethrow;
       return false;
@@ -234,7 +240,9 @@ class DragonflyCache {
     late Socket socket;
     final startTime = DateTime.now();
     try {
+      print('[DRAGONFLY_CACHE] _sendCommand: Attempting Socket.connect($_host:$_port) with ${timeout.inSeconds}s timeout');
       socket = await Socket.connect(_host, _port, timeout: timeout);
+      print('[DRAGONFLY_CACHE] _sendCommand: Socket.connect() SUCCESS');
 
       // Build RESP request
       final buffer = StringBuffer();
@@ -297,8 +305,11 @@ class DragonflyCache {
       final latencyMs = DateTime.now().difference(startTime).inMilliseconds;
       _totalLatencyMs += latencyMs;
       _operationCount++;
+      print('[DRAGONFLY_CACHE] _sendCommand: Command ${command.join(" ")} succeeded in ${latencyMs}ms');
       return result;
-    } catch (e) {
+    } catch (e, stack) {
+      print('[DRAGONFLY_CACHE] _sendCommand: FAILED with error: $e');
+      print('[DRAGONFLY_CACHE] _sendCommand: Stack: $stack');
       try {
         socket.destroy();
       } catch (_) {}
