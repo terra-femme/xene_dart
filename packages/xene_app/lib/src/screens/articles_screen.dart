@@ -124,144 +124,149 @@ class _ContainedMagazineLayoutState extends State<_ContainedMagazineLayout> {
 
   @override
   Widget build(BuildContext context) {
-    final mediaPadding = MediaQuery.of(context).padding;
+    final mediaQuery = MediaQuery.of(context);
+    final mediaPadding = mediaQuery.padding;
     final bottomPad = mediaPadding.bottom;
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final w = constraints.maxWidth;
-        final h = constraints.maxHeight;
-        final rawAspect = widget.cover?.aspectRatioValue ?? 3 / 4;
-        final coverAspect = rawAspect > 0 ? rawAspect : 3 / 4;
-        final isLandscape = w > h;
+    // Use full viewport width/height instead of constrained layout width.
+    // On real Safari (vs device_preview), the LayoutBuilder constraints are
+    // reduced by safe areas. Using a SizedBox with explicit dimensions ensures
+    // the magazine cover spans edge-to-edge on all platforms without being
+    // constrained by parent layout constraints.
+    final w = mediaQuery.size.width;
+    final h = mediaQuery.size.height;
+    final rawAspect = widget.cover?.aspectRatioValue ?? 3 / 4;
+    final coverAspect = rawAspect > 0 ? rawAspect : 3 / 4;
+    final isLandscape = w > h;
 
-        debugPrint(
-          '[ContainedMagazineLayout] screen=${w}x${h} '
-          'coverAspect=$coverAspect cover=${widget.cover?.id ?? "none"} '
-          'landscape=$isLandscape safeL=${mediaPadding.left}',
-        );
+    debugPrint(
+      '[ContainedMagazineLayout] screen=${w}x${h} '
+      'coverAspect=$coverAspect cover=${widget.cover?.id ?? "none"} '
+      'landscape=$isLandscape safeL=${mediaPadding.left}',
+    );
 
-        // Shift the entire content block up by 5 px so the cover sits flush
-        // against the nav bar with no visible seam. Content paints last in
-        // the parent Column so it renders on top of the divider cleanly.
-        const landscapeLift = 20.0;
-        const portraitLift = 5.0;
+    // Shift the entire content block up by 5 px so the cover sits flush
+    // against the nav bar with no visible seam. Content paints last in
+    // the parent Column so it renders on top of the divider cleanly.
+    const landscapeLift = 20.0;
+    const portraitLift = 5.0;
 
-        if (isLandscape) {
-          // Cover fills full width at its natural (portrait) aspect ratio —
-          // much taller than the screen. User scrolls down through the cover,
-          // then reaches the article strip at the bottom.
-          // Keep the authored cover fully visible in landscape; the source
-          // art is positioned carefully and should not be horizontally cropped.
-          final coverH = w / coverAspect;
+    // Wrap in SizedBox with explicit full viewport width to prevent parent
+    // layout constraints from reducing the width on real Safari devices.
+    return SizedBox(
+      width: w,
+      height: h,
+      child: Builder(
+        builder: (context) {
+          if (isLandscape) {
+            // Cover fills full width at its natural (portrait) aspect ratio —
+            // much taller than the screen. User scrolls down through the cover,
+            // then reaches the article strip at the bottom.
+            // Keep the authored cover fully visible in landscape; the source
+            // art is positioned carefully and should not be horizontally cropped.
+            final coverH = w / coverAspect;
 
-          // ClipRect prevents the translated scrollable from painting over the
-          // nav bar. The trade-off is the top landscapeLift px of the cover are
-          // clipped, but the cover is ~1000 px tall so it is imperceptible.
-          return ClipRect(
-            child: Stack(
-              children: [
-                NotificationListener<ScrollNotification>(
-                  onNotification: _handleLandscapeScroll,
-                  child: SingleChildScrollView(
-                    padding: EdgeInsets.only(left: mediaPadding.left),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        SizedBox(
-                          width: w,
-                          height: coverH - landscapeLift,
-                          child: ClipRect(
-                            child: Transform.translate(
-                              offset: const Offset(0, -landscapeLift),
-                              child: SizedBox(
-                                width: w,
-                                height: coverH,
-                                child: _coverStack(w, coverH),
+            // ClipRect prevents the translated scrollable from painting over the
+            // nav bar. The trade-off is the top landscapeLift px of the cover are
+            // clipped, but the cover is ~1000 px tall so it is imperceptible.
+            return ClipRect(
+              child: Stack(
+                children: [
+                  NotificationListener<ScrollNotification>(
+                    onNotification: _handleLandscapeScroll,
+                    child: SingleChildScrollView(
+                      padding: EdgeInsets.only(left: mediaPadding.left),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          SizedBox(
+                            width: w,
+                            height: coverH - landscapeLift,
+                            child: ClipRect(
+                              child: Transform.translate(
+                                offset: const Offset(0, -landscapeLift),
+                                child: SizedBox(
+                                  width: w,
+                                  height: coverH,
+                                  child: _coverStack(w, coverH),
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                        SizedBox(
-                          key: const ValueKey('landscapeArticleStrip'),
-                          height: _stripHeight + bottomPad,
-                          child: ColoredBox(
-                            color: Colors.white,
-                            child: _ArticleStrip(
-                              articles: widget.articles,
-                              bottomPad: bottomPad,
-                              landscape: false,
+                          SizedBox(
+                            key: const ValueKey('landscapeArticleStrip'),
+                            height: _stripHeight + bottomPad,
+                            child: ColoredBox(
+                              color: Colors.white,
+                              child: _ArticleStrip(
+                                articles: widget.articles,
+                                bottomPad: bottomPad,
+                                landscape: false,
+                              ),
                             ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
-                ),
-                if (!_landscapeAtBottom)
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 32 + bottomPad,
-                    child: const IgnorePointer(child: _JumpingChevron()),
+                  if (!_landscapeAtBottom)
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 32 + bottomPad,
+                      child: const IgnorePointer(child: _JumpingChevron()),
+                    ),
+                ],
+              ),
+            );
+          } else {
+            final imgH = w / coverAspect;
+
+            return ClipRect(
+              child: Transform.translate(
+                offset: const Offset(0, -portraitLift),
+                child: CustomScrollView(
+                  physics: const BouncingScrollPhysics(
+                    parent: AlwaysScrollableScrollPhysics(),
                   ),
-              ],
-            ),
-          );
-        }
-
-        // Portrait: Stack layout so the article strip overlaps the cover's
-        // lower portion. The transparent gradient top sits over the cover
-        // image — not below it — producing a correct photo-to-black fade.
-        // ClipRect + portraitLift flush the cover against the nav bar.
-        const overlapPx = 120.0;
-        final maxCoverH = (h - _stripHeight - bottomPad).clamp(0.0, h);
-        final imgH = (w / coverAspect).clamp(0.0, maxCoverH);
-
-        return ClipRect(
-          child: Transform.translate(
-            offset: const Offset(0, -portraitLift),
-            child: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                // Cover pinned to top.
-                Positioned(
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  height: imgH,
-                  child: _coverStack(w, imgH),
-                ),
-                // Strip anchored to bottom, overlapping the cover by overlapPx
-                // so the transparent gradient top sees the cover image.
-                // bottom: -portraitLift extends the strip past the Stack's
-                // layout edge so the -5px translate lands it flush at the
-                // screen bottom, closing the white gap.
-                Positioned(
-                  bottom: -portraitLift,
-                  left: 0,
-                  right: 0,
-                  height: _stripHeight + bottomPad + overlapPx,
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      const _BottomGradient(),
-                      Padding(
-                        padding: const EdgeInsets.only(top: overlapPx),
-                        child: _ArticleStrip(
-                          articles: widget.articles,
-                          bottomPad: bottomPad,
-                          landscape: false,
+                  slivers: [
+                    SliverToBoxAdapter(
+                      child: SizedBox(
+                        width: w,
+                        height: imgH + portraitLift,
+                        child: Align(
+                          alignment: Alignment.bottomCenter,
+                          child: SizedBox(
+                            width: w,
+                            height: imgH,
+                            child: _coverStack(w, imgH),
+                          ),
                         ),
                       ),
-                    ],
-                  ),
+                    ),
+                    const SliverToBoxAdapter(child: SizedBox(height: 5)),
+                    SliverToBoxAdapter(
+                      child: SizedBox(
+                        key: const ValueKey('portraitArticleStrip'),
+                        height: _stripHeight + bottomPad,
+                        child: ColoredBox(
+                          color: Colors.white,
+                          child: _ArticleStrip(
+                            articles: widget.articles,
+                            bottomPad: bottomPad,
+                            landscape: false,
+                          ),
+                        ),
+                      ),
+                    ),
+                    SliverToBoxAdapter(child: SizedBox(height: bottomPad + 12)),
+                  ],
                 ),
-              ],
-            ),
-          ),
-        );
-      },
+              ),
+            );
+          }
+        },
+      ),
     );
   }
 }
@@ -398,24 +403,6 @@ class _JumpingChevronState extends State<_JumpingChevron>
               size: 30,
             ),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _BottomGradient extends StatelessWidget {
-  const _BottomGradient();
-
-  @override
-  Widget build(BuildContext context) {
-    return const DecoratedBox(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Colors.transparent, Color(0xCC000000), Colors.black],
-          stops: [0.0, 0.55, 1.0],
         ),
       ),
     );
