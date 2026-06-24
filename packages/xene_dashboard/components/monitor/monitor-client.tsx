@@ -50,26 +50,35 @@ export function MonitorClient({ token, backendUrl }: Props) {
 
   async function fetchStats() {
     try {
+      console.log('[MonitorClient] Fetching /monitor from', backendUrl)
       const res = await fetch(`${backendUrl}/monitor`, {
         headers: { Authorization: `Bearer ${token}` },
       })
+      console.log('[MonitorClient] /monitor response status:', res.status)
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
       const data = await res.json()
+      console.log('[MonitorClient] /monitor data:', data)
       setStats(data)
       setError(null)
     } catch (e) {
+      console.error('[MonitorClient] /monitor fetch failed:', e)
       setError((e as Error).message)
     }
 
     try {
+      console.log('[MonitorClient] Fetching /monitor/cache from', backendUrl)
       const res = await fetch(`${backendUrl}/monitor/cache`, {
         headers: { Authorization: `Bearer ${token}` },
       })
+      console.log('[MonitorClient] /monitor/cache response status:', res.status)
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
       const data = (await res.json()) as CacheMetrics
+      console.log('[MonitorClient] /monitor/cache data:', data)
+      console.log('[MonitorClient] cache connected field:', data.connected)
       setCacheMetrics(data)
       setCacheError(null)
     } catch (e) {
+      console.error('[MonitorClient] /monitor/cache fetch failed:', e)
       setCacheError((e as Error).message)
     }
 
