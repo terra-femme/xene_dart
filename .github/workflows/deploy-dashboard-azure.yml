@@ -38,7 +38,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push Docker image to GHCR
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: ./packages/xene_dashboard
           push: true
