@@ -14,6 +14,7 @@ import '../providers/track_analysis_provider.dart';
 import '../theme/xene_theme.dart';
 // Conditional facade: real iframe player on web, no-op stub elsewhere.
 import '../widgets/soundcloud_embed.dart';
+import 'sc_track_search.dart';
 
 final _logger = Logger('av_sphere_sandbox');
 
@@ -34,20 +35,11 @@ class AvSphereSandbox extends ConsumerStatefulWidget {
 }
 
 class _AvSphereSandboxState extends ConsumerState<AvSphereSandbox> {
-  final _controller = TextEditingController();
   String? _trackId;
 
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _load() {
-    final id = _controller.text.trim();
-    _logger.info('[avSandbox] load requested trackId="$id"');
-    if (id.isEmpty) return;
-    setState(() => _trackId = id);
+  void _select(String trackId, String label) {
+    _logger.info('[avSandbox] selected trackId="$trackId" ($label)');
+    setState(() => _trackId = trackId);
   }
 
   @override
@@ -61,45 +53,17 @@ class _AvSphereSandboxState extends ConsumerState<AvSphereSandbox> {
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-          child: Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _controller,
-                  style: GoogleFonts.dmMono(fontSize: 13),
-                  decoration: InputDecoration(
-                    isDense: true,
-                    hintText: 'SoundCloud numeric track ID (already analyzed)',
-                    hintStyle: GoogleFonts.dmMono(
-                      fontSize: 12,
-                      color: XeneTheme.muted,
-                    ),
-                    border: const OutlineInputBorder(),
-                  ),
-                  onSubmitted: (_) => _load(),
-                ),
-              ),
-              const SizedBox(width: 8),
-              SizedBox(
-                height: 44,
-                child: ElevatedButton(
-                  onPressed: _load,
-                  child: Text(
-                    'LOAD',
-                    style: GoogleFonts.teko(letterSpacing: 1),
-                  ),
-                ),
-              ),
-            ],
+          child: ScTrackSearch(
+            onSelected: (id, label, _) => _select(id, label),
           ),
         ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Text(
-            'Paste the numeric track ID of a SoundCloud track you have already '
-            'played/queued in the app (so its analysis exists). The sphere '
-            'reacts to real amplitude + beats; it cannot separate bass from '
-            'treble — that needs the raw audio file.',
+            'Search SoundCloud and tap a track. The sphere reacts to real '
+            'amplitude + beats; it cannot separate bass from treble — that '
+            'needs the raw audio file. First load may take a few seconds while '
+            'the backend analyzes the track.',
             style: GoogleFonts.dmMono(
               fontSize: 10,
               height: 1.6,

@@ -36,7 +36,19 @@
   // ---- xene additions: short-clip cap + haptics (the accessibility core) ----
   const CLIP_SECONDS = 30;        // cap uploaded-clip playback (modest, in-session)
   let clipCap = true;             // only uploads are capped; SC sources (later) won't be
-  let hapticsOn = 'vibrate' in navigator;
+  // Native bridge: inside the Flutter WebView, XeneHaptics routes beats to
+  // Flutter's HapticFeedback (works on iOS, where navigator.vibrate is ignored).
+  const hapticBridge = !!(window.XeneHaptics && window.XeneHaptics.postMessage);
+  function fireHaptic(level) {
+    if (hapticBridge) {
+      window.XeneHaptics.postMessage(
+        level > 0.75 ? 'heavy' : level > 0.5 ? 'medium' : 'light'
+      );
+    } else if (navigator.vibrate) {
+      navigator.vibrate(Math.round(8 + Math.min(1, level) * 32)); // 8-40ms
+    }
+  }
+  let hapticsOn = ('vibrate' in navigator) || hapticBridge;
   let prevReactForHaptic = 0;     // for rising-edge beat detection
   const HAPTIC_THRESHOLD = 0.45;  // react level that counts as a "hit"
 
@@ -231,17 +243,19 @@
     hapticBtn.classList.toggle('active', hapticsOn);
     $('hapticLabel').textContent = hapticsOn ? 'Haptics: ON' : 'Haptics: OFF';
   }
-  if (!('vibrate' in navigator)) {
-    // iOS Safari and desktops without vibration hardware: disable + label it.
+  if (!('vibrate' in navigator) && !hapticBridge) {
+    // iOS Safari / desktops with no vibration AND no native bridge: disable.
     hapticsOn = false;
     $('hapticMeta').textContent = 'unsupported here';
+  } else if (hapticBridge) {
+    $('hapticMeta').textContent = 'native';
   }
   syncHapticUi();
   hapticBtn.addEventListener('click', () => {
-    if (!('vibrate' in navigator)) return;
+    if (!('vibrate' in navigator) && !hapticBridge) return;
     hapticsOn = !hapticsOn;
     syncHapticUi();
-    if (hapticsOn) navigator.vibrate(15); // confirmation buzz
+    if (hapticsOn) fireHaptic(0.3); // confirmation buzz
   });
 
   // ---------- panel toggle ----------
@@ -319,9 +333,9 @@
     // xene: fire a haptic pulse on each RISING beat in the isolated band.
     // The band-isolated transient IS the beat, so this maps the same signal
     // that warps the sphere onto touch — the accessibility payload.
-    if (hapticsOn && playing && navigator.vibrate) {
+    if (hapticsOn && playing) {
       if (engine.react > HAPTIC_THRESHOLD && prevReactForHaptic <= HAPTIC_THRESHOLD) {
-        navigator.vibrate(Math.round(8 + Math.min(1, engine.react) * 32)); // 8–40ms
+        fireHaptic(Math.min(1, engine.react));
       }
     }
     prevReactForHaptic = engine.react;

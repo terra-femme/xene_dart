@@ -30,6 +30,13 @@ dependencies:
   youtube_player_flutter: ^10.0.1
   shared_preferences: ^2.3.0
   pointer_interceptor: ^0.10.1+2
+  # Native SoundCloud embed hosts the SC Widget API HTML in a WebView (web keeps
+  # its <iframe>). The _android/_wkwebview packages are declared directly because
+  # soundcloud_embed_native.dart imports them for platform-specific autoplay/
+  # inline-playback config (otherwise depend_on_referenced_packages fires).
+  webview_flutter: ^4.13.0
+  webview_flutter_android: ^4.12.0
+  webview_flutter_wkwebview: ^3.25.0
 
 dev_dependencies:
   flutter_test:
@@ -47,3 +54,7 @@ flutter:
     - assets/soundcloud_logo.png
     - assets/yt_icon_red_digital.png
     - assets/animations/
+    # Dancing Points WebGL page — bundled so the native WebView
+    # (dancing_points_view_native.dart) can load it via loadFlutterAsset.
+    - web/dancing_points/
+    - web/dancing_points/js/

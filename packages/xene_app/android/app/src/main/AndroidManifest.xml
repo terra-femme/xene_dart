@@ -1,4 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Required for network access in release builds (Flutter auto-adds this
+         for debug/profile only) and for the WebView-hosted SoundCloud embed. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="XENE"
         android:name="${applicationName}"
