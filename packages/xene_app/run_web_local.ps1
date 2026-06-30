@@ -9,7 +9,11 @@
 # URLs (the app sends Uri.base.origin as the magic-link redirect on web).
 param(
     [int]$Port = 3000,
-    [switch]$PerfHud
+    [switch]$PerfHud,
+    # -Lan: serve on the LAN IP (open on a phone over WiFi) instead of localhost.
+    # Web viewing works; magic-link sign-in does NOT over a bare http LAN IP
+    # (front it with HTTPS / your travel router). Default = localhost.
+    [switch]$Lan
 )
 
 # Get all IPv4 addresses excluding virtual adapters
@@ -54,8 +58,14 @@ if (-not $localIP) {
 $env:SUPABASE_URL = "https://zwhabeyrhiqwzzttwfrk.supabase.co"
 $env:SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp3aGFiZXlyaGlxd3p6dHR3ZnJrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1NTU0NDMsImV4cCI6MjA5MjEzMTQ0M30.-w5Iuke6u2CKSsCJ3MXsmdkEWQhipBnCak1wOHpQUI4"
 
-# Port comes from the -Port parameter (positional, default 8080).
+# Port comes from the -Port parameter (positional, default 3000).
 $port = $Port
+
+# Hostname the dev server binds to:
+#   default -> localhost  (Supabase honors http://localhost, so sign-in works)
+#   -Lan    -> the LAN IP (open the web build on a phone over WiFi)
+if ($Lan) { $webHost = $localIP } else { $webHost = 'localhost' }
+$displayUrl = "http://${webHost}:$port"
 
 # Optional on-screen performance HUD. Passed to `flutter run` below only when
 # -PerfHud is set. NOTE: must stay a real array — building it with the
@@ -70,17 +80,22 @@ if ($PerfHud) {
 }
 
 Write-Host ""
-Write-Host "Flutter Web Dev Server - Local Network" -ForegroundColor Green
+Write-Host "Flutter Web Dev Server" -ForegroundColor Green
 Write-Host ""
-Write-Host "Your machine IP: $localIP" -ForegroundColor Yellow
-Write-Host "Port: $port" -ForegroundColor Yellow
+if ($Lan) {
+    Write-Host "Mode: LAN (-Lan) -- open on a phone over WiFi" -ForegroundColor Yellow
+    Write-Host "  Phone URL: $displayUrl" -ForegroundColor Cyan
+    Write-Host "  Web viewing works; magic-link SIGN-IN won't over http LAN IP" -ForegroundColor Gray
+    Write-Host "  (front it with HTTPS / your travel router for phone sign-in)." -ForegroundColor Gray
+} else {
+    Write-Host "Mode: localhost (default) -- desktop web + magic-link sign-in" -ForegroundColor Yellow
+    Write-Host "  Open in your Chrome: $displayUrl" -ForegroundColor Cyan
+    Write-Host "  For a phone, re-run with -Lan (LAN IP: http://${localIP}:$port)" -ForegroundColor Gray
+}
 Write-Host ""
-Write-Host "On your phone/tablet (same WiFi):" -ForegroundColor Cyan
-Write-Host "  http://${localIP}:$port" -ForegroundColor Cyan
-Write-Host ""
-Write-Host "Backend: http://${localIP}:8080/api (or custom port)" -ForegroundColor Gray
+Write-Host "Supabase Redirect URLs must include: $displayUrl" -ForegroundColor Gray
 Write-Host "Hot Reload: Press R in terminal after code changes" -ForegroundColor Gray
-Write-Host "Usage: ./run_web_local.ps1 [port]  (default: 3000)" -ForegroundColor Gray
+Write-Host "Usage: ./run_web_local.ps1 [port] [-PerfHud] [-Lan]  (default: 3000)" -ForegroundColor Gray
 Write-Host ""
 
 # Verify backend is running (optional, check standard port)
@@ -110,15 +125,13 @@ cd $PSScriptRoot
 # Start dev server
 if ($useLocalBackend) {
     Write-Host "Starting Flutter web (with local backend)..." -ForegroundColor Cyan
-    Write-Host "OPEN THIS IN YOUR OWN CHROME (the one with your email):" -ForegroundColor Green
-    Write-Host "  http://${localIP}:$port" -ForegroundColor Green
-    Write-Host "  (web-server mode: no isolated Chrome, so magic-link sign-in works)" -ForegroundColor Gray
+    Write-Host "URL: $displayUrl" -ForegroundColor Green
+    Write-Host "  (Flutter also auto-opens its own debug window - you can ignore it.)" -ForegroundColor Gray
     $backendUrl = "http://${localIP}:8080"
-    & flutter run -d web-server --web-hostname ${localIP} --web-port $port --dart-define="BACKEND_URL=$backendUrl" --dart-define="SUPABASE_URL=$env:SUPABASE_URL" --dart-define="SUPABASE_ANON_KEY=$env:SUPABASE_ANON_KEY" $perfHudArg
+    & flutter run -d chrome --web-hostname $webHost --web-port $port --dart-define="BACKEND_URL=$backendUrl" --dart-define="SUPABASE_URL=$env:SUPABASE_URL" --dart-define="SUPABASE_ANON_KEY=$env:SUPABASE_ANON_KEY" $perfHudArg
 } else {
     Write-Host "Starting Flutter web (with production backend)..." -ForegroundColor Cyan
-    Write-Host "OPEN THIS IN YOUR OWN CHROME (the one with your email):" -ForegroundColor Green
-    Write-Host "  http://${localIP}:$port" -ForegroundColor Green
-    Write-Host "  (web-server mode: no isolated Chrome, so magic-link sign-in works)" -ForegroundColor Gray
-    & flutter run -d web-server --web-hostname ${localIP} --web-port $port --dart-define='BACKEND_URL=https://xene-backend.yellowwater-2ccd556b.eastus.azurecontainerapps.io' --dart-define="SUPABASE_URL=$env:SUPABASE_URL" --dart-define="SUPABASE_ANON_KEY=$env:SUPABASE_ANON_KEY" $perfHudArg
+    Write-Host "URL: $displayUrl" -ForegroundColor Green
+    Write-Host "  (Flutter also auto-opens its own debug window - you can ignore it.)" -ForegroundColor Gray
+    & flutter run -d chrome --web-hostname $webHost --web-port $port --dart-define='BACKEND_URL=https://xene-backend.yellowwater-2ccd556b.eastus.azurecontainerapps.io' --dart-define="SUPABASE_URL=$env:SUPABASE_URL" --dart-define="SUPABASE_ANON_KEY=$env:SUPABASE_ANON_KEY" $perfHudArg
 }
