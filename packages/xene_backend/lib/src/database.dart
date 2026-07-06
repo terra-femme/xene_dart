@@ -63,6 +63,74 @@ class DatabaseService {
     }
   }
 
+  /// Batched variant of [getCachedFeedItems]: one query per chunk of artists
+  /// instead of one per artist. Artists are chunked so a chunk's rows stay
+  /// under PostgREST's max-rows cap (default 1000); if a chunk still hits the
+  /// cap, it falls back to per-artist queries so no artist's rows are
+  /// silently truncated.
+  Future<List<Map<String, dynamic>>> getCachedFeedItemsForArtists({
+    required String platform,
+    required List<String> artistNames,
+    int days = 31,
+  }) async {
+    if (artistNames.isEmpty) return [];
+    const chunkSize = 8;
+    const chunkRowCap = 1000;
+    final now = DateTime.now().toLocal();
+    final cutoff = DateTime(
+      now.year,
+      now.month,
+      now.day,
+    ).subtract(Duration(days: days)).toUtc().toIso8601String();
+
+    final all = <Map<String, dynamic>>[];
+    for (var i = 0; i < artistNames.length; i += chunkSize) {
+      final chunk = artistNames.sublist(
+        i,
+        (i + chunkSize).clamp(0, artistNames.length),
+      );
+      try {
+        final response = await client
+            .from('feed_items')
+            .select()
+            .eq('platform', platform)
+            .inFilter('artist_name', chunk)
+            .gte('published_at', cutoff)
+            .order('published_at', ascending: false)
+            .limit(chunkRowCap);
+        final rows = List<Map<String, dynamic>>.from(response);
+        if (rows.length >= chunkRowCap) {
+          _logger.warning(
+            '[db] getCachedFeedItemsForArtists: chunk of ${chunk.length} '
+            '$platform artists hit the $chunkRowCap-row cap — '
+            'falling back to per-artist queries for this chunk',
+          );
+          for (final artist in chunk) {
+            all.addAll(
+              await getCachedFeedItems(
+                platform: platform,
+                artistName: artist,
+                days: days,
+              ),
+            );
+          }
+        } else {
+          all.addAll(rows);
+        }
+      } catch (e) {
+        _logger.severe(
+          '[db] getCachedFeedItemsForArtists failed for $platform '
+          'chunk ${chunk.join(",")}: $e',
+        );
+      }
+    }
+    _logger.info(
+      '[db] getCachedFeedItemsForArtists: ${all.length} rows for '
+      '${artistNames.length} $platform artists',
+    );
+    return all;
+  }
+
   Future<List<Map<String, dynamic>>> searchFeedItems(
     String query, {
     int limit = 50,
@@ -1903,6 +1971,42 @@ class DatabaseService {
       _logger.severe('Error reading system_cache for $key: $e');
     }
     return null;
+  }
+
+  /// Batched variant of [getSystemCache]: fetch many keys in one query.
+  /// Returns a map of key → value containing only keys that exist and have
+  /// not expired. Keys are chunked to keep the PostgREST in-filter URL short.
+  Future<Map<String, Map<String, dynamic>>> getSystemCacheMany(
+    List<String> keys,
+  ) async {
+    if (keys.isEmpty) return {};
+    const chunkSize = 100;
+    final now = DateTime.now().toUtc().toIso8601String();
+    final result = <String, Map<String, dynamic>>{};
+    for (var i = 0; i < keys.length; i += chunkSize) {
+      final chunk = keys.sublist(i, (i + chunkSize).clamp(0, keys.length));
+      try {
+        final response = await client
+            .from('system_cache')
+            .select('key, value, expires_at')
+            .inFilter('key', chunk);
+        for (final row in List<Map<String, dynamic>>.from(response)) {
+          final expiresAt = row['expires_at'] as String?;
+          if (expiresAt != null && expiresAt.compareTo(now) < 0) continue;
+          final value = row['value'] as Map<String, dynamic>?;
+          final key = row['key'] as String?;
+          if (key != null && value != null) result[key] = value;
+        }
+      } catch (e) {
+        _logger.severe(
+          'Error batch-reading system_cache (${chunk.length} keys): $e',
+        );
+      }
+    }
+    _logger.info(
+      '[db] getSystemCacheMany: ${result.length}/${keys.length} keys present',
+    );
+    return result;
   }
 
   /// Store a value in the system_cache table.
