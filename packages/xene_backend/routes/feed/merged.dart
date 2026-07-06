@@ -190,6 +190,14 @@ Future<Response> onRequest(RequestContext context) async {
   final fastTaskFactories = <Future<List<FeedItem>> Function()>[];
   final bcTaskFactories = <Future<List<FeedItem>> Function()>[];
 
+  // Collected alongside the factories; used to batch-prefetch last_polled,
+  // empty-window markers, and cached rows for ALL pairs in a handful of
+  // queries. The factories close over [prefetch], which is assigned before
+  // they run, so each fetchWithCache call reads from the prefetched maps
+  // instead of issuing its own per-artist Supabase round trips.
+  final prefetchSpecs = <FeedPrefetchSpec>[];
+  FeedCachePrefetch? prefetch;
+
   for (final artist in artists) {
     final name = artist['name'] as String? ?? 'Unknown';
 
@@ -212,6 +220,7 @@ Future<Response> onRequest(RequestContext context) async {
     if (scIdentifier != null && scIdentifier.isNotEmpty) {
       if (platformFilter == null || platformFilter.contains('soundcloud')) {
         _logger.info('[feed.merged] → SC task: $scIdentifier ($name)');
+        prefetchSpecs.add(FeedPrefetchSpec('soundcloud', name, 31));
         fastTaskFactories.add(
           () => fetchWithCache(
             db,
@@ -220,6 +229,7 @@ Future<Response> onRequest(RequestContext context) async {
             _platformTtls['soundcloud']!,
             () => scService.getTracks(scIdentifier, name),
             backgroundOnMiss: true,
+            prefetch: prefetch,
           ),
         );
       } else {
@@ -232,6 +242,9 @@ Future<Response> onRequest(RequestContext context) async {
     if (bcUrl != null && bcUrl.isNotEmpty) {
       if (platformFilter == null || platformFilter.contains('bandcamp')) {
         _logger.info('[feed.merged] → Bandcamp task: $bcUrl ($name)');
+        prefetchSpecs.add(
+          FeedPrefetchSpec('bandcamp', name, _bandcampCacheDays),
+        );
         bcTaskFactories.add(
           () => fetchWithCache(
             db,
@@ -242,6 +255,7 @@ Future<Response> onRequest(RequestContext context) async {
                 bcService.getFeed(bcUrl, name, bypassMemoryCache: forceRefresh),
             cacheDays: _bandcampCacheDays,
             backgroundOnMiss: true,
+            prefetch: prefetch,
           ),
         );
       } else {
@@ -260,6 +274,7 @@ Future<Response> onRequest(RequestContext context) async {
     if (ytId != null && ytId.isNotEmpty) {
       if (platformFilter == null || platformFilter.contains('youtube')) {
         _logger.info('[feed.merged] → YouTube task: $ytId ($name)');
+        prefetchSpecs.add(FeedPrefetchSpec('youtube', name, 31));
         fastTaskFactories.add(
           () => fetchWithCache(
             db,
@@ -268,6 +283,7 @@ Future<Response> onRequest(RequestContext context) async {
             _platformTtls['youtube']!,
             () => ytService.getVideos(ytId, name),
             backgroundOnMiss: true,
+            prefetch: prefetch,
           ),
         );
       } else {
@@ -299,6 +315,16 @@ Future<Response> onRequest(RequestContext context) async {
   _logger.info(
     '[feed.merged] Running fast=${fastTaskFactories.length} '
     'bc=${bcTaskFactories.length} platform tasks',
+  );
+
+  // Batch-prefetch cache state for every (platform, artist) pair before the
+  // tasks run: ~4 Supabase queries total instead of 2+ per artist inside
+  // fetchWithCache. The task factories close over [prefetch].
+  final prefetchSw = Stopwatch()..start();
+  prefetch = await buildFeedCachePrefetch(db, prefetchSpecs);
+  _logger.info(
+    '[feed.merged] Prefetch of ${prefetchSpecs.length} pairs took '
+    '${prefetchSw.elapsedMilliseconds}ms',
   );
 
   // SC/YT and Bandcamp groups run in parallel with each other, but within

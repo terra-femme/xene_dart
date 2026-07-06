@@ -38,11 +38,124 @@ final _backgroundSemaphore = _Semaphore(_kBackgroundMaxConcurrent);
 const _kBcBackgroundMaxConcurrent = 3;
 final _bcBackgroundSemaphore = _Semaphore(_kBcBackgroundMaxConcurrent);
 
+/// One (platform, artist) pair to include in a [FeedCachePrefetch].
+class FeedPrefetchSpec {
+  const FeedPrefetchSpec(this.platform, this.artistName, this.cacheDays);
+
+  final String platform;
+  final String artistName;
+  final int cacheDays;
+}
+
+/// Per-request cache state fetched in a handful of batched Supabase queries,
+/// replacing the 2+ round trips per (platform, artist) pair that
+/// [fetchWithCache] would otherwise make individually. When passed to
+/// [fetchWithCache], it is authoritative for every pair it was built with:
+/// a missing key means "not in the DB", not "not fetched".
+class FeedCachePrefetch {
+  const FeedCachePrefetch({
+    required this.lastPolled,
+    required this.rows,
+    required this.emptyWindowKeys,
+  });
+
+  /// '$platform:$artistName' → last successful poll time.
+  final Map<String, DateTime> lastPolled;
+
+  /// '$platform:$artistName' → cached feed_items rows, newest first.
+  final Map<String, List<Map<String, dynamic>>> rows;
+
+  /// Present (non-expired) feed_empty_window system_cache keys.
+  final Set<String> emptyWindowKeys;
+}
+
+/// Builds a [FeedCachePrefetch] for [specs] using batched queries:
+/// one system_cache read for all last_polled + empty-window keys, and one
+/// chunked feed_items read per platform — instead of 2+ queries per artist.
+Future<FeedCachePrefetch> buildFeedCachePrefetch(
+  DatabaseService db,
+  List<FeedPrefetchSpec> specs,
+) async {
+  if (specs.isEmpty) {
+    return const FeedCachePrefetch(
+      lastPolled: {},
+      rows: {},
+      emptyWindowKeys: {},
+    );
+  }
+
+  final systemCacheKeys = <String>[
+    for (final s in specs) 'last_polled:${s.platform}:${s.artistName}',
+    for (final s in specs)
+      _emptyWindowCacheKey(s.platform, s.artistName, s.cacheDays),
+  ];
+
+  final byPlatform = <String, List<FeedPrefetchSpec>>{};
+  for (final s in specs) {
+    byPlatform.putIfAbsent(s.platform, () => []).add(s);
+  }
+
+  // system_cache batch and the per-platform feed_items batches are
+  // independent — run them concurrently.
+  final results = await Future.wait<dynamic>([
+    db.getSystemCacheMany(systemCacheKeys),
+    ...byPlatform.entries.map(
+      (entry) => db.getCachedFeedItemsForArtists(
+        platform: entry.key,
+        artistNames: [for (final s in entry.value) s.artistName],
+        days: entry.value.map((s) => s.cacheDays).reduce(max),
+      ),
+    ),
+  ]);
+
+  final cacheValues = results.first as Map<String, Map<String, dynamic>>;
+  final lastPolled = <String, DateTime>{};
+  final emptyWindowKeys = <String>{};
+  for (final s in specs) {
+    final pairKey = '${s.platform}:${s.artistName}';
+    final polled = cacheValues['last_polled:$pairKey']?['timestamp'] as String?;
+    final parsed = polled != null ? DateTime.tryParse(polled)?.toUtc() : null;
+    if (parsed != null) lastPolled[pairKey] = parsed;
+    final windowKey = _emptyWindowCacheKey(
+      s.platform,
+      s.artistName,
+      s.cacheDays,
+    );
+    if (cacheValues.containsKey(windowKey)) emptyWindowKeys.add(windowKey);
+  }
+
+  final rows = <String, List<Map<String, dynamic>>>{};
+  var platformIndex = 1;
+  for (final entry in byPlatform.entries) {
+    final fetched = results[platformIndex++] as List<Map<String, dynamic>>;
+    for (final row in fetched) {
+      final artist = row['artist_name'] as String?;
+      if (artist == null) continue;
+      rows.putIfAbsent('${entry.key}:$artist', () => []).add(row);
+    }
+  }
+
+  _logger.info(
+    '[feed_cache] Prefetch built: ${specs.length} pairs, '
+    '${lastPolled.length} polled, ${rows.length} with rows, '
+    '${emptyWindowKeys.length} verified-empty',
+  );
+  return FeedCachePrefetch(
+    lastPolled: lastPolled,
+    rows: rows,
+    emptyWindowKeys: emptyWindowKeys,
+  );
+}
+
 /// Check last_polled TTL. If fresh -> return from feed_items DB.
 /// If stale -> serve stale rows immediately and kick off a background refresh.
 /// On live-fetch failure -> serve stale cache rather than returning empty.
 ///
 /// Mirrors feed.py :: fetch_platform_items cache logic.
+///
+/// When [prefetch] is provided (built via [buildFeedCachePrefetch] for this
+/// request's artists), the hot-path reads come from it with zero extra HTTP;
+/// without it, behavior is identical to before (per-artist queries).
 Future<List<FeedItem>> fetchWithCache(
   DatabaseService db,
   String platform,
@@ -51,17 +164,25 @@ Future<List<FeedItem>> fetchWithCache(
   Future<List<FeedItem>> Function() fetchLive, {
   int cacheDays = 31,
   bool backgroundOnMiss = false,
+  FeedCachePrefetch? prefetch,
 }) async {
-  final lastPolled = await db.getLastPolled(platform, artistName);
+  final pairKey = '$platform:$artistName';
+  final lastPolled = prefetch != null
+      ? prefetch.lastPolled[pairKey]
+      : await db.getLastPolled(platform, artistName);
   final now = DateTime.now().toUtc();
   final isFresh = lastPolled != null && now.difference(lastPolled) < ttl;
 
   if (isFresh) {
-    final rows = await db.getCachedFeedItems(
-      platform: platform,
-      artistName: artistName,
-      days: cacheDays,
-    );
+    final rows =
+        prefetch?.rows[pairKey] ??
+        (prefetch != null
+            ? const <Map<String, dynamic>>[]
+            : await db.getCachedFeedItems(
+                platform: platform,
+                artistName: artistName,
+                days: cacheDays,
+              ));
     if (rows.isNotEmpty) {
       _logger.info(
         '[feed_cache] Cache HIT $platform/$artistName - ${rows.length} rows '
@@ -70,10 +191,15 @@ Future<List<FeedItem>> fetchWithCache(
       return rows.map(feedItemFromRow).whereType<FeedItem>().toList();
     }
 
-    final emptyWindow = await db.getSystemCache(
-      _emptyWindowCacheKey(platform, artistName, cacheDays),
+    final emptyWindowKey = _emptyWindowCacheKey(
+      platform,
+      artistName,
+      cacheDays,
     );
-    if (emptyWindow != null) {
+    final hasEmptyWindow = prefetch != null
+        ? prefetch.emptyWindowKeys.contains(emptyWindowKey)
+        : await db.getSystemCache(emptyWindowKey) != null;
+    if (hasEmptyWindow) {
       _logger.info(
         '[feed_cache] Cache HIT (verified empty) $platform/$artistName - no content in ${cacheDays}d window '
         '(age=${now.difference(lastPolled).inMinutes}min / ttl=${ttl.inHours}h)',
@@ -100,11 +226,15 @@ Future<List<FeedItem>> fetchWithCache(
     // STALE: if there are rows from a previous fetch, serve them immediately
     // and kick off a background refresh so the caller isn't blocked.
     if (lastPolled != null) {
-      final staleRows = await db.getCachedFeedItems(
-        platform: platform,
-        artistName: artistName,
-        days: cacheDays,
-      );
+      final staleRows =
+          prefetch?.rows[pairKey] ??
+          (prefetch != null
+              ? const <Map<String, dynamic>>[]
+              : await db.getCachedFeedItems(
+                  platform: platform,
+                  artistName: artistName,
+                  days: cacheDays,
+                ));
       if (staleRows.isNotEmpty) {
         _logger.info(
           '[feed_cache] Stale HIT $platform/$artistName - '
@@ -159,11 +289,15 @@ Future<List<FeedItem>> fetchWithCache(
     },
   );
   if (leaseOwner == null) {
-    final rows = await db.getCachedFeedItems(
-      platform: platform,
-      artistName: artistName,
-      days: cacheDays,
-    );
+    final rows =
+        prefetch?.rows[pairKey] ??
+        (prefetch != null
+            ? const <Map<String, dynamic>>[]
+            : await db.getCachedFeedItems(
+                platform: platform,
+                artistName: artistName,
+                days: cacheDays,
+              ));
     if (rows.isNotEmpty) {
       _logger.info(
         '[feed_cache] Refresh lease BUSY $platform/$artistName - serving ${rows.length} cached rows',
