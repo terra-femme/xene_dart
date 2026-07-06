@@ -409,7 +409,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
   List<_FeedDateSection> _buildDateSections(List<FeedItem> items) {
     final sorted = List<FeedItem>.from(items)
       ..sort((a, b) {
-        final byDate = b.publishedAt.compareTo(a.publishedAt);
+        final byDate = b.timelineAt.compareTo(a.timelineAt);
         if (byDate != 0) return byDate;
 
         final byArtist = a.artistName.compareTo(b.artistName);
@@ -422,7 +422,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
     _FeedDateSection? currentSection;
 
     for (final item in sorted) {
-      final date = _localDate(item.publishedAt);
+      final date = _localDate(item.timelineAt);
 
       if (currentSection == null || currentSection.date != date) {
         currentSection = _FeedDateSection(date: date, items: <FeedItem>[]);

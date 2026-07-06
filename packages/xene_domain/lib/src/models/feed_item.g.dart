@@ -17,6 +17,22 @@ _FeedItem _$FeedItemFromJson(Map<String, dynamic> json) => _FeedItem(
   artworkUrl: json['artworkUrl'] as String?,
   externalUrl: json['externalUrl'] as String,
   publishedAt: DateTime.parse(json['publishedAt'] as String),
+  sourceCreatedAt: json['sourceCreatedAt'] == null
+      ? null
+      : DateTime.parse(json['sourceCreatedAt'] as String),
+  displayAt: json['displayAt'] == null
+      ? null
+      : DateTime.parse(json['displayAt'] as String),
+  releaseAt: json['releaseAt'] == null
+      ? null
+      : DateTime.parse(json['releaseAt'] as String),
+  sourceLastModifiedAt: json['sourceLastModifiedAt'] == null
+      ? null
+      : DateTime.parse(json['sourceLastModifiedAt'] as String),
+  dateSource: json['dateSource'] as String?,
+  dateConfidence: json['dateConfidence'] as String?,
+  dateConflictReason: json['dateConflictReason'] as String?,
+  isUpcoming: json['isUpcoming'] as bool? ?? false,
   playCount: (json['playCount'] as num?)?.toInt(),
   likeCount: (json['likeCount'] as num?)?.toInt(),
   waveformUrl: json['waveformUrl'] as String?,
@@ -36,6 +52,14 @@ Map<String, dynamic> _$FeedItemToJson(_FeedItem instance) => <String, dynamic>{
   'artworkUrl': instance.artworkUrl,
   'externalUrl': instance.externalUrl,
   'publishedAt': instance.publishedAt.toIso8601String(),
+  'sourceCreatedAt': instance.sourceCreatedAt?.toIso8601String(),
+  'displayAt': instance.displayAt?.toIso8601String(),
+  'releaseAt': instance.releaseAt?.toIso8601String(),
+  'sourceLastModifiedAt': instance.sourceLastModifiedAt?.toIso8601String(),
+  'dateSource': instance.dateSource,
+  'dateConfidence': instance.dateConfidence,
+  'dateConflictReason': instance.dateConflictReason,
+  'isUpcoming': instance.isUpcoming,
   'playCount': instance.playCount,
   'likeCount': instance.likeCount,
   'waveformUrl': instance.waveformUrl,

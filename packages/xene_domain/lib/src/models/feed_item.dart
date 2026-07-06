@@ -16,6 +16,14 @@ abstract class FeedItem with _$FeedItem {
     String? artworkUrl,
     required String externalUrl,
     required DateTime publishedAt,
+    DateTime? sourceCreatedAt,
+    DateTime? displayAt,
+    DateTime? releaseAt,
+    DateTime? sourceLastModifiedAt,
+    String? dateSource,
+    String? dateConfidence,
+    String? dateConflictReason,
+    @Default(false) bool isUpcoming,
     int? playCount,
     int? likeCount,
     String? waveformUrl,
@@ -24,5 +32,11 @@ abstract class FeedItem with _$FeedItem {
     @Default(false) bool isNew,
   }) = _FeedItem;
 
-  factory FeedItem.fromJson(Map<String, dynamic> json) => _$FeedItemFromJson(json);
+  factory FeedItem.fromJson(Map<String, dynamic> json) =>
+      _$FeedItemFromJson(json);
+}
+
+extension FeedItemTimeline on FeedItem {
+  DateTime get timelineAt =>
+      isUpcoming && releaseAt != null ? releaseAt! : publishedAt;
 }

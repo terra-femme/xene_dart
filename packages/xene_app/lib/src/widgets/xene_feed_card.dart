@@ -252,9 +252,7 @@ class XeneFeedCard extends StatelessWidget {
                                           platform: item.platform,
                                         ),
                                       ),
-                                      if (item.publishedAt.isAfter(
-                                        DateTime.now(),
-                                      ))
+                                      if (item.isUpcoming)
                                         const _PreOrderStar(),
                                     ],
                                   ),
@@ -490,8 +488,7 @@ class _YoutubeVideoCard extends StatelessWidget {
                           children: [
                             _TypePill(type: item.contentType),
                             _PlatformBadge(platform: item.platform),
-                            if (item.publishedAt.isAfter(DateTime.now()))
-                              const _PreOrderStar(),
+                            if (item.isUpcoming) const _PreOrderStar(),
                           ],
                         ),
                       ),

@@ -316,7 +316,8 @@ Future<Response> onRequest(RequestContext context) async {
   final allItems = <FeedItem>[];
   for (final sublist in results) {
     for (final item in sublist) {
-      if (!item.publishedAt.toLocal().isBefore(archiveCutoff)) {
+      if (!item.publishedAt.toLocal().isBefore(archiveCutoff) ||
+          item.isUpcoming) {
         allItems.add(item);
       }
     }
@@ -353,12 +354,17 @@ Future<Response> onRequest(RequestContext context) async {
 
   final recentItems = _sortNewestFirst(
     filteredItems
-        .where((item) => !item.publishedAt.toLocal().isBefore(recentCutoff))
+        .where(
+          (item) =>
+              item.isUpcoming ||
+              !item.publishedAt.toLocal().isBefore(recentCutoff),
+        )
         .toList(),
   );
   final archiveItems = filteredItems
       .where(
         (item) =>
+            !item.isUpcoming &&
             item.publishedAt.toLocal().isBefore(recentCutoff) &&
             !item.publishedAt.toLocal().isBefore(archiveCutoff),
       )
@@ -496,7 +502,9 @@ Future<Response> onRequest(RequestContext context) async {
     final realRecentPool = _sortNewestFirst(
       uniqueItems
           .where(
-            (item) => !item.publishedAt.toLocal().isBefore(realRecentCutoff),
+            (item) =>
+                item.isUpcoming ||
+                !item.publishedAt.toLocal().isBefore(realRecentCutoff),
           )
           .toList(),
     ).take(limit).toList();
@@ -506,6 +514,7 @@ Future<Response> onRequest(RequestContext context) async {
     final realArchiveItems = uniqueItems
         .where(
           (item) =>
+              !item.isUpcoming &&
               item.publishedAt.toLocal().isBefore(realRecentCutoff) &&
               !item.publishedAt.toLocal().isBefore(realArchiveCutoff),
         )
@@ -663,7 +672,7 @@ List<FeedItem> _archiveFullPage(List<FeedItem> items, int page, int count) {
 
 List<FeedItem> _sortNewestFirst(List<FeedItem> items) {
   return List<FeedItem>.from(items)..sort((a, b) {
-    final byDate = b.publishedAt.compareTo(a.publishedAt);
+    final byDate = b.timelineAt.compareTo(a.timelineAt);
     if (byDate != 0) return byDate;
 
     final byArtist = a.artistName.compareTo(b.artistName);

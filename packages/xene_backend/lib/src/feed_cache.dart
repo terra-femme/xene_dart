@@ -510,6 +510,14 @@ FeedItem? feedItemFromRow(Map<String, dynamic> row) {
       artworkUrl: row['artwork_url'] as String?,
       externalUrl: row['external_url'] as String,
       publishedAt: DateTime.parse(row['published_at'] as String),
+      sourceCreatedAt: _optionalDate(row['source_created_at']),
+      displayAt: _optionalDate(row['source_display_at']),
+      releaseAt: _optionalDate(row['source_release_at']),
+      sourceLastModifiedAt: _optionalDate(row['source_last_modified_at']),
+      dateSource: row['date_source'] as String?,
+      dateConfidence: row['date_confidence'] as String?,
+      dateConflictReason: row['date_conflict_reason'] as String?,
+      isUpcoming: row['is_upcoming'] as bool? ?? false,
       durationSeconds: row['duration_seconds'] as int?,
       playCount: row['play_count'] as int?,
       likeCount: row['like_count'] as int?,
@@ -521,6 +529,9 @@ FeedItem? feedItemFromRow(Map<String, dynamic> row) {
     return null;
   }
 }
+
+DateTime? _optionalDate(Object? value) =>
+    value is String ? DateTime.tryParse(value)?.toUtc() : null;
 
 String? _bodyWithRepostAttribution(Map<String, dynamic> row) {
   final body = (row['body'] as String?)?.trim();
