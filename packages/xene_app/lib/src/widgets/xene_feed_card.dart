@@ -696,8 +696,23 @@ class _PreOrderStar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const Tooltip(
-      message: 'Pre-order',
-      child: Icon(Icons.star, size: 11, color: Color(0xFFFFB800)),
+      message: 'Pre-release',
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.star, size: 11, color: Color(0xFFFFB800)),
+          SizedBox(width: 2),
+          Text(
+            'pre-release',
+            style: TextStyle(
+              color: Color(0xFFFFB800),
+              fontSize: 8,
+              fontWeight: FontWeight.bold,
+              fontFamily: 'DM Mono',
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

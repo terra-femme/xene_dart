@@ -384,7 +384,7 @@ class _XeneDraggableSheetState extends ConsumerState<XeneDraggableSheet>
 
     final isLandscape =
         MediaQuery.of(context).orientation == Orientation.landscape;
-    final logoBottom = isLandscape ? topOffset : topOffset + 277;
+    final logoBottom = isLandscape ? topOffset : topOffset + 290;
 
     final maxRatio = ((screenHeight - logoBottom) / screenHeight).clamp(
       0.1,
