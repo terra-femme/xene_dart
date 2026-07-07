@@ -252,7 +252,7 @@ class XeneFeedCard extends StatelessWidget {
                                           platform: item.platform,
                                         ),
                                       ),
-                                      if (item.isUpcoming)
+                                      if (_isPreReleaseItem(item))
                                         const _PreOrderStar(),
                                     ],
                                   ),
@@ -488,7 +488,8 @@ class _YoutubeVideoCard extends StatelessWidget {
                           children: [
                             _TypePill(type: item.contentType),
                             _PlatformBadge(platform: item.platform),
-                            if (item.isUpcoming) const _PreOrderStar(),
+                            if (_isPreReleaseItem(item))
+                              const _PreOrderStar(),
                           ],
                         ),
                       ),
@@ -643,6 +644,18 @@ String? _bodyWithoutAttribution(String? body, String? attribution) {
 
 String _normaliseName(String value) {
   return value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
+}
+
+bool _isPreReleaseItem(FeedItem item) {
+  if (item.isUpcoming) return true;
+
+  final now = DateTime.now();
+  final releaseAt = item.releaseAt;
+  if (releaseAt != null && releaseAt.isAfter(now)) return true;
+
+  // Compatibility path for legacy rows / pre-migration responses where future
+  // releases were represented only by a future feed date.
+  return item.publishedAt.isAfter(now);
 }
 
 class _TypePill extends StatelessWidget {
