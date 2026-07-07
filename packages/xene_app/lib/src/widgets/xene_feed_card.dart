@@ -207,52 +207,43 @@ class XeneFeedCard extends StatelessWidget {
 
                           // 2. Content Frame (Right)
                           Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                if ([
-                                  'soundcloud',
-                                  'youtube',
-                                ].contains(item.platform.toLowerCase()))
-                                  Align(
-                                    alignment: Alignment.centerRight,
-                                    child: _SaveButton(item: item, dark: dark),
+                            child: ExcludeSemantics(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  ConstrainedBox(
+                                    constraints: BoxConstraints(
+                                      maxWidth: badgeMaxWidth,
+                                    ),
+                                    child: _TypePill(type: item.contentType),
                                   ),
-                                ExcludeSemantics(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
+                                  const SizedBox(height: 3),
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
                                     children: [
                                       ConstrainedBox(
                                         constraints: BoxConstraints(
                                           maxWidth: badgeMaxWidth,
                                         ),
-                                        child: _TypePill(type: item.contentType),
+                                        child: _PlatformBadge(
+                                          platform: item.platform,
+                                        ),
                                       ),
-                                      const SizedBox(height: 3),
-                                      Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          ConstrainedBox(
-                                            constraints: BoxConstraints(
-                                              maxWidth: badgeMaxWidth,
-                                            ),
-                                            child: _PlatformBadge(
-                                              platform: item.platform,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      if (_isPreReleaseItem(item)) ...[
-                                        const SizedBox(height: 3),
-                                        const _PreOrderStar(),
-                                      ],
                                     ],
                                   ),
-                                ),
-                              ],
+                                  if (_isPreReleaseItem(item)) ...[
+                                    const SizedBox(height: 3),
+                                    const _PreOrderStar(),
+                                  ],
+                                ],
                               ),
+                            ),
                           ),
+                          if ([
+                            'soundcloud',
+                            'youtube',
+                          ].contains(item.platform.toLowerCase()))
+                            _SaveButton(item: item, dark: dark),
                             ],
                           ),
                           SizedBox(height: compact ? 4 : 6),
@@ -565,7 +556,7 @@ class _SaveButton extends ConsumerWidget {
           }
         },
         child: SizedBox(
-          width: 44,
+          width: 32,
           height: 44,
           child: Align(
             alignment: Alignment.topCenter,
@@ -739,24 +730,22 @@ class _PlatformBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = _getPlatformColor(platform);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      height: 18,
+      padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
+      constraints: const BoxConstraints(minHeight: 16),
       decoration: BoxDecoration(
         border: Border.all(color: color, width: 1),
         borderRadius: BorderRadius.circular(2),
       ),
-      child: Center(
-        child: Text(
-          platform.toUpperCase(),
-          style: GoogleFonts.dmMono(
-            color: color,
-            fontSize: 8,
-            fontWeight: FontWeight.w500,
-          ),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          softWrap: false,
+      child: Text(
+        platform.toUpperCase(),
+        style: GoogleFonts.dmMono(
+          color: color,
+          fontSize: 8,
+          fontWeight: FontWeight.w500,
         ),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        softWrap: false,
       ),
     );
   }
