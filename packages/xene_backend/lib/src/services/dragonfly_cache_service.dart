@@ -23,6 +23,20 @@ class DragonflyCache {
   int _operationCount = 0;
   DateTime _metricsStartTime = DateTime.now();
 
+  // ── Reconnect loop ──────────────────────────────────────────────────────
+  // The client is fail-open: when Dragonfly is unreachable every operation
+  // short-circuits on !_connected. Without a retry, a backend replica that
+  // booted while Dragonfly was scaled to zero would ignore it forever and
+  // re-enablement required a full revision restart (see
+  // docs/Changelog_2026-07-06.md). While disconnected we retry a PING every
+  // [_reconnectInterval]; attempts fail fast (5s connect timeout) and log at
+  // FINE so an absent Dragonfly never spams production logs. Only state
+  // changes (reconnected) log at INFO.
+  Timer? _reconnectTimer;
+  bool _reconnectEnabled = false;
+  int _reconnectAttempts = 0;
+  static const Duration _reconnectInterval = Duration(minutes: 3);
+
   factory DragonflyCache() {
     _instance ??= DragonflyCache._();
     return _instance!;
@@ -39,6 +53,8 @@ class DragonflyCache {
       final uri = Uri.parse(urlStr);
       _host = uri.host.isEmpty ? 'localhost' : uri.host;
       _port = uri.port == 0 ? 6379 : uri.port;
+      // Host/port are parsed — safe to arm the reconnect loop from here on.
+      _reconnectEnabled = true;
 
       print('[DRAGONFLY_CACHE] INIT: DRAGONFLY_URL env = $urlStr');
       print('[DRAGONFLY_CACHE] INIT: Parsed host=$_host, port=$_port');
@@ -59,14 +75,59 @@ class DragonflyCache {
       _logger.warning('[dragonfly_cache] Connection failed: $e', e, stack);
       _connected = false;
       if (!failOpen) rethrow;
+      _scheduleReconnect();
       return false;
     }
   }
 
-  /// Graceful shutdown.
+  /// Graceful shutdown. Also disarms the reconnect loop so processes
+  /// (and test runners) are not kept alive by a pending retry timer.
   Future<void> close() async {
+    _reconnectEnabled = false;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
     _connected = false;
     _logger.info('[dragonfly_cache] Connection closed');
+  }
+
+  /// Mark the connection lost and arm a retry. Called from every operation's
+  /// error path so a Dragonfly that drops (or scales to zero) mid-flight is
+  /// re-adopted automatically when it returns.
+  void _markDisconnected() {
+    _connected = false;
+    _scheduleReconnect();
+  }
+
+  /// Schedule a single reconnect attempt [_reconnectInterval] from now.
+  /// Chained (non-periodic) timers: each failed attempt schedules the next,
+  /// so there is never more than one pending timer.
+  void _scheduleReconnect() {
+    if (!_reconnectEnabled || _connected) return;
+    if (_reconnectTimer?.isActive ?? false) return;
+    _reconnectTimer = Timer(_reconnectInterval, () async {
+      _reconnectTimer = null;
+      if (!_reconnectEnabled || _connected) return;
+      _reconnectAttempts++;
+      _logger.fine(
+        '[dragonfly_cache] Reconnect attempt #$_reconnectAttempts to $_host:$_port',
+      );
+      try {
+        final pingResult = await _sendCommand(['PING']);
+        if (pingResult == 'PONG') {
+          _connected = true;
+          _logger.info(
+            '[dragonfly_cache] Reconnected to $_host:$_port ✓ '
+            '(after $_reconnectAttempts attempt(s))',
+          );
+          _reconnectAttempts = 0;
+          return;
+        }
+        throw 'PING did not return PONG: $pingResult';
+      } catch (e) {
+        _logger.fine('[dragonfly_cache] Reconnect attempt failed: $e');
+        _scheduleReconnect();
+      }
+    });
   }
 
   /// Store a value with optional TTL.
@@ -85,7 +146,7 @@ class DragonflyCache {
       return false;
     } catch (e) {
       _logger.warning('[dragonfly_cache] SET $key failed: $e');
-      _connected = false;
+      _markDisconnected();
       return false;
     }
   }
@@ -105,7 +166,7 @@ class DragonflyCache {
       return value;
     } catch (e) {
       _logger.warning('[dragonfly_cache] GET $key failed: $e');
-      _connected = false;
+      _markDisconnected();
       return null;
     }
   }
@@ -118,7 +179,7 @@ class DragonflyCache {
       return (result as int) > 0;
     } catch (e) {
       _logger.warning('[dragonfly_cache] EXISTS $key failed: $e');
-      _connected = false;
+      _markDisconnected();
       return false;
     }
   }
@@ -135,7 +196,7 @@ class DragonflyCache {
       return false;
     } catch (e) {
       _logger.warning('[dragonfly_cache] DEL $key failed: $e');
-      _connected = false;
+      _markDisconnected();
       return false;
     }
   }
@@ -148,7 +209,7 @@ class DragonflyCache {
       return (result as int) > 0;
     } catch (e) {
       _logger.warning('[dragonfly_cache] EXPIRE $key failed: $e');
-      _connected = false;
+      _markDisconnected();
       return false;
     }
   }
@@ -162,7 +223,7 @@ class DragonflyCache {
       return result as int;
     } catch (e) {
       _logger.warning('[dragonfly_cache] INCR $key failed: $e');
-      _connected = false;
+      _markDisconnected();
       return null;
     }
   }
@@ -218,6 +279,8 @@ class DragonflyCache {
 
     return {
       'connected': _connected,
+      'reconnect_attempts': _reconnectAttempts,
+      'reconnect_pending': _reconnectTimer?.isActive ?? false,
       'uptime_seconds': uptime.inSeconds,
       'total_operations': _operationCount,
       'get_hits': _getHits,
@@ -240,9 +303,14 @@ class DragonflyCache {
     late Socket socket;
     final startTime = DateTime.now();
     try {
-      print('[DRAGONFLY_CACHE] _sendCommand: Attempting Socket.connect($_host:$_port) with ${timeout.inSeconds}s timeout');
+      // FINE, not print(): with the reconnect loop this path runs every few
+      // minutes while Dragonfly is scaled to zero — print() would emit
+      // billable Log Analytics lines around the clock for nothing.
+      _logger.fine(
+        '[dragonfly_cache] _sendCommand: connecting $_host:$_port '
+        '(${timeout.inSeconds}s timeout)',
+      );
       socket = await Socket.connect(_host, _port, timeout: timeout);
-      print('[DRAGONFLY_CACHE] _sendCommand: Socket.connect() SUCCESS');
 
       // Build RESP request
       final buffer = StringBuffer();
@@ -305,11 +373,12 @@ class DragonflyCache {
       final latencyMs = DateTime.now().difference(startTime).inMilliseconds;
       _totalLatencyMs += latencyMs;
       _operationCount++;
-      print('[DRAGONFLY_CACHE] _sendCommand: Command ${command.join(" ")} succeeded in ${latencyMs}ms');
+      _logger.fine(
+        '[dragonfly_cache] _sendCommand: ${command.first} succeeded in ${latencyMs}ms',
+      );
       return result;
     } catch (e, stack) {
-      print('[DRAGONFLY_CACHE] _sendCommand: FAILED with error: $e');
-      print('[DRAGONFLY_CACHE] _sendCommand: Stack: $stack');
+      _logger.fine('[dragonfly_cache] _sendCommand failed: $e', e, stack);
       try {
         socket.destroy();
       } catch (_) {}
