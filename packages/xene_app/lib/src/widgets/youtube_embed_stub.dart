@@ -5,10 +5,14 @@ class YouTubeEmbed extends StatelessWidget {
     super.key,
     required this.videoId,
     required this.externalUrl,
+    this.artworkUrl,
   });
 
   final String videoId;
   final String externalUrl;
+
+  // Accepted for facade-signature parity with the native embed.
+  final String? artworkUrl;
 
   @override
   Widget build(BuildContext context) {

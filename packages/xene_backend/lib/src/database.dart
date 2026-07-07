@@ -10,6 +10,14 @@ const _optionalFeedItemColumns = {
   'reposted_by_name',
   'reposted_at',
   'feed_source_path',
+  'source_created_at',
+  'source_display_at',
+  'source_release_at',
+  'source_last_modified_at',
+  'date_source',
+  'date_confidence',
+  'date_conflict_reason',
+  'is_upcoming',
 };
 
 class DatabaseService {
@@ -43,11 +51,13 @@ class DatabaseService {
         now.day,
       ).subtract(Duration(days: days)).toUtc().toIso8601String();
 
-      var query = client
-          .from('feed_items')
-          .select()
-          .eq('platform', platform)
-          .gte('published_at', cutoff);
+      var query = client.from('feed_items').select().eq('platform', platform);
+      final useSoundCloudDateV2 =
+          platform == 'soundcloud' &&
+          Platform.environment['SC_DATE_RESOLVER_V2']?.toLowerCase() == 'true';
+      query = useSoundCloudDateV2
+          ? query.or('published_at.gte.$cutoff,is_upcoming.eq.true')
+          : query.gte('published_at', cutoff);
 
       if (artistName != null) {
         query = query.eq('artist_name', artistName);

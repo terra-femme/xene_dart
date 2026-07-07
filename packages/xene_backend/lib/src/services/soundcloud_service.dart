@@ -7,6 +7,7 @@ import 'package:xene_domain/xene_domain.dart';
 import '../database.dart';
 import '../utils/http_client.dart';
 import 'api_analytics_service.dart';
+import 'soundcloud_date_resolver.dart';
 
 final _logger = Logger('SoundCloudService');
 
@@ -35,8 +36,17 @@ class _ScRepostMeta {
 }
 
 class SoundCloudService {
-  SoundCloudService(this._db, {ApiAnalyticsService? analytics})
-    : _dio = analytics?.trackDio(_createDio(), 'soundcloud') ?? _createDio();
+  SoundCloudService(
+    this._db, {
+    ApiAnalyticsService? analytics,
+    Dio? dio,
+    DateTime Function()? now,
+    bool? dateResolverV2,
+  }) : _now = now ?? (() => DateTime.now().toUtc()),
+       _dateResolverV2Override = dateResolverV2,
+       _dio =
+           dio ??
+           (analytics?.trackDio(_createDio(), 'soundcloud') ?? _createDio());
 
   final DatabaseService _db;
   static const _xenePlaylistTitle = 'XENE Tunes';
@@ -48,13 +58,23 @@ class SoundCloudService {
   static const _userCacheTtl = Duration(days: 7);
 
   final Dio _dio;
+  final DateTime Function() _now;
+  final bool? _dateResolverV2Override;
+  static const _dateResolver = SoundCloudDateResolver();
+
+  bool get _v2DatesEnabled =>
+      _dateResolverV2Override ??
+      Platform.environment['SC_DATE_RESOLVER_V2']?.toLowerCase() == 'true';
 
   static Dio _createDio() => Dio(
     BaseOptions(
       baseUrl: 'https://api.soundcloud.com',
       connectTimeout: const Duration(seconds: 15),
       receiveTimeout: const Duration(seconds: 20),
-      headers: {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'},
+      headers: {
+        'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      },
     ),
   )..httpClientAdapter = pooledKeepAliveAdapter();
 
@@ -167,7 +187,10 @@ class SoundCloudService {
         'https://secure.soundcloud.com/sign-out',
         data: jsonEncode({'access_token': accessToken}),
         options: Options(
-          headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
           // SC returns 401 when the token is already invalid. Treat <500 as
           // "handled" so an already-dead token is not surfaced as a Dio error.
           validateStatus: (status) => status != null && status < 500,
@@ -188,7 +211,9 @@ class SoundCloudService {
         );
         return true;
       }
-      _logger.warning('[sc] revokeUserToken: unexpected status=$status body=${response.data}');
+      _logger.warning(
+        '[sc] revokeUserToken: unexpected status=$status body=${response.data}',
+      );
       return false;
     } catch (e) {
       _logger.warning('[sc] revokeUserToken: revoke request failed: $e');
@@ -209,7 +234,9 @@ class SoundCloudService {
     if (username.contains('soundcloud.com/')) {
       // If a full URL was provided, validate it's a legitimate SoundCloud URL
       if (!isSoundCloudProfileUrl(username)) {
-        _logger.warning('[sc] _resolveUserInfo: rejected non-SoundCloud URL: $username');
+        _logger.warning(
+          '[sc] _resolveUserInfo: rejected non-SoundCloud URL: $username',
+        );
         return null;
       }
       try {
@@ -226,7 +253,8 @@ class SoundCloudService {
     // Check in-memory user cache (7-day TTL — mirrors soundcloud.py _user_id_cache).
     final userCached = _userCache[cleanUsername];
     if (userCached != null &&
-        DateTime.now().toUtc().difference(userCached.fetchedAt) < _userCacheTtl) {
+        DateTime.now().toUtc().difference(userCached.fetchedAt) <
+            _userCacheTtl) {
       _logger.info('[sc] User cache HIT for $cleanUsername');
       return userCached.data;
     }
@@ -240,7 +268,10 @@ class SoundCloudService {
       );
 
       if (response.data != null) {
-        _userCache[cleanUsername] = _ScUserCacheEntry(response.data!, DateTime.now().toUtc());
+        _userCache[cleanUsername] = _ScUserCacheEntry(
+          response.data!,
+          DateTime.now().toUtc(),
+        );
       }
       return response.data;
     } catch (e) {
@@ -288,7 +319,10 @@ class SoundCloudService {
 
       for (final p in (response.data ?? [])) {
         final profile = p as Map<String, dynamic>;
-        var network = (profile['network'] ?? '').toString().trim().toLowerCase();
+        var network = (profile['network'] ?? '')
+            .toString()
+            .trim()
+            .toLowerCase();
         final purl = (profile['url'] ?? '').toString().trim();
 
         if (purl.isEmpty) continue;
@@ -343,7 +377,9 @@ class SoundCloudService {
   /// HTTP request to prevent SSRF attacks.
   Future<Map<String, dynamic>?> resolveProfileUrl(String scUrl) async {
     if (!isSoundCloudProfileUrl(scUrl)) {
-      _logger.warning('[sc] resolveProfileUrl: rejected non-SoundCloud URL: $scUrl');
+      _logger.warning(
+        '[sc] resolveProfileUrl: rejected non-SoundCloud URL: $scUrl',
+      );
       throw ArgumentError('URL must be a valid soundcloud.com profile URL');
     }
 
@@ -378,8 +414,10 @@ class SoundCloudService {
     final trackCached = _trackCache[username];
     if (!bypassMemoryCache &&
         trackCached != null &&
-        DateTime.now().toUtc().difference(trackCached.fetchedAt) < _trackCacheTtl) {
-      _logger.info('[sc] Track cache HIT for $username (${trackCached.items.length} items)');
+        _now().toUtc().difference(trackCached.fetchedAt) < _trackCacheTtl) {
+      _logger.info(
+        '[sc] Track cache HIT for $username (${trackCached.items.length} items)',
+      );
       return trackCached.items;
     }
 
@@ -391,14 +429,13 @@ class SoundCloudService {
 
     final userId = userData['id'].toString();
     final artistDisplayName = displayName ?? userData['username'];
-    final avatarUrl = (userData['avatar_url'] as String?).toString().replaceFirst(
-      '-large.',
-      '-t500x500.',
-    );
+    final avatarUrl = (userData['avatar_url'] as String?)
+        .toString()
+        .replaceFirst('-large.', '-t500x500.');
 
     final items = <FeedItem>[];
     final repostMetaById = <String, _ScRepostMeta>{};
-    final cutoff = DateTime.now().toUtc().subtract(const Duration(days: 31));
+    final cutoff = _now().toUtc().subtract(const Duration(days: 31));
 
     // 1. Fetch own tracks
     final tracks = await _getCollection(
@@ -407,6 +444,7 @@ class SoundCloudService {
       cutoffDate: cutoff,
       auditSink: auditSink,
     );
+    await _verifyAnomalousPublicDates(tracks, token);
     _parseScTracks(
       tracks,
       items,
@@ -423,6 +461,7 @@ class SoundCloudService {
       cutoffDate: cutoff,
       auditSink: auditSink,
     );
+    await _verifyAnomalousPublicDates(ownPlaylists, token);
     _parseScPlaylists(
       ownPlaylists,
       items,
@@ -439,6 +478,7 @@ class SoundCloudService {
       cutoffDate: cutoff,
       auditSink: auditSink,
     );
+    await _verifyAnomalousPublicDates(trackReposts, token);
     _parseScTracks(
       trackReposts,
       items,
@@ -455,6 +495,7 @@ class SoundCloudService {
       cutoffDate: cutoff,
       auditSink: auditSink,
     );
+    await _verifyAnomalousPublicDates(playlistReposts, token);
     _parseScPlaylists(
       playlistReposts,
       items,
@@ -467,9 +508,15 @@ class SoundCloudService {
     // Sort, trim to window, save.
     // Pre-orders (future publishedAt) are kept; only past-31d items are dropped.
     items.sort((a, b) => b.publishedAt.compareTo(a.publishedAt));
-    final windowItems = items.where((i) => i.publishedAt.isAfter(cutoff)).toList();
+    final windowItems = items
+        .where((i) => i.publishedAt.isAfter(cutoff) || i.isUpcoming)
+        .toList();
 
-    final dbItems = windowItems.map((i) {
+    // V2 must also persist corrected items that fall outside the display
+    // window. Otherwise an old cache row with bad future metadata survives
+    // forever because the corrected public date is no longer recent.
+    final persistenceItems = _v2DatesEnabled ? items : windowItems;
+    final dbItems = persistenceItems.map((i) {
       final repostMeta = repostMetaById[i.id];
       return {
         'platform': i.platform,
@@ -481,6 +528,14 @@ class SoundCloudService {
         'artwork_url': i.artworkUrl,
         'external_url': i.externalUrl,
         'published_at': i.publishedAt.toIso8601String(),
+        'source_created_at': i.sourceCreatedAt?.toIso8601String(),
+        'source_display_at': i.displayAt?.toIso8601String(),
+        'source_release_at': i.releaseAt?.toIso8601String(),
+        'source_last_modified_at': i.sourceLastModifiedAt?.toIso8601String(),
+        'date_source': i.dateSource,
+        'date_confidence': i.dateConfidence,
+        'date_conflict_reason': i.dateConflictReason,
+        'is_upcoming': i.isUpcoming,
         'duration_seconds': i.durationSeconds,
         'play_count': i.playCount,
         'like_count': i.likeCount,
@@ -489,7 +544,7 @@ class SoundCloudService {
         'reposted_by_name': repostMeta?.repostedByName,
         'reposted_at': repostMeta?.repostedAt?.toUtc().toIso8601String(),
         'feed_source_path': repostMeta?.feedSourcePath,
-        'updated_at': DateTime.now().toUtc().toIso8601String(),
+        'updated_at': _now().toUtc().toIso8601String(),
       };
     }).toList();
 
@@ -499,24 +554,30 @@ class SoundCloudService {
     // Uses the canonical SC username from the API (userData['username']) which
     // matches the soundcloud_username key stored in the artists table.
     // Non-fatal — genre update failure must never abort the feed fetch.
-    final scApiUsername = (userData['username'] as String?)?.toLowerCase().trim();
+    final scApiUsername = (userData['username'] as String?)
+        ?.toLowerCase()
+        .trim();
     if (scApiUsername != null) {
       final scGenre = userData['genre'] as String?;
       final scTagList = userData['tag_list'] as String?;
       final genreTags = _parseScGenreTags(scGenre, scTagList);
       if (genreTags.isNotEmpty) {
         _logger.info('[sc] Genre tags for $scApiUsername: $genreTags');
-        await _db.updateArtistGenreTags(genreTags, soundcloudUsername: scApiUsername).catchError((
-          Object e,
-        ) {
-          _logger.warning('[sc] Genre tags update skipped for $scApiUsername: $e');
-        });
+        await _db
+            .updateArtistGenreTags(genreTags, soundcloudUsername: scApiUsername)
+            .catchError((Object e) {
+              _logger.warning(
+                '[sc] Genre tags update skipped for $scApiUsername: $e',
+              );
+            });
       }
     }
 
     // Write to in-memory track cache.
-    _trackCache[username] = _ScTrackCacheEntry(windowItems, DateTime.now().toUtc());
-    _logger.info('[sc] Track cache WRITE for $username (${windowItems.length} items)');
+    _trackCache[username] = _ScTrackCacheEntry(windowItems, _now().toUtc());
+    _logger.info(
+      '[sc] Track cache WRITE for $username (${windowItems.length} items)',
+    );
 
     return windowItems;
   }
@@ -539,7 +600,10 @@ class SoundCloudService {
 
     try {
       String? nextPath = path;
-      Map<String, dynamic>? queryParameters = {'linked_partitioning': true, 'limit': pageLimit};
+      Map<String, dynamic>? queryParameters = {
+        'linked_partitioning': true,
+        'limit': pageLimit,
+      };
 
       for (var page = 0; page < maxPages && nextPath != null; page++) {
         pagesActual = page + 1;
@@ -617,18 +681,180 @@ class SoundCloudService {
     }
   }
 
+  Future<void> _verifyAnomalousPublicDates(
+    List<dynamic> rows,
+    String token,
+  ) async {
+    var verified = 0;
+    for (final raw in rows) {
+      if (verified >= 8 || raw is! Map) break;
+      final wrapper = Map<String, dynamic>.from(raw);
+      final nested = wrapper['track'] ?? wrapper['playlist'];
+      final item = nested is Map ? Map<String, dynamic>.from(nested) : wrapper;
+      final preview = _dateResolver.resolve(item, now: _now());
+      if (preview.releaseAt == null ||
+          !preview.releaseAt!.isAfter(_now().toUtc())) {
+        continue;
+      }
+      final url = item['permalink_url'];
+      if (url is! String || url.isEmpty) continue;
+      try {
+        final response = await _dio.get<String>(
+          url,
+          options: Options(responseType: ResponseType.plain),
+        );
+        final pageItem = _hydratedResource(response.data ?? '', item['id']);
+        final displayAt = _dateResolver.parseDate(pageItem?['display_date']);
+        if (displayAt == null) continue;
+        item['_xene_verified_display_date'] = displayAt.toIso8601String();
+        final conflictReason = await _duplicatePlaylistConflict(item, token);
+        if (conflictReason != null) {
+          item['_xene_verified_conflict_reason'] = conflictReason;
+        }
+        if (nested is Map) {
+          nested['_xene_verified_display_date'] = displayAt.toIso8601String();
+          if (conflictReason != null) {
+            nested['_xene_verified_conflict_reason'] = conflictReason;
+          }
+        } else {
+          raw['_xene_verified_display_date'] = displayAt.toIso8601String();
+          if (conflictReason != null) {
+            raw['_xene_verified_conflict_reason'] = conflictReason;
+          }
+        }
+        verified++;
+      } catch (e) {
+        _logger.warning(
+          '[sc-date] public verification failed id=${item['id']}: $e',
+        );
+      }
+    }
+  }
+
+  Future<String?> _duplicatePlaylistConflict(
+    Map<String, dynamic> item,
+    String token,
+  ) async {
+    if (item['kind'] != 'playlist') return null;
+    final sourceIds = _trackIds(item);
+    if (sourceIds.isEmpty) return null;
+    final title = item['title']?.toString() ?? '';
+    final query = title
+        .replaceAll(RegExp(r'\[[^\]]*\]|\([^)]*\)'), ' ')
+        .replaceAll(RegExp(r'[^a-zA-Z0-9]+'), ' ')
+        .trim();
+    if (query.isEmpty) return null;
+    try {
+      final response = await _dio.get<Map<String, dynamic>>(
+        '/playlists',
+        queryParameters: {'q': query, 'limit': 20, 'linked_partitioning': true},
+        options: Options(headers: {'Authorization': 'OAuth $token'}),
+      );
+      final candidates = response.data?['collection'];
+      if (candidates is! List) return null;
+      for (final raw in candidates) {
+        if (raw is! Map) continue;
+        final candidate = Map<String, dynamic>.from(raw);
+        if (candidate['id']?.toString() == item['id']?.toString()) continue;
+        final candidateIds = _trackIds(candidate);
+        if (candidateIds.length != sourceIds.length ||
+            !candidateIds.containsAll(sourceIds)) {
+          continue;
+        }
+        final candidateDate =
+            _dateResolver.parseDate(candidate['display_date']) ??
+            _dateResolver.parseDate(candidate['created_at']);
+        if (candidateDate != null && !candidateDate.isAfter(_now().toUtc())) {
+          return 'duplicate_playlist_same_tracks_with_past_date';
+        }
+      }
+    } catch (e) {
+      _logger.warning(
+        '[sc-date] duplicate playlist check failed id=${item['id']}: $e',
+      );
+    }
+    return null;
+  }
+
+  Set<String> _trackIds(Map<String, dynamic> playlist) {
+    final tracks = playlist['tracks'];
+    if (tracks is! List) return const {};
+    return tracks
+        .whereType<Map>()
+        .map((track) => track['id']?.toString())
+        .whereType<String>()
+        .toSet();
+  }
+
+  Map<String, dynamic>? _hydratedResource(String html, Object? expectedId) {
+    final match = RegExp(
+      r'window\.__sc_hydration\s*=\s*(\[.*?\]);\s*</script>',
+      dotAll: true,
+    ).firstMatch(html);
+    if (match == null) return null;
+    try {
+      final entries = jsonDecode(match.group(1)!) as List<dynamic>;
+      for (final raw in entries) {
+        if (raw is! Map) continue;
+        final data = raw['data'];
+        if (data is! Map) continue;
+        if (data['id']?.toString() == expectedId?.toString()) {
+          return Map<String, dynamic>.from(data);
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  SoundCloudDateResolution _resolveDate(
+    Map<String, dynamic> item, {
+    DateTime? repostedAt,
+  }) {
+    return _dateResolver.resolve(
+      item,
+      repostedAt: repostedAt,
+      verifiedDisplayAt: _dateResolver.parseDate(
+        item['_xene_verified_display_date'],
+      ),
+      verifiedConflictReason: item['_xene_verified_conflict_reason']
+          ?.toString(),
+      now: _now(),
+    );
+  }
+
+  void _logShadowDateDifference(
+    Map<String, dynamic> item,
+    SoundCloudDateResolution resolution,
+  ) {
+    if (_v2DatesEnabled ||
+        resolution.legacyPublishedAt == resolution.publishedAt) {
+      return;
+    }
+    _logger.warning(
+      '[sc-date-shadow] ${jsonEncode({'id': item['id'], 'title': item['title'], 'legacy_published_at': resolution.legacyPublishedAt.toIso8601String(), 'v2_published_at': resolution.publishedAt.toIso8601String(), 'release_at': resolution.releaseAt?.toIso8601String(), 'is_upcoming': resolution.isUpcoming, 'confidence': resolution.confidence, 'conflict_reason': resolution.conflictReason})}',
+    );
+  }
+
   /// Search SoundCloud users by name — used as the source-of-truth lookup.
-  Future<List<Map<String, dynamic>>> searchUsers(String query, {int limit = 10}) async {
+  Future<List<Map<String, dynamic>>> searchUsers(
+    String query, {
+    int limit = 10,
+  }) async {
     final token = await _getToken();
     if (token == null) return [];
 
     try {
       final response = await _dio.get<Map<String, dynamic>>(
         '/users',
-        queryParameters: {'q': query, 'limit': limit, 'linked_partitioning': true},
+        queryParameters: {
+          'q': query,
+          'limit': limit,
+          'linked_partitioning': true,
+        },
         options: Options(headers: {'Authorization': 'OAuth $token'}),
       );
-      final collection = (response.data?['collection'] as List? ?? []).cast<Map<String, dynamic>>();
+      final collection = (response.data?['collection'] as List? ?? [])
+          .cast<Map<String, dynamic>>();
       _logger.info('[sc] searchUsers "$query": ${collection.length} results');
       return collection;
     } catch (e) {
@@ -639,17 +865,25 @@ class SoundCloudService {
 
   /// Search SoundCloud tracks by query string.
   /// Returns up to [limit] track objects with the fields needed for party submission.
-  Future<List<Map<String, dynamic>>> searchTracks(String query, {int limit = 10}) async {
+  Future<List<Map<String, dynamic>>> searchTracks(
+    String query, {
+    int limit = 10,
+  }) async {
     final token = await _getToken();
     if (token == null) return [];
 
     try {
       final response = await _dio.get<Map<String, dynamic>>(
         '/tracks',
-        queryParameters: {'q': query, 'limit': limit, 'linked_partitioning': true},
+        queryParameters: {
+          'q': query,
+          'limit': limit,
+          'linked_partitioning': true,
+        },
         options: Options(headers: {'Authorization': 'OAuth $token'}),
       );
-      final collection = (response.data?['collection'] as List? ?? []).cast<Map<String, dynamic>>();
+      final collection = (response.data?['collection'] as List? ?? [])
+          .cast<Map<String, dynamic>>();
       _logger.info('[sc] searchTracks "$query": ${collection.length} results');
 
       return collection.map((t) {
@@ -671,25 +905,48 @@ class SoundCloudService {
     }
   }
 
-  /// Resolve a track's stream URL using the official token.
+  /// Resolve a track's directly-playable stream URL using the official token.
+  ///
+  /// SoundCloud's `/tracks/{id}/stream` (singular) 302-redirects to a signed
+  /// CloudFront URL (`cf-media.sndcdn.com` / `cf-preview-media…`) whose auth is
+  /// baked into the query string (Policy/Signature/Key-Pair-Id) — so it's
+  /// fetchable by a native player with **no** Authorization header.
+  ///
+  /// We deliberately do NOT return the `/streams` JSON fields (`http_mp3_128_url`
+  /// etc.): those stay on `api.soundcloud.com` and still require the OAuth
+  /// header, which a client (ExoPlayer/just_audio) can't send → 401. Verified
+  /// live 2026-07-06 against track 932965966.
+  ///
+  /// NOTE: with app client-credentials this resolves to a ~30s PREVIEW
+  /// (`cf-preview-media`) for most tracks; full-length streams require
+  /// user-level rights the app token doesn't carry.
   Future<String?> getStreamUrl(String trackId) async {
     final token = await _getToken();
     if (token == null) return null;
 
     try {
-      final response = await _dio.get<Map<String, dynamic>>(
-        '/tracks/$trackId/streams',
+      final response = await _dio.get<dynamic>(
+        '/tracks/$trackId/stream',
         options: Options(
           headers: {'Authorization': 'OAuth $token'},
-          followRedirects: false, // We want the redirect URL
-          validateStatus: (status) => status != null && status < 500,
+          followRedirects: false, // capture the 302 Location ourselves
+          validateStatus: (status) => status != null && status < 400,
         ),
       );
 
-      // The streams endpoint returns a list of formats.
-      // Usually 'http_mp3_128_url' or similar.
-      final data = response.data!;
-      return data['http_mp3_128_url'] as String?;
+      final location = response.headers.value('location');
+      if (location == null || location.isEmpty) {
+        _logger.warning(
+          '[sc] getStreamUrl: no Location on /stream redirect for $trackId '
+          '(status=${response.statusCode})',
+        );
+        return null;
+      }
+      _logger.info(
+        '[sc] getStreamUrl resolved $trackId → signed CDN url '
+        '(len=${location.length})',
+      );
+      return location;
     } catch (e) {
       _logger.warning('Failed to resolve SoundCloud stream for $trackId: $e');
       return null;
@@ -711,7 +968,9 @@ class SoundCloudService {
 
     if (tracks.isEmpty) return null;
 
-    _logger.info('[sc] createScPlaylist title="$title" tracks=${tracks.length}');
+    _logger.info(
+      '[sc] createScPlaylist title="$title" tracks=${tracks.length}',
+    );
 
     // Explicitly encode to JSON string so Dio sends the body as-is.
     // Passing a Map with a custom contentType can cause Dio to form-encode
@@ -760,7 +1019,8 @@ class SoundCloudService {
     if (playlistId == null) return null;
 
     final existingTrackIds = _extractPlaylistTrackIds(playlist).toList();
-    final mergedTrackIds = LinkedHashSet<String>.from(existingTrackIds)..addAll(newTrackIds);
+    final mergedTrackIds = LinkedHashSet<String>.from(existingTrackIds)
+      ..addAll(newTrackIds);
     final tracks = mergedTrackIds.map((id) => {'id': id}).toList();
 
     _logger.info(
@@ -770,7 +1030,11 @@ class SoundCloudService {
     );
 
     final body = jsonEncode({
-      'playlist': {'title': _xenePlaylistTitle, 'sharing': 'private', 'tracks': tracks},
+      'playlist': {
+        'title': _xenePlaylistTitle,
+        'sharing': 'private',
+        'tracks': tracks,
+      },
     });
 
     final response = await _dio.put<Map<String, dynamic>>(
@@ -872,7 +1136,11 @@ class SoundCloudService {
 
     final initialTracks = initialTrackIds.map((id) => {'id': id}).toList();
     final body = jsonEncode({
-      'playlist': {'title': title, 'sharing': 'private', 'tracks': initialTracks},
+      'playlist': {
+        'title': title,
+        'sharing': 'private',
+        'tracks': initialTracks,
+      },
     });
 
     final response = await _dio.post<Map<String, dynamic>>(
@@ -903,7 +1171,9 @@ class SoundCloudService {
     required String userId,
     required String cachePrefix,
   }) async {
-    final cached = await _db.getSystemCache(_playlistCacheKey(cachePrefix, userId));
+    final cached = await _db.getSystemCache(
+      _playlistCacheKey(cachePrefix, userId),
+    );
     final playlistId = _resourceIdText(cached?['playlist_id']);
     if (playlistId == null) return null;
 
@@ -925,14 +1195,19 @@ class SoundCloudService {
       return playlist;
     } on DioException catch (e) {
       if (e.response?.statusCode == 404) {
-        _logger.warning('[sc] Cached Xene playlist $playlistId not found; recreating');
+        _logger.warning(
+          '[sc] Cached Xene playlist $playlistId not found; recreating',
+        );
         return null;
       }
       rethrow;
     }
   }
 
-  Future<void> _cacheXenePlaylist(String userId, Map<String, dynamic>? playlist) => _cachePlaylist(
+  Future<void> _cacheXenePlaylist(
+    String userId,
+    Map<String, dynamic>? playlist,
+  ) => _cachePlaylist(
     cachePrefix: 'soundcloud:xene_playlist',
     userId: userId,
     playlist: playlist,
@@ -955,7 +1230,8 @@ class SoundCloudService {
     });
   }
 
-  String _playlistCacheKey(String cachePrefix, String userId) => '$cachePrefix:$userId';
+  String _playlistCacheKey(String cachePrefix, String userId) =>
+      '$cachePrefix:$userId';
 
   String? _playlistUrl(Map<String, dynamic>? playlist) {
     final permalinkUrl = playlist?['permalink_url'] as String?;
@@ -966,11 +1242,19 @@ class SoundCloudService {
 
     final uri = Uri.parse(permalinkUrl);
     return uri
-        .replace(queryParameters: {...uri.queryParameters, 'secret_token': secretToken})
+        .replace(
+          queryParameters: {
+            ...uri.queryParameters,
+            'secret_token': secretToken,
+          },
+        )
         .toString();
   }
 
-  Future<List<String>> _expandScTrackIds(String accessToken, List<String> rawIds) async {
+  Future<List<String>> _expandScTrackIds(
+    String accessToken,
+    List<String> rawIds,
+  ) async {
     final ids = LinkedHashSet<String>();
 
     for (final raw in rawIds) {
@@ -998,7 +1282,10 @@ class SoundCloudService {
     return ids.toList();
   }
 
-  Future<List<String>> _resolveTrackIdsFromUrl(String accessToken, String url) async {
+  Future<List<String>> _resolveTrackIdsFromUrl(
+    String accessToken,
+    String url,
+  ) async {
     try {
       final response = await _dio.get<Map<String, dynamic>>(
         '/resolve',
@@ -1023,7 +1310,10 @@ class SoundCloudService {
     return const [];
   }
 
-  Future<List<String>> _getPlaylistTrackIds(String accessToken, String playlistId) async {
+  Future<List<String>> _getPlaylistTrackIds(
+    String accessToken,
+    String playlistId,
+  ) async {
     try {
       final tracksResponse = await _dio.get<dynamic>(
         '/playlists/$playlistId/tracks',
@@ -1039,12 +1329,16 @@ class SoundCloudService {
       );
       return _extractPlaylistTrackIds(playlistResponse.data).toList();
     } catch (e) {
-      _logger.warning('[sc] Failed to expand playlist $playlistId for export: $e');
+      _logger.warning(
+        '[sc] Failed to expand playlist $playlistId for export: $e',
+      );
       return const [];
     }
   }
 
-  Iterable<String> _extractPlaylistTrackIds(Map<String, dynamic>? playlist) sync* {
+  Iterable<String> _extractPlaylistTrackIds(
+    Map<String, dynamic>? playlist,
+  ) sync* {
     final tracks = playlist?['tracks'];
     yield* _extractTrackIds(tracks);
   }
@@ -1076,7 +1370,8 @@ class SoundCloudService {
     for (var trackData in data) {
       try {
         // 1. Unwrap Repost Wrapper if present
-        final isRepost = trackData['type'] == 'track-repost' || trackData['track'] != null;
+        final isRepost =
+            trackData['type'] == 'track-repost' || trackData['track'] != null;
         final Map<String, dynamic> track = isRepost
             ? trackData['track'] as Map<String, dynamic>
             : trackData as Map<String, dynamic>;
@@ -1098,11 +1393,15 @@ class SoundCloudService {
           continue;
         }
 
-        final String? repostCreatedAt = isRepost ? trackData['created_at'] as String? : null;
+        final String? repostCreatedAt = isRepost
+            ? trackData['created_at'] as String?
+            : null;
         final repostedAt = _parseSoundCloudDate(repostCreatedAt);
-        final publishedAt = isRepost
-            ? repostedAt ?? _parsePublicTrackDate(track)
-            : _parsePublicTrackDate(track);
+        final resolution = _resolveDate(track, repostedAt: repostedAt);
+        final publishedAt = _v2DatesEnabled
+            ? resolution.publishedAt
+            : resolution.legacyPublishedAt;
+        _logShadowDateDifference(track, resolution);
 
         // 2. Extract Producer Name (metadata_artist > user['username'])
         final producerName = _getProducerName(track, artistName);
@@ -1110,7 +1409,9 @@ class SoundCloudService {
         // 3. Mandatory Title Augmentation: "Producer - Title"
         var title = track['title'] as String? ?? '';
         if (title.trim().isEmpty) {
-          _logger.warning('[sc] Dropping track with blank title id=${track['id']}');
+          _logger.warning(
+            '[sc] Dropping track with blank title id=${track['id']}',
+          );
           continue;
         }
         if (!title.toLowerCase().contains(producerName.toLowerCase())) {
@@ -1136,10 +1437,21 @@ class SoundCloudService {
             repostedBy: isRepost ? artistName : null,
           ),
           artworkUrl:
-              ((track['artwork_url'] as String?)?.replaceFirst('-large.', '-t500x500.')) ??
+              ((track['artwork_url'] as String?)?.replaceFirst(
+                '-large.',
+                '-t500x500.',
+              )) ??
               avatarUrl,
           externalUrl: _validateTrackUrl(track['permalink_url']),
           publishedAt: publishedAt,
+          sourceCreatedAt: resolution.sourceCreatedAt,
+          displayAt: resolution.displayAt,
+          releaseAt: resolution.releaseAt,
+          sourceLastModifiedAt: resolution.sourceLastModifiedAt,
+          dateSource: _v2DatesEnabled ? resolution.dateSource : 'legacy_max',
+          dateConfidence: resolution.confidence,
+          dateConflictReason: resolution.conflictReason,
+          isUpcoming: _v2DatesEnabled && resolution.isUpcoming,
           durationSeconds: (track['duration'] as int) ~/ 1000,
           playCount: track['playback_count'] as int?,
           likeCount: track['likes_count'] as int?,
@@ -1174,7 +1486,8 @@ class SoundCloudService {
     for (var plData in data) {
       try {
         // 1. Unwrap Repost Wrapper if present
-        final isRepost = plData['type'] == 'playlist-repost' || plData['playlist'] != null;
+        final isRepost =
+            plData['type'] == 'playlist-repost' || plData['playlist'] != null;
         final Map<String, dynamic> pl = isRepost
             ? plData['playlist'] as Map<String, dynamic>
             : plData as Map<String, dynamic>;
@@ -1184,12 +1497,15 @@ class SoundCloudService {
 
         // Guard: skip blank-title playlists.
         if (title.trim().isEmpty) {
-          _logger.warning('[sc] Dropping playlist with blank title id=${pl['id']}');
+          _logger.warning(
+            '[sc] Dropping playlist with blank title id=${pl['id']}',
+          );
           continue;
         }
 
         // Filter: if not uploader, artist name must be in title
-        if (uploader != artistLower && !title.toLowerCase().contains(artistLower)) {
+        if (uploader != artistLower &&
+            !title.toLowerCase().contains(artistLower)) {
           auditSink?.add({
             'type': 'fetch_drop',
             'reason': 'playlist_title_filter',
@@ -1205,7 +1521,9 @@ class SoundCloudService {
         // Guard: skip empty playlists — track_count=0 means nothing to play.
         final trackCount = pl['track_count'] as int? ?? 0;
         if (trackCount == 0) {
-          _logger.warning('[sc] Dropping empty playlist "$title" (track_count=0) id=${pl['id']}');
+          _logger.warning(
+            '[sc] Dropping empty playlist "$title" (track_count=0) id=${pl['id']}',
+          );
           auditSink?.add({
             'type': 'fetch_drop',
             'reason': 'empty_playlist',
@@ -1217,11 +1535,15 @@ class SoundCloudService {
           continue;
         }
 
-        final String? repostCreatedAt = isRepost ? plData['created_at'] as String? : null;
+        final String? repostCreatedAt = isRepost
+            ? plData['created_at'] as String?
+            : null;
         final repostedAt = _parseSoundCloudDate(repostCreatedAt);
-        final publishedAt = isRepost
-            ? repostedAt ?? _parsePublicTrackDate(pl)
-            : _parsePublicTrackDate(pl);
+        final resolution = _resolveDate(pl, repostedAt: repostedAt);
+        final publishedAt = _v2DatesEnabled
+            ? resolution.publishedAt
+            : resolution.legacyPublishedAt;
+        _logShadowDateDifference(pl, resolution);
 
         // 2. Extract Producer Name
         final producerName = _getProducerName(pl, artistName);
@@ -1251,12 +1573,24 @@ class SoundCloudService {
               repostedBy: isRepost ? artistName : null,
             ),
             artworkUrl:
-                ((pl['artwork_url'] as String?)?.replaceFirst('-large.', '-t500x500.')) ??
+                ((pl['artwork_url'] as String?)?.replaceFirst(
+                  '-large.',
+                  '-t500x500.',
+                )) ??
                 avatarUrl,
             externalUrl: _validateTrackUrl(pl['permalink_url']),
             publishedAt: publishedAt,
+            sourceCreatedAt: resolution.sourceCreatedAt,
+            displayAt: resolution.displayAt,
+            releaseAt: resolution.releaseAt,
+            sourceLastModifiedAt: resolution.sourceLastModifiedAt,
+            dateSource: _v2DatesEnabled ? resolution.dateSource : 'legacy_max',
+            dateConfidence: resolution.confidence,
+            dateConflictReason: resolution.conflictReason,
+            isUpcoming: _v2DatesEnabled && resolution.isUpcoming,
             trackCount: pl['track_count'] as int?,
-            durationSeconds: pl['duration'] is int && (pl['duration'] as int) > 0
+            durationSeconds:
+                pl['duration'] is int && (pl['duration'] as int) > 0
                 ? (pl['duration'] as int) ~/ 1000
                 : null,
           ),
@@ -1311,7 +1645,9 @@ class SoundCloudService {
       if (uri.scheme != 'https' ||
           (uri.host.toLowerCase() != 'soundcloud.com' &&
               uri.host.toLowerCase() != 'www.soundcloud.com')) {
-        _logger.warning('[sc] Track URL from API does not match expected SoundCloud domain: $url');
+        _logger.warning(
+          '[sc] Track URL from API does not match expected SoundCloud domain: $url',
+        );
       }
     } catch (e) {
       _logger.warning('[sc] Failed to validate track URL: $url, error: $e');
@@ -1319,7 +1655,10 @@ class SoundCloudService {
     return url;
   }
 
-  String? _cardBody({required String? description, required String? repostedBy}) {
+  String? _cardBody({
+    required String? description,
+    required String? repostedBy,
+  }) {
     final cleanDescription = description?.trim();
     if (repostedBy == null || repostedBy.trim().isEmpty) {
       return cleanDescription?.isEmpty == true ? null : cleanDescription;
@@ -1347,7 +1686,8 @@ class SoundCloudService {
     final rd = track['release_day'];
     String? releaseYmd;
     if (ry is int && rm is int && rd is int) {
-      releaseYmd = '$ry-${rm.toString().padLeft(2, '0')}-${rd.toString().padLeft(2, '0')}';
+      releaseYmd =
+          '$ry-${rm.toString().padLeft(2, '0')}-${rd.toString().padLeft(2, '0')}';
     }
 
     // Reconstruct which candidate won the max-date selection.
@@ -1390,7 +1730,8 @@ class SoundCloudService {
       usedField = candidates.entries
           .reduce(
             (a, b) =>
-                (a.value.difference(publishedAt).abs() < b.value.difference(publishedAt).abs())
+                (a.value.difference(publishedAt).abs() <
+                    b.value.difference(publishedAt).abs())
                 ? a
                 : b,
           )
@@ -1436,76 +1777,8 @@ class SoundCloudService {
     return fallback;
   }
 
-  /// Match the public SoundCloud Tracks tab date. Uploaded tracks can show
-  /// release metadata ("7 days ago") even when the API resource was created
-  /// earlier, so release/display dates win over created_at for own items.
-  DateTime _parsePublicTrackDate(Map<String, dynamic> item) {
-    final candidates = <DateTime>[];
-
-    final ry = item['release_year'];
-    final rm = item['release_month'];
-    final rd = item['release_day'];
-    if (ry is int && rm is int && rd is int) {
-      try {
-        candidates.add(_dateOnlyUtc(ry, rm, rd));
-      } catch (_) {}
-    }
-
-    final fields = ['release_date', 'display_date', 'created_at'];
-    for (final f in fields) {
-      final val = item[f];
-      if (val is String && val.isNotEmpty) {
-        final parsed = _parseSoundCloudDate(val);
-        if (parsed != null) candidates.add(parsed);
-      }
-    }
-
-    if (candidates.isEmpty) return DateTime.now().toUtc();
-
-    return candidates.reduce((a, b) => a.isAfter(b) ? a : b);
-  }
-
-  DateTime? _parseSoundCloudDate(Object? value) {
-    if (value is! String || value.isEmpty) return null;
-    final trimmed = value.trim();
-    final dateOnly = RegExp(r'^(\d{4})-(\d{2})-(\d{2})$').firstMatch(trimmed);
-    if (dateOnly != null) {
-      return _dateOnlyUtc(
-        int.parse(dateOnly.group(1)!),
-        int.parse(dateOnly.group(2)!),
-        int.parse(dateOnly.group(3)!),
-      );
-    }
-
-    try {
-      return DateTime.parse(trimmed.replaceAll('/', '-')).toUtc();
-    } catch (_) {
-      final match = RegExp(
-        r'^(\d{4})/(\d{2})/(\d{2})\s+(\d{2}):(\d{2}):(\d{2})\s+([+-])(\d{2})(\d{2})$',
-      ).firstMatch(trimmed);
-      if (match == null) return null;
-
-      final year = int.parse(match.group(1)!);
-      final month = int.parse(match.group(2)!);
-      final day = int.parse(match.group(3)!);
-      final hour = int.parse(match.group(4)!);
-      final minute = int.parse(match.group(5)!);
-      final second = int.parse(match.group(6)!);
-      final sign = match.group(7) == '-' ? -1 : 1;
-      final offsetHours = int.parse(match.group(8)!);
-      final offsetMinutes = int.parse(match.group(9)!);
-      final offset = Duration(hours: sign * offsetHours, minutes: sign * offsetMinutes);
-
-      return DateTime.utc(year, month, day, hour, minute, second).subtract(offset);
-    }
-  }
-
-  DateTime _dateOnlyUtc(int year, int month, int day) {
-    // SoundCloud public dates are calendar dates, not instants. Store them at
-    // midday UTC so US time zones do not shift them into the previous day when
-    // recent/archive buckets compare local calendar days.
-    return DateTime.utc(year, month, day, 12);
-  }
+  DateTime? _parseSoundCloudDate(Object? value) =>
+      _dateResolver.parseDate(value);
 
   /// Parse SC profile genre + tag_list fields into a sorted, deduplicated list.
   /// SC tag_list format: "drum and bass" "liquid" dnb neurofunk

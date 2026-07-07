@@ -23,6 +23,7 @@ import '../routes/soundcloud/stream/[id].dart' as soundcloud_stream_$id;
 import '../routes/publications/matches.dart' as publications_matches;
 import '../routes/proxy/image.dart' as proxy_image;
 import '../routes/press_scout/run.dart' as press_scout_run;
+import '../routes/press_scout/poll_publications.dart' as press_scout_poll_publications;
 import '../routes/presets/magazine_cover.dart' as presets_magazine_cover;
 import '../routes/presets/index.dart' as presets_index;
 import '../routes/presets/custom_sources.dart' as presets_custom_sources;
@@ -36,6 +37,7 @@ import '../routes/presets/templates/[slug]/sources/[sourceId]/refresh_feed.dart'
 import '../routes/presets/templates/[slug]/sources/[sourceId]/move.dart' as presets_templates_$slug_sources_$source_id_move;
 import '../routes/presets/templates/[slug]/sources/[sourceId]/index.dart' as presets_templates_$slug_sources_$source_id_index;
 import '../routes/presets/templates/[slug]/sources/[sourceId]/articles.dart' as presets_templates_$slug_sources_$source_id_articles;
+import '../routes/monitor/cache.dart' as monitor_cache;
 import '../routes/inbox/daily.dart' as inbox_daily;
 import '../routes/game/scene.dart' as game_scene;
 import '../routes/game/profile/username.dart' as game_profile_username;
@@ -61,6 +63,8 @@ import '../routes/connections/status.dart' as connections_status;
 import '../routes/connections/soundcloud/following.dart' as connections_soundcloud_following;
 import '../routes/connections/soundcloud/disconnect.dart' as connections_soundcloud_disconnect;
 import '../routes/config/index.dart' as config_index;
+import '../routes/auth/email_exists.dart' as auth_email_exists;
+import '../routes/auth/capacity_check.dart' as auth_capacity_check;
 import '../routes/auth/soundcloud/nonce.dart' as auth_soundcloud_nonce;
 import '../routes/auth/soundcloud/index.dart' as auth_soundcloud_index;
 import '../routes/auth/soundcloud/done.dart' as auth_soundcloud_done;
@@ -104,6 +108,7 @@ Handler buildRootHandler() {
     ..mount('/presets/templates/<slug>', (context,slug,) => buildPresetsTemplates$slugHandler(slug,)(context))
     ..mount('/presets/templates/<slug>/sources', (context,slug,) => buildPresetsTemplates$slugSourcesHandler(slug,)(context))
     ..mount('/presets/templates/<slug>/sources/<sourceId>', (context,slug,sourceId,) => buildPresetsTemplates$slugSources$sourceIdHandler(slug,sourceId,)(context))
+    ..mount('/monitor', (context) => buildMonitorHandler()(context))
     ..mount('/inbox', (context) => buildInboxHandler()(context))
     ..mount('/game', (context) => buildGameHandler()(context))
     ..mount('/game/profile', (context) => buildGameProfileHandler()(context))
@@ -117,6 +122,7 @@ Handler buildRootHandler() {
     ..mount('/connections', (context) => buildConnectionsHandler()(context))
     ..mount('/connections/soundcloud', (context) => buildConnectionsSoundcloudHandler()(context))
     ..mount('/config', (context) => buildConfigHandler()(context))
+    ..mount('/auth', (context) => buildAuthHandler()(context))
     ..mount('/auth/soundcloud', (context) => buildAuthSoundcloudHandler()(context))
     ..mount('/artists', (context) => buildArtistsHandler()(context))
     ..mount('/artists/<id>', (context,id,) => buildArtists$idHandler(id,)(context))
@@ -204,7 +210,7 @@ Handler buildProxyHandler() {
 Handler buildPressScoutHandler() {
   final pipeline = const Pipeline();
   final router = Router()
-    ..all('/run', (context) => press_scout_run.onRequest(context,));
+    ..all('/poll_publications', (context) => press_scout_poll_publications.onRequest(context,))..all('/run', (context) => press_scout_run.onRequest(context,));
   return pipeline.addHandler(router);
 }
 
@@ -240,6 +246,13 @@ Handler buildPresetsTemplates$slugSources$sourceIdHandler(String slug,String sou
   final pipeline = const Pipeline();
   final router = Router()
     ..all('/articles', (context) => presets_templates_$slug_sources_$source_id_articles.onRequest(context,slug,sourceId,))..all('/move', (context) => presets_templates_$slug_sources_$source_id_move.onRequest(context,slug,sourceId,))..all('/refresh_feed', (context) => presets_templates_$slug_sources_$source_id_refresh_feed.onRequest(context,slug,sourceId,))..all('/', (context) => presets_templates_$slug_sources_$source_id_index.onRequest(context,slug,sourceId,));
+  return pipeline.addHandler(router);
+}
+
+Handler buildMonitorHandler() {
+  final pipeline = const Pipeline();
+  final router = Router()
+    ..all('/cache', (context) => monitor_cache.onRequest(context,));
   return pipeline.addHandler(router);
 }
 
@@ -331,6 +344,13 @@ Handler buildConfigHandler() {
   final pipeline = const Pipeline();
   final router = Router()
     ..all('/', (context) => config_index.onRequest(context,));
+  return pipeline.addHandler(router);
+}
+
+Handler buildAuthHandler() {
+  final pipeline = const Pipeline();
+  final router = Router()
+    ..all('/capacity_check', (context) => auth_capacity_check.onRequest(context,))..all('/email_exists', (context) => auth_email_exists.onRequest(context,));
   return pipeline.addHandler(router);
 }
 

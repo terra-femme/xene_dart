@@ -8,10 +8,15 @@ class YouTubeEmbed extends StatefulWidget {
     super.key,
     required this.videoId,
     required this.externalUrl,
+    this.artworkUrl,
   });
 
   final String videoId;
   final String externalUrl;
+
+  // Accepted for facade-signature parity with the native embed (which uses it
+  // for the artwork fallback). Unused on web, where the iframe renders directly.
+  final String? artworkUrl;
 
   @override
   State<YouTubeEmbed> createState() => _YouTubeEmbedState();

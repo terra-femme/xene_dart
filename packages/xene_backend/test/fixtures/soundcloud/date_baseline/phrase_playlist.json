@@ -1,0 +1,35 @@
+{
+  "captured_at": "2026-07-06T00:00:00.000Z",
+  "canonical_url": "https://soundcloud.com/phrasednb/sets/phrase-kill-plan-final-test",
+  "official_api": {
+    "kind": "playlist",
+    "id": 2112403133,
+    "title": "Phrase - Kill Plan / Final Test (Ranger Records)",
+    "created_at": "2025/11/11 04:28:30 +0000",
+    "display_date": null,
+    "release_date": null,
+    "release_year": null,
+    "release_month": null,
+    "release_day": null,
+    "last_modified": "2025/11/14 19:45:58 +0000",
+    "permalink_url": "https://soundcloud.com/phrasednb/sets/phrase-kill-plan-final-test",
+    "tracks": [
+      {
+        "id": 2200721063,
+        "title": "Phrase - Kill Plan [Premiere]",
+        "created_at": "2025/10/28 12:57:48 +0000",
+        "display_date": "2025-11-04T18:00:38Z"
+      },
+      {
+        "id": 2210240468,
+        "title": "Phrase - Final Test",
+        "created_at": "2025/11/10 18:50:05 +0000",
+        "display_date": "2025-11-10T18:50:05Z"
+      }
+    ]
+  },
+  "public_page": {
+    "display_date": "2025-11-11T04:28:30Z",
+    "release_date": null
+  }
+}

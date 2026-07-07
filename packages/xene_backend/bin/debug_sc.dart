@@ -1,6 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:dio/dio.dart';
+import 'package:xene_backend/src/services/soundcloud_date_resolver.dart';
+
+const _dateResolver = SoundCloudDateResolver();
 
 /// Standalone diagnostic tool to inspect raw SoundCloud API responses.
 /// Usage:
@@ -279,59 +282,10 @@ _DateRow? _dateRow(String source, dynamic raw) {
 }
 
 DateTime _parsePublicTrackDate(Map<String, dynamic> item) {
-  final candidates = <DateTime>[];
-  final ry = item['release_year'];
-  final rm = item['release_month'];
-  final rd = item['release_day'];
-  if (ry is int && rm is int && rd is int) {
-    candidates.add(_dateOnlyUtc(ry, rm, rd));
-  }
-  for (final f in ['release_date', 'display_date', 'created_at']) {
-    final parsed = _parseSoundCloudDate(item[f]);
-    if (parsed != null) candidates.add(parsed);
-  }
-  if (candidates.isEmpty) return DateTime.now().toUtc();
-  return candidates.reduce((a, b) => a.isAfter(b) ? a : b);
+  return _dateResolver.legacy(item, now: DateTime.now().toUtc());
 }
 
-DateTime? _parseSoundCloudDate(Object? value) {
-  if (value is! String || value.isEmpty) return null;
-  final trimmed = value.trim();
-  final dateOnly = RegExp(r'^(\d{4})-(\d{2})-(\d{2})$').firstMatch(trimmed);
-  if (dateOnly != null) {
-    return _dateOnlyUtc(
-      int.parse(dateOnly.group(1)!),
-      int.parse(dateOnly.group(2)!),
-      int.parse(dateOnly.group(3)!),
-    );
-  }
-
-  try {
-    return DateTime.parse(trimmed.replaceAll('/', '-')).toUtc();
-  } catch (_) {
-    final match = RegExp(
-      r'^(\d{4})/(\d{2})/(\d{2})\s+(\d{2}):(\d{2}):(\d{2})\s+([+-])(\d{2})(\d{2})$',
-    ).firstMatch(trimmed);
-    if (match == null) return null;
-    final sign = match.group(7) == '-' ? -1 : 1;
-    final offset = Duration(
-      hours: sign * int.parse(match.group(8)!),
-      minutes: sign * int.parse(match.group(9)!),
-    );
-    return DateTime.utc(
-      int.parse(match.group(1)!),
-      int.parse(match.group(2)!),
-      int.parse(match.group(3)!),
-      int.parse(match.group(4)!),
-      int.parse(match.group(5)!),
-      int.parse(match.group(6)!),
-    ).subtract(offset);
-  }
-}
-
-DateTime _dateOnlyUtc(int year, int month, int day) {
-  return DateTime.utc(year, month, day, 12);
-}
+DateTime? _parseSoundCloudDate(Object? value) => _dateResolver.parseDate(value);
 
 void _printRow(_DateRow row) {
   final ageDays = DateTime.now().toUtc().difference(row.feedAt).inDays;

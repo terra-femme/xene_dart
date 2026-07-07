@@ -80,7 +80,15 @@ class XeneLayoutMetrics {
       cardMinHeight: compactHeight ? 82.0 : 92.0,
       cardThumbnailSize: compactHeight ? 34.0 : 39.0,
       sheetMinHeight: 23.0,
-      sheetMaxHeight: (usableHeight * 0.72).clamp(180.0, usableHeight),
+      // Guard: on the first frame the platform can hand us a degenerate
+      // viewport (height ≈ 0 before the native surface is ready), which makes
+      // the 180.0 lower bound exceed usableHeight and `clamp` throw
+      // ArgumentError(180.0). Fall back to usableHeight until a real frame
+      // arrives and recomputes this. This is the only clamp here with a
+      // variable upper bound, so it's the only one that can invert.
+      sheetMaxHeight: usableHeight < 180.0
+          ? usableHeight
+          : (usableHeight * 0.72).clamp(180.0, usableHeight),
       playerWidth: (width * 0.18).clamp(150.0, 220.0),
       playerHeight: (usableHeight * 0.34).clamp(220.0, 320.0),
       contentHorizontalPadding: layoutClass == XeneLayoutClass.compact

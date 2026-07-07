@@ -4,4 +4,9 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- PROFILE-ONLY: allow cleartext HTTP so `run_android_local.ps1 -LocalBackend`
+         (http://<lan-ip>:8080) is reachable when running in profile mode. Merged
+         ONLY into profile builds — release builds never permit cleartext. -->
+    <application android:usesCleartextTraffic="true"/>
 </manifest>

@@ -43,7 +43,6 @@ const double _articlesBottomGapPortrait = 30.0;
 const double _articlesBottomGapCompactPortrait = 18.0;
 const double _presetArticleMinGap = 16.0;
 const double _presetDockLabelAndGapHeight = 24.0;
-const double _sidebarAutoCrawlMaxHeight = 540.0;
 
 class XeneSidebar extends ConsumerStatefulWidget {
   const XeneSidebar({super.key, this.metrics});
@@ -182,7 +181,9 @@ class _XeneSidebarState extends ConsumerState<XeneSidebar>
     return SizedBox(
       height: contentCycleHeight,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: alignRight
+            ? CrossAxisAlignment.end
+            : CrossAxisAlignment.start,
         children: [
           SizedBox(height: topSetPadding),
           // Authored XENE logo lockup. Do not change text alignment, tracking,
@@ -311,19 +312,20 @@ class _XeneSidebarState extends ConsumerState<XeneSidebar>
             0.0,
             double.infinity,
           );
+          final sidebarContentWidth = (sidebarWidth - sidebarPadding * 2)
+              .clamp(0.0, double.infinity);
           const presetLabelReserve = 28.0;
           // Authored sidebar cycle height. Keep this independent from shared
           // metrics so global density changes cannot move the logo/articles.
           final contentCycleHeight = isLandscape ? 740.0 : 700.0;
           final measuredContentCycleHeight =
               contentCycleHeight + presetLabelReserve;
-          // Portrait mode is intentionally static. Auto-crawl is allowed only
-          // for genuinely short landscape sidebars where the authored content
-          // cannot fit vertically. Wide desktop/tablet windows must stay still.
+          // Portrait mode is intentionally static. In landscape, auto-crawl
+          // whenever the authored sidebar stack is taller than the actual
+          // viewport left after the pinned articles dock. This keeps small
+          // rotated devices from freezing with the logo/dial clipped.
           final needsScroll =
-              isLandscape &&
-              availableHeight <= _sidebarAutoCrawlMaxHeight &&
-              availableHeight < measuredContentCycleHeight;
+              isLandscape && scrollViewportHeight < measuredContentCycleHeight;
 
           _needsScroll = needsScroll;
           _contentCycleHeight = measuredContentCycleHeight;
@@ -337,7 +339,7 @@ class _XeneSidebarState extends ConsumerState<XeneSidebar>
             'scrollViewportHeight': scrollViewportHeight,
             'contentCycleHeight': measuredContentCycleHeight,
             'needsScroll': needsScroll,
-            'autoCrawlMaxHeight': _sidebarAutoCrawlMaxHeight,
+            'sidebarContentWidth': sidebarContentWidth,
             'alignRight': alignRight,
             'compactPortrait': compactPortrait,
             'estimatedPresetLabelBottom': estimatedPresetLabelBottom,
@@ -373,17 +375,22 @@ class _XeneSidebarState extends ConsumerState<XeneSidebar>
                     onPointerDown: (_) => _setPaused(true),
                     onPointerUp: (_) => _setPaused(false),
                     onPointerCancel: (_) => _setPaused(false),
-                    child: MouseRegion(
-                      onEnter: (_) => _setPaused(true),
-                      onExit: (_) => _setPaused(false),
-                      child: ListView(
-                        controller: _scrollController,
-                        clipBehavior: Clip.hardEdge,
-                        physics: needsScroll
-                            ? const ClampingScrollPhysics()
-                            : const NeverScrollableScrollPhysics(),
-                        padding: EdgeInsets.zero,
-                        children: [
+                    child: ListView(
+                      controller: _scrollController,
+                      clipBehavior: Clip.hardEdge,
+                      physics: needsScroll
+                          ? const ClampingScrollPhysics()
+                          : const NeverScrollableScrollPhysics(),
+                      padding: EdgeInsets.zero,
+                      children: [
+                        _buildContentSet(
+                          isLandscape: isLandscape,
+                          compactPortrait: compactPortrait,
+                          layoutMetrics: layoutMetrics,
+                          contentCycleHeight: measuredContentCycleHeight,
+                          alignRight: alignRight,
+                        ),
+                        if (needsScroll)
                           _buildContentSet(
                             isLandscape: isLandscape,
                             compactPortrait: compactPortrait,
@@ -391,16 +398,7 @@ class _XeneSidebarState extends ConsumerState<XeneSidebar>
                             contentCycleHeight: measuredContentCycleHeight,
                             alignRight: alignRight,
                           ),
-                          if (needsScroll)
-                            _buildContentSet(
-                              isLandscape: isLandscape,
-                              compactPortrait: compactPortrait,
-                              layoutMetrics: layoutMetrics,
-                              contentCycleHeight: measuredContentCycleHeight,
-                              alignRight: alignRight,
-                            ),
-                        ],
-                      ),
+                      ],
                     ),
                   ),
                 ),

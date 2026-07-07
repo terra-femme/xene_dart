@@ -24,6 +24,26 @@ class XeneFeedCard extends StatelessWidget {
   final bool dark;
   final bool videoMode;
 
+  // Cached base text styles. GoogleFonts.<family>() does a registry lookup and
+  // allocates a TextStyle on every call; doing that inside build() re-resolves
+  // the same fonts dozens of times per second while the feed crawls/transitions.
+  // Resolve each once here (font family + size + weight are constant) and apply
+  // the only per-card variable — color — with the cheap copyWith below.
+  static final TextStyle _archivoBold13 = GoogleFonts.archivo(
+    fontWeight: FontWeight.bold,
+    fontSize: 13,
+  );
+  static final TextStyle _archivo13w700 = GoogleFonts.archivo(
+    fontSize: 13,
+    fontWeight: FontWeight.w700,
+  );
+  static final TextStyle _archivo10 = GoogleFonts.archivo(fontSize: 10);
+  static final TextStyle _dmMono9 = GoogleFonts.dmMono(fontSize: 9);
+  static final TextStyle _dmMono9w700 = GoogleFonts.dmMono(
+    fontSize: 9,
+    fontWeight: FontWeight.w700,
+  );
+
   @override
   Widget build(BuildContext context) {
     if (videoMode && item.platform.toLowerCase() == 'youtube') {
@@ -232,9 +252,7 @@ class XeneFeedCard extends StatelessWidget {
                                           platform: item.platform,
                                         ),
                                       ),
-                                      if (item.publishedAt.isAfter(
-                                        DateTime.now(),
-                                      ))
+                                      if (item.isUpcoming)
                                         const _PreOrderStar(),
                                     ],
                                   ),
@@ -243,10 +261,8 @@ class XeneFeedCard extends StatelessWidget {
                                   // Title
                                   Text(
                                     item.title ?? 'Untitled',
-                                    style: GoogleFonts.archivo(
+                                    style: _archivoBold13.copyWith(
                                       color: titleColor,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 13,
                                     ),
                                     softWrap: true,
                                     overflow: TextOverflow.fade,
@@ -256,10 +272,8 @@ class XeneFeedCard extends StatelessWidget {
                                   Text(
                                     item.artistName,
                                     textAlign: TextAlign.center,
-                                    style: GoogleFonts.archivo(
+                                    style: _archivo13w700.copyWith(
                                       color: dark ? Colors.white : Colors.black,
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w700,
                                     ),
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
@@ -268,10 +282,8 @@ class XeneFeedCard extends StatelessWidget {
                                   if (repostAttribution != null)
                                     Text(
                                       repostAttribution,
-                                      style: GoogleFonts.dmMono(
+                                      style: _dmMono9w700.copyWith(
                                         color: XeneTheme.scOrange,
-                                        fontSize: 9,
-                                        fontWeight: FontWeight.w700,
                                       ),
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
@@ -281,9 +293,8 @@ class XeneFeedCard extends StatelessWidget {
                                   if (bodyText != null && bodyText.isNotEmpty)
                                     Text(
                                       bodyText,
-                                      style: GoogleFonts.archivo(
+                                      style: _archivo10.copyWith(
                                         color: snippetColor,
-                                        fontSize: 10,
                                       ),
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
@@ -307,9 +318,8 @@ class XeneFeedCard extends StatelessWidget {
                                             _formatDuration(
                                               item.durationSeconds!,
                                             ),
-                                            style: GoogleFonts.dmMono(
+                                            style: _dmMono9.copyWith(
                                               color: snippetColor,
-                                              fontSize: 9,
                                             ),
                                           ),
                                         ],
@@ -330,9 +340,8 @@ class XeneFeedCard extends StatelessWidget {
                                           const SizedBox(width: 2),
                                           Text(
                                             '${item.trackCount} tracks',
-                                            style: GoogleFonts.dmMono(
+                                            style: _dmMono9.copyWith(
                                               color: snippetColor,
-                                              fontSize: 9,
                                             ),
                                           ),
                                         ],
@@ -371,6 +380,16 @@ class _YoutubeVideoCard extends StatelessWidget {
   final FeedItem item;
   final VoidCallback? onTap;
   final bool dark;
+
+  // Cached once (font family + size + weight constant); color varies per card.
+  static final TextStyle _archivoBold13 = GoogleFonts.archivo(
+    fontWeight: FontWeight.bold,
+    fontSize: 13,
+  );
+  static final TextStyle _archivo10w500 = GoogleFonts.archivo(
+    fontSize: 10,
+    fontWeight: FontWeight.w500,
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -469,8 +488,7 @@ class _YoutubeVideoCard extends StatelessWidget {
                           children: [
                             _TypePill(type: item.contentType),
                             _PlatformBadge(platform: item.platform),
-                            if (item.publishedAt.isAfter(DateTime.now()))
-                              const _PreOrderStar(),
+                            if (item.isUpcoming) const _PreOrderStar(),
                           ],
                         ),
                       ),
@@ -480,21 +498,13 @@ class _YoutubeVideoCard extends StatelessWidget {
                   const SizedBox(height: 4),
                   Text(
                     item.title ?? 'Untitled',
-                    style: GoogleFonts.archivo(
-                      color: titleColor,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13,
-                    ),
+                    style: _archivoBold13.copyWith(color: titleColor),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
                   Text(
                     item.artistName,
-                    style: GoogleFonts.archivo(
-                      color: snippetColor,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w500,
-                    ),
+                    style: _archivo10w500.copyWith(color: snippetColor),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -686,8 +696,23 @@ class _PreOrderStar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const Tooltip(
-      message: 'Pre-order',
-      child: Icon(Icons.star, size: 11, color: Color(0xFFFFB800)),
+      message: 'Pre-release',
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.star, size: 11, color: Color(0xFFFFB800)),
+          SizedBox(width: 2),
+          Text(
+            'pre-release',
+            style: TextStyle(
+              color: Color(0xFFFFB800),
+              fontSize: 8,
+              fontWeight: FontWeight.bold,
+              fontFamily: 'DM Mono',
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -695,6 +720,12 @@ class _PreOrderStar extends StatelessWidget {
 class _PlatformBadge extends StatelessWidget {
   const _PlatformBadge({required this.platform});
   final String platform;
+
+  // Resolved once; only the per-platform color varies (applied via copyWith).
+  static final TextStyle _badgeStyle = GoogleFonts.dmMono(
+    fontSize: 8,
+    fontWeight: FontWeight.w500,
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -709,11 +740,7 @@ class _PlatformBadge extends StatelessWidget {
       child: Center(
         child: Text(
           platform.toUpperCase(),
-          style: GoogleFonts.dmMono(
-            color: color,
-            fontSize: 8,
-            fontWeight: FontWeight.w500,
-          ),
+          style: _badgeStyle.copyWith(color: color),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           softWrap: false,

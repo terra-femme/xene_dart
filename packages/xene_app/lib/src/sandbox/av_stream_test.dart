@@ -45,6 +45,9 @@ class _AvStreamTestState extends ConsumerState<AvStreamTest> {
   final _subs = <StreamSubscription<dynamic>>[];
 
   bool _resolving = false;
+  bool _searching = false;
+  List<Map<String, dynamic>> _results = [];
+  String? _nowPlayingLabel;
   String? _streamUrl;
   String? _error;
   Duration _position = Duration.zero;
@@ -100,13 +103,65 @@ class _AvStreamTestState extends ConsumerState<AvStreamTest> {
     super.dispose();
   }
 
-  /// Resolve the official MP3 URL from the backend, then hand it to just_audio.
-  Future<void> _resolveAndPlay() async {
-    final id = _controller.text.trim();
+  /// Search SoundCloud's catalog by words (artist/title), e.g.
+  /// "alina baraz - alone with you". Populates the tappable results list; the
+  /// chosen result's numeric id then feeds the existing resolve-and-play flow.
+  Future<void> _search() async {
+    final q = _controller.text.trim();
+    if (q.isEmpty) {
+      setState(
+        () => _error = 'Enter a search, e.g. "alina baraz - alone with you".',
+      );
+      return;
+    }
+    setState(() {
+      _searching = true;
+      _error = null;
+      _results = [];
+    });
+    final dio = ref.read(authenticatedDioProvider);
+    try {
+      _logger.info('[avStreamTest] GET /soundcloud/track_search?q="$q"');
+      final resp = await dio.get<Map<String, dynamic>>(
+        '/soundcloud/track_search',
+        queryParameters: {'q': q},
+      );
+      final collection = (resp.data?['collection'] as List? ?? [])
+          .cast<Map<String, dynamic>>();
+      _logger.info(
+        '[avStreamTest] search "$q" -> ${collection.length} results',
+      );
+      setState(() {
+        _results = collection;
+        if (collection.isEmpty) _error = 'No SoundCloud tracks matched "$q".';
+      });
+    } on DioException catch (e) {
+      final code = e.response?.statusCode;
+      _logger.warning(
+        '[avStreamTest] search failed status=$code: ${e.message}',
+      );
+      setState(() {
+        _error = switch (code) {
+          401 => 'Unauthorized — sign in with a real account first.',
+          400 => 'Empty query.',
+          _ => 'Search error (status=$code): ${e.message}',
+        };
+      });
+    } catch (e) {
+      _logger.warning('[avStreamTest] search error: $e');
+      setState(() => _error = 'Search failed: $e');
+    } finally {
+      if (mounted) setState(() => _searching = false);
+    }
+  }
+
+  /// Resolve a chosen track's official MP3 URL from the backend, then hand it to
+  /// just_audio.
+  Future<void> _resolveAndPlay(String id, {String? label}) async {
     _logger.info('[avStreamTest] resolveAndPlay requested trackId="$id"');
 
     if (int.tryParse(id) == null) {
-      setState(() => _error = 'Track ID must be numeric (the SoundCloud id).');
+      setState(() => _error = 'Track id must be numeric (the SoundCloud id).');
       return;
     }
 
@@ -114,6 +169,7 @@ class _AvStreamTestState extends ConsumerState<AvStreamTest> {
       _resolving = true;
       _error = null;
       _streamUrl = null;
+      _nowPlayingLabel = label;
     });
 
     final dio = ref.read(authenticatedDioProvider);
@@ -229,9 +285,10 @@ class _AvStreamTestState extends ConsumerState<AvStreamTest> {
           ),
           const SizedBox(height: 6),
           Text(
-            'Confirms (1) the backend resolves an official MP3 URL for a track, '
-            'and (2) just_audio plays it with no SoundCloud iframe. If audio is '
-            'audible and POSITION ticks below, the full pipeline is viable.',
+            'Search SoundCloud, tap a result, and confirm (1) the backend '
+            'resolves its official MP3 URL and (2) just_audio plays it with no '
+            'iframe. If audio is audible and POSITION ticks below, the pipeline '
+            'is viable.',
             style: GoogleFonts.dmMono(
               fontSize: 11,
               height: 1.6,
@@ -246,37 +303,62 @@ class _AvStreamTestState extends ConsumerState<AvStreamTest> {
                 child: TextField(
                   controller: _controller,
                   style: GoogleFonts.dmMono(fontSize: 13),
+                  textInputAction: TextInputAction.search,
                   decoration: InputDecoration(
                     isDense: true,
-                    hintText: 'SoundCloud numeric track ID',
+                    hintText:
+                        'Search SoundCloud, e.g. alina baraz - alone with you',
                     hintStyle: GoogleFonts.dmMono(
-                      fontSize: 12,
+                      fontSize: 11,
                       color: XeneTheme.muted,
                     ),
                     border: const OutlineInputBorder(),
                   ),
-                  onSubmitted: (_) => _resolveAndPlay(),
+                  onSubmitted: (_) => _search(),
                 ),
               ),
               const SizedBox(width: 8),
               SizedBox(
                 height: 44,
                 child: ElevatedButton(
-                  onPressed: _resolving ? null : _resolveAndPlay,
-                  child: _resolving
+                  onPressed: _searching ? null : _search,
+                  child: _searching
                       ? const SizedBox(
                           width: 16,
                           height: 16,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : Text(
-                          'RESOLVE + PLAY',
+                          'SEARCH',
                           style: GoogleFonts.teko(letterSpacing: 1),
                         ),
                 ),
               ),
             ],
           ),
+
+          // ── Search results ──────────────────────────────────────────────
+          if (_results.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            ..._results.map((t) {
+              final id = t['id'] as String? ?? '';
+              final title = t['title'] as String? ?? 'Unknown';
+              final user = t['username'] as String? ?? 'Unknown';
+              final art = t['artwork_url'] as String?;
+              final dur = t['duration_seconds'] as int? ?? 0;
+              final label = '$user — $title';
+              return _ResultRow(
+                title: title,
+                username: user,
+                artworkUrl: art,
+                durationSeconds: dur,
+                busy: _resolving && _nowPlayingLabel == label,
+                onTap: id.isEmpty
+                    ? null
+                    : () => _resolveAndPlay(id, label: label),
+              );
+            }),
+          ],
 
           const SizedBox(height: 16),
 
@@ -350,6 +432,7 @@ class _AvStreamTestState extends ConsumerState<AvStreamTest> {
           const SizedBox(height: 14),
 
           // ── Live diagnostics ────────────────────────────────────────────
+          _kv('TRACK', _nowPlayingLabel ?? '—'),
           _kv('PROCESSING', _processing.name),
           _kv('PLAYING', _playing.toString()),
           _kv(
@@ -412,5 +495,109 @@ class _AvStreamTestState extends ConsumerState<AvStreamTest> {
         ),
       ],
     ),
+  );
+}
+
+/// A single SoundCloud search result — artwork, title, artist + duration, and a
+/// play affordance. Tapping resolves its stream and plays it.
+class _ResultRow extends StatelessWidget {
+  const _ResultRow({
+    required this.title,
+    required this.username,
+    required this.artworkUrl,
+    required this.durationSeconds,
+    required this.busy,
+    required this.onTap,
+  });
+
+  final String title;
+  final String username;
+  final String? artworkUrl;
+  final int durationSeconds;
+  final bool busy;
+  final VoidCallback? onTap;
+
+  String get _dur {
+    final m = (durationSeconds ~/ 60).toString();
+    final s = (durationSeconds % 60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: busy ? null : onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: (artworkUrl != null && artworkUrl!.isNotEmpty)
+                  ? Image.network(
+                      artworkUrl!,
+                      width: 44,
+                      height: 44,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => const _ArtPlaceholder(),
+                    )
+                  : const _ArtPlaceholder(),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.dmMono(
+                      fontSize: 12,
+                      color: Colors.black,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '$username · $_dur',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.dmMono(
+                      fontSize: 10,
+                      color: XeneTheme.muted,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            busy
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Icon(
+                    Icons.play_circle_outline,
+                    color: XeneTheme.teal,
+                    size: 24,
+                  ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ArtPlaceholder extends StatelessWidget {
+  const _ArtPlaceholder();
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: 44,
+    height: 44,
+    color: const Color(0xFFE0E0E0),
+    child: const Icon(Icons.music_note, size: 18, color: Color(0xFF999999)),
   );
 }

@@ -89,7 +89,11 @@ final recentFeedProvider = Provider<AsyncValue<List<FeedItem>>>((ref) {
   final cutoff = _midnightCutoff(effectiveDate, 7);
   return ref.watch(feedProvider).whenData((items) {
     final filtered = _sortNewestFirst(
-      items.where((i) => !i.publishedAt.toLocal().isBefore(cutoff)).toList(),
+      items
+          .where(
+            (i) => i.isUpcoming || !i.publishedAt.toLocal().isBefore(cutoff),
+          )
+          .toList(),
     );
     debugPrint(
       '[recentFeedProvider] total=${items.length} passed7d=${filtered.length} '
@@ -102,7 +106,7 @@ final recentFeedProvider = Provider<AsyncValue<List<FeedItem>>>((ref) {
 
 List<FeedItem> _sortNewestFirst(List<FeedItem> items) {
   return List<FeedItem>.from(items)..sort((a, b) {
-    final byDate = b.publishedAt.compareTo(a.publishedAt);
+    final byDate = b.timelineAt.compareTo(a.timelineAt);
     if (byDate != 0) return byDate;
 
     final byArtist = a.artistName.compareTo(b.artistName);

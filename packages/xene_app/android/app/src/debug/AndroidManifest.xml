@@ -4,4 +4,10 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- DEBUG-ONLY: allow cleartext HTTP so `run_android_local.ps1 -LocalBackend`
+         (http://<lan-ip>:8080) is reachable from the device. This variant
+         manifest is merged ONLY into debug builds — release builds never permit
+         cleartext. Without this, LAN backend calls are silently blocked. -->
+    <application android:usesCleartextTraffic="true"/>
 </manifest>

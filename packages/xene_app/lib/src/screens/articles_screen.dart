@@ -67,12 +67,26 @@ class _ContainedMagazineLayout extends StatefulWidget {
 class _ContainedMagazineLayoutState extends State<_ContainedMagazineLayout> {
   static const _stripHeight = 200.0;
   bool _landscapeAtBottom = false;
+  bool _portraitAtBottom = false;
 
   bool _handleLandscapeScroll(ScrollNotification notification) {
     final metrics = notification.metrics;
+    if (metrics.axis != Axis.vertical) return false;
+
     final atBottom = metrics.pixels >= metrics.maxScrollExtent - 8;
     if (atBottom != _landscapeAtBottom) {
       setState(() => _landscapeAtBottom = atBottom);
+    }
+    return false;
+  }
+
+  bool _handlePortraitScroll(ScrollNotification notification) {
+    final metrics = notification.metrics;
+    if (metrics.axis != Axis.vertical) return false;
+
+    final atBottom = metrics.pixels >= metrics.maxScrollExtent - 8;
+    if (atBottom != _portraitAtBottom) {
+      setState(() => _portraitAtBottom = atBottom);
     }
     return false;
   }
@@ -221,47 +235,66 @@ class _ContainedMagazineLayoutState extends State<_ContainedMagazineLayout> {
             );
           } else {
             final imgH = w / coverAspect;
+            final portraitContentH =
+                imgH + portraitLift + 5 + _stripHeight + bottomPad * 2 + 12;
+            final portraitCanScroll = portraitContentH > h + 8;
 
             return ClipRect(
-              child: Transform.translate(
-                offset: const Offset(0, -portraitLift),
-                child: CustomScrollView(
-                  physics: const BouncingScrollPhysics(
-                    parent: AlwaysScrollableScrollPhysics(),
+              child: Stack(
+                children: [
+                  NotificationListener<ScrollNotification>(
+                    onNotification: _handlePortraitScroll,
+                    child: Transform.translate(
+                      offset: const Offset(0, -portraitLift),
+                      child: CustomScrollView(
+                        physics: const BouncingScrollPhysics(
+                          parent: AlwaysScrollableScrollPhysics(),
+                        ),
+                        slivers: [
+                          SliverToBoxAdapter(
+                            child: SizedBox(
+                              width: w,
+                              height: imgH + portraitLift,
+                              child: Align(
+                                alignment: Alignment.bottomCenter,
+                                child: SizedBox(
+                                  width: w,
+                                  height: imgH,
+                                  child: _coverStack(w, imgH),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SliverToBoxAdapter(child: SizedBox(height: 5)),
+                          SliverToBoxAdapter(
+                            child: SizedBox(
+                              key: const ValueKey('portraitArticleStrip'),
+                              height: _stripHeight + bottomPad,
+                              child: ColoredBox(
+                                color: Colors.white,
+                                child: _ArticleStrip(
+                                  articles: widget.articles,
+                                  bottomPad: bottomPad,
+                                  landscape: false,
+                                ),
+                              ),
+                            ),
+                          ),
+                          SliverToBoxAdapter(
+                            child: SizedBox(height: bottomPad + 12),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                  slivers: [
-                    SliverToBoxAdapter(
-                      child: SizedBox(
-                        width: w,
-                        height: imgH + portraitLift,
-                        child: Align(
-                          alignment: Alignment.bottomCenter,
-                          child: SizedBox(
-                            width: w,
-                            height: imgH,
-                            child: _coverStack(w, imgH),
-                          ),
-                        ),
-                      ),
+                  if (portraitCanScroll && !_portraitAtBottom)
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 32 + bottomPad,
+                      child: const IgnorePointer(child: _JumpingChevron()),
                     ),
-                    const SliverToBoxAdapter(child: SizedBox(height: 5)),
-                    SliverToBoxAdapter(
-                      child: SizedBox(
-                        key: const ValueKey('portraitArticleStrip'),
-                        height: _stripHeight + bottomPad,
-                        child: ColoredBox(
-                          color: Colors.white,
-                          child: _ArticleStrip(
-                            articles: widget.articles,
-                            bottomPad: bottomPad,
-                            landscape: false,
-                          ),
-                        ),
-                      ),
-                    ),
-                    SliverToBoxAdapter(child: SizedBox(height: bottomPad + 12)),
-                  ],
-                ),
+                ],
               ),
             );
           }
