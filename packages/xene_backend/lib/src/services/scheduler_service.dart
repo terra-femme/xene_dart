@@ -18,6 +18,13 @@ final _logger = Logger('SchedulerService');
 const _youtubeRefreshTtl = Duration(hours: 24);
 const _youtubeDefaultBatchSize = 10;
 
+// Scheduled press scout is opt-in: the admin dashboard has a manual trigger
+// (routes/press_scout/run.dart), so the cron job and startup warmup only run
+// when PRESS_SCOUT_ENABLED=true. Off by default — each scheduled run spends
+// Gemini quota across every active artist.
+final bool _pressScoutScheduledEnabled =
+    Platform.environment['PRESS_SCOUT_ENABLED'] == 'true';
+
 class SchedulerService {
   SchedulerService({
     required this.db,
@@ -74,15 +81,18 @@ class SchedulerService {
 
     // Run press scout once 30 seconds after startup so articles populate
     // immediately on first boot instead of waiting up to 12 hours for cron.
-    Future<void>.delayed(const Duration(seconds: 30), () async {
-      _logger.info('[Scheduler] Startup press scout warmup starting');
-      try {
-        await pressScout.scoutArticlesForActiveArtists();
-        _logger.info('[Scheduler] Startup press scout warmup done');
-      } catch (e) {
-        _logger.warning('[Scheduler] Startup press scout warmup failed: $e');
-      }
-    });
+    // Opt-in — see _pressScoutScheduledEnabled.
+    if (_pressScoutScheduledEnabled) {
+      Future<void>.delayed(const Duration(seconds: 30), () async {
+        _logger.info('[Scheduler] Startup press scout warmup starting');
+        try {
+          await pressScout.scoutArticlesForActiveArtists();
+          _logger.info('[Scheduler] Startup press scout warmup done');
+        } catch (e) {
+          _logger.warning('[Scheduler] Startup press scout warmup failed: $e');
+        }
+      });
+    }
 
     // Run publication RSS poller 60 seconds after startup.
     // Gated by PUBLICATION_STARTUP_POLL=true so dev restarts don't trigger
@@ -226,10 +236,18 @@ class SchedulerService {
     });
 
     // 5. Press scout: Twice daily at noon and midnight (staggered from cleanup)
-    _cron.schedule(Schedule.parse('0 */12 * * *'), () async {
-      _logger.info('[Scheduler] Starting Press Scout');
-      await pressScout.scoutArticlesForActiveArtists();
-    });
+    //    Opt-in — the admin dashboard's manual trigger is the intended path.
+    if (_pressScoutScheduledEnabled) {
+      _cron.schedule(Schedule.parse('0 */12 * * *'), () async {
+        _logger.info('[Scheduler] Starting Press Scout');
+        await pressScout.scoutArticlesForActiveArtists();
+      });
+    } else {
+      _logger.info(
+        '[Scheduler] Press scout cron DISABLED — manual dashboard trigger only '
+        '(set PRESS_SCOUT_ENABLED=true to schedule)',
+      );
+    }
 
     // 6. Publication RSS poller: Every 4 hours (6x/day)
     // Serial execution per PublicationPollerService design — one feed at a time.
@@ -256,7 +274,10 @@ class SchedulerService {
       );
     });
 
-    _logger.info('Tiered Scheduler Active (7 jobs registered).');
+    _logger.info(
+      'Tiered Scheduler Active '
+      '(${_pressScoutScheduledEnabled ? 7 : 6} jobs registered).',
+    );
   }
 
   void stop() {
