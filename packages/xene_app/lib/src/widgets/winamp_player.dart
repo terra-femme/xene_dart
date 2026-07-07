@@ -12,9 +12,9 @@ import '../providers/queue_provider.dart';
 import '../providers/saved_provider.dart';
 import '../providers/track_analysis_provider.dart';
 import 'auth_gate_sheet.dart';
-import 'soundcloud_embed_web.dart';
+import 'soundcloud_embed.dart';
 import 'track_visualizer.dart';
-import 'youtube_embed_web.dart';
+import 'youtube_embed.dart';
 
 // Xene monochrome palette — platform colors appear only on tiny indicator dots.
 const _teal = Color(0xFF00C5A5);

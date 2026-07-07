@@ -159,9 +159,12 @@ class XeneFeedCard extends StatelessWidget {
                       ),
                     Padding(
                       padding: EdgeInsets.all(cardPadding),
-                      child: Row(
+                      child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
                           // 1. Thumbnail (Left) — decorative, described by card label
                           ExcludeSemantics(
                             child: ClipRRect(
@@ -204,149 +207,157 @@ class XeneFeedCard extends StatelessWidget {
 
                           // 2. Content Frame (Right)
                           Expanded(
-                            child: ExcludeSemantics(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  // Top badges wrap instead of overflowing when the feed
-                                  // column gets narrow beside the fixed sidebar.
-                                  Wrap(
-                                    spacing: 4,
-                                    runSpacing: 3,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if ([
+                                  'soundcloud',
+                                  'youtube',
+                                ].contains(item.platform.toLowerCase()))
+                                  Align(
+                                    alignment: Alignment.centerRight,
+                                    child: _SaveButton(item: item, dark: dark),
+                                  ),
+                                ExcludeSemantics(
+                                  child: Column(
                                     crossAxisAlignment:
-                                        WrapCrossAlignment.center,
+                                        CrossAxisAlignment.start,
                                     children: [
                                       ConstrainedBox(
                                         constraints: BoxConstraints(
                                           maxWidth: badgeMaxWidth,
                                         ),
-                                        child: _TypePill(
-                                          type: item.contentType,
-                                        ),
+                                        child: _TypePill(type: item.contentType),
                                       ),
-                                      ConstrainedBox(
-                                        constraints: BoxConstraints(
-                                          maxWidth: badgeMaxWidth,
-                                        ),
-                                        child: _PlatformBadge(
-                                          platform: item.platform,
-                                        ),
+                                      const SizedBox(height: 3),
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          ConstrainedBox(
+                                            constraints: BoxConstraints(
+                                              maxWidth: badgeMaxWidth,
+                                            ),
+                                            child: _PlatformBadge(
+                                              platform: item.platform,
+                                            ),
+                                          ),
+                                        ],
                                       ),
-                                      if (item.publishedAt.isAfter(
-                                        DateTime.now(),
-                                      ))
+                                      if (_isPreReleaseItem(item)) ...[
+                                        const SizedBox(height: 3),
                                         const _PreOrderStar(),
+                                      ],
                                     ],
                                   ),
-                                  const SizedBox(height: 4),
-
-                                  // Title
-                                  Text(
-                                    item.title ?? 'Untitled',
-                                    style: GoogleFonts.archivo(
-                                      color: titleColor,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 13,
-                                    ),
-                                    softWrap: true,
-                                    overflow: TextOverflow.fade,
+                                ),
+                              ],
+                              ),
+                          ),
+                            ],
+                          ),
+                          SizedBox(height: compact ? 4 : 6),
+                          ExcludeSemantics(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  item.title ?? 'Untitled',
+                                  style: GoogleFonts.archivo(
+                                    color: titleColor,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
                                   ),
-
-                                  // Artist name
+                                  softWrap: true,
+                                  overflow: TextOverflow.fade,
+                                ),
+                                Text(
+                                  item.artistName,
+                                  style: GoogleFonts.archivo(
+                                    color: dark ? Colors.white : Colors.black,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                if (repostAttribution != null)
                                   Text(
-                                    item.artistName,
-                                    textAlign: TextAlign.center,
-                                    style: GoogleFonts.archivo(
-                                      color: dark ? Colors.white : Colors.black,
-                                      fontSize: 13,
+                                    repostAttribution,
+                                    style: GoogleFonts.dmMono(
+                                      color: XeneTheme.scOrange,
+                                      fontSize: 9,
                                       fontWeight: FontWeight.w700,
                                     ),
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                   ),
-
-                                  if (repostAttribution != null)
-                                    Text(
-                                      repostAttribution,
-                                      style: GoogleFonts.dmMono(
-                                        color: XeneTheme.scOrange,
-                                        fontSize: 9,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-
-                                  // Snippet
-                                  if (bodyText != null && bodyText.isNotEmpty)
-                                    Text(
-                                      bodyText,
-                                      style: GoogleFonts.archivo(
-                                        color: snippetColor,
-                                        fontSize: 10,
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-
-                                  // Duration (SC) or track count (BC) — mutually exclusive
-                                  if (item.durationSeconds != null &&
-                                      item.durationSeconds! > 0)
-                                    Align(
-                                      alignment: Alignment.centerRight,
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Icon(
-                                            Icons.schedule,
-                                            size: 9,
-                                            color: snippetColor,
-                                          ),
-                                          const SizedBox(width: 2),
-                                          Text(
-                                            _formatDuration(
-                                              item.durationSeconds!,
-                                            ),
-                                            style: GoogleFonts.dmMono(
-                                              color: snippetColor,
-                                              fontSize: 9,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    )
-                                  else if (item.trackCount != null &&
-                                      item.trackCount! > 1)
-                                    Align(
-                                      alignment: Alignment.centerRight,
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Icon(
-                                            Icons.queue_music,
-                                            size: 9,
-                                            color: snippetColor,
-                                          ),
-                                          const SizedBox(width: 2),
-                                          Text(
-                                            '${item.trackCount} tracks',
-                                            style: GoogleFonts.dmMono(
-                                              color: snippetColor,
-                                              fontSize: 9,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                ],
-                              ),
+                              ],
                             ),
                           ),
-                          if ([
-                            'soundcloud',
-                            'youtube',
-                          ].contains(item.platform.toLowerCase()))
-                            _SaveButton(item: item, dark: dark),
+                          if (bodyText != null && bodyText.isNotEmpty) ...[
+                            SizedBox(height: compact ? 4 : 5),
+                            ExcludeSemantics(
+                              child: Text(
+                                bodyText,
+                                style: GoogleFonts.archivo(
+                                  color: snippetColor,
+                                  fontSize: 10,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                          if (item.durationSeconds != null &&
+                              item.durationSeconds! > 0)
+                            ExcludeSemantics(
+                              child: Align(
+                                alignment: Alignment.centerRight,
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.schedule,
+                                      size: 9,
+                                      color: snippetColor,
+                                    ),
+                                    const SizedBox(width: 2),
+                                    Text(
+                                      _formatDuration(item.durationSeconds!),
+                                      style: GoogleFonts.dmMono(
+                                        color: snippetColor,
+                                        fontSize: 9,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            )
+                          else if (item.trackCount != null &&
+                              item.trackCount! > 1)
+                            ExcludeSemantics(
+                              child: Align(
+                                alignment: Alignment.centerRight,
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.queue_music,
+                                      size: 9,
+                                      color: snippetColor,
+                                    ),
+                                    const SizedBox(width: 2),
+                                    Text(
+                                      '${item.trackCount} tracks',
+                                      style: GoogleFonts.dmMono(
+                                        color: snippetColor,
+                                        fontSize: 9,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
                         ],
                       ),
                     ),
@@ -469,7 +480,7 @@ class _YoutubeVideoCard extends StatelessWidget {
                           children: [
                             _TypePill(type: item.contentType),
                             _PlatformBadge(platform: item.platform),
-                            if (item.publishedAt.isAfter(DateTime.now()))
+                            if (_isPreReleaseItem(item))
                               const _PreOrderStar(),
                           ],
                         ),
@@ -527,7 +538,7 @@ class _SaveButton extends ConsumerWidget {
     );
     final iconColor = isQueued
         ? XeneTheme.purple
-        : (dark ? Colors.white : const Color(0xFFFFD23F));
+        : const Color(0xFFFFD23F);
     final iconShadows = dark
         ? [
             Shadow(
@@ -561,9 +572,7 @@ class _SaveButton extends ConsumerWidget {
             child: Padding(
               padding: const EdgeInsets.only(top: 1),
               child: Icon(
-                isQueued
-                    ? Icons.bookmark
-                    : (dark ? Icons.bookmark_add : Icons.bookmark_add_outlined),
+                isQueued ? Icons.bookmark : Icons.bookmark_add,
                 size: 24,
                 color: iconColor,
                 shadows: iconShadows,
@@ -635,6 +644,18 @@ String _normaliseName(String value) {
   return value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
 }
 
+bool _isPreReleaseItem(FeedItem item) {
+  if (item.isUpcoming) return true;
+
+  final now = DateTime.now();
+  final releaseAt = item.releaseAt;
+  if (releaseAt != null && releaseAt.isAfter(now)) return true;
+
+  // Compatibility path for legacy rows / pre-migration responses where future
+  // releases were represented only by a future feed date.
+  return item.publishedAt.isAfter(now);
+}
+
 class _TypePill extends StatelessWidget {
   const _TypePill({required this.type});
   final String type;
@@ -686,8 +707,26 @@ class _PreOrderStar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const Tooltip(
-      message: 'Pre-order',
-      child: Icon(Icons.star, size: 11, color: Color(0xFFFFB800)),
+      message: 'Pre-release',
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.star, size: 11, color: Color(0xFFFFB800)),
+          SizedBox(width: 2),
+          Text(
+            'pre-release',
+            style: TextStyle(
+              color: Color(0xFFFFB800),
+              fontSize: 8,
+              fontWeight: FontWeight.bold,
+              fontFamily: 'DM Mono',
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            softWrap: false,
+          ),
+        ],
+      ),
     );
   }
 }
