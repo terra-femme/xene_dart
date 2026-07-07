@@ -15,7 +15,7 @@ T _$identity<T>(T value) => value;
 /// @nodoc
 mixin _$FeedItem {
 
- String get id; String get platform; String get artistName; String get contentType; String? get title; String? get body; String? get mediaUrl; String? get artworkUrl; String get externalUrl; DateTime get publishedAt; int? get playCount; int? get likeCount; String? get waveformUrl; int? get durationSeconds; int? get trackCount; bool get isNew;
+ String get id; String get platform; String get artistName; String get contentType; String? get title; String? get body; String? get mediaUrl; String? get artworkUrl; String get externalUrl; DateTime get publishedAt; int? get playCount; int? get likeCount; String? get waveformUrl; int? get durationSeconds; int? get trackCount; bool get isNew; bool get isUpcoming; DateTime? get releaseAt;
 /// Create a copy of FeedItem
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -28,16 +28,16 @@ $FeedItemCopyWith<FeedItem> get copyWith => _$FeedItemCopyWithImpl<FeedItem>(thi
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is FeedItem&&(identical(other.id, id) || other.id == id)&&(identical(other.platform, platform) || other.platform == platform)&&(identical(other.artistName, artistName) || other.artistName == artistName)&&(identical(other.contentType, contentType) || other.contentType == contentType)&&(identical(other.title, title) || other.title == title)&&(identical(other.body, body) || other.body == body)&&(identical(other.mediaUrl, mediaUrl) || other.mediaUrl == mediaUrl)&&(identical(other.artworkUrl, artworkUrl) || other.artworkUrl == artworkUrl)&&(identical(other.externalUrl, externalUrl) || other.externalUrl == externalUrl)&&(identical(other.publishedAt, publishedAt) || other.publishedAt == publishedAt)&&(identical(other.playCount, playCount) || other.playCount == playCount)&&(identical(other.likeCount, likeCount) || other.likeCount == likeCount)&&(identical(other.waveformUrl, waveformUrl) || other.waveformUrl == waveformUrl)&&(identical(other.durationSeconds, durationSeconds) || other.durationSeconds == durationSeconds)&&(identical(other.trackCount, trackCount) || other.trackCount == trackCount)&&(identical(other.isNew, isNew) || other.isNew == isNew));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is FeedItem&&(identical(other.id, id) || other.id == id)&&(identical(other.platform, platform) || other.platform == platform)&&(identical(other.artistName, artistName) || other.artistName == artistName)&&(identical(other.contentType, contentType) || other.contentType == contentType)&&(identical(other.title, title) || other.title == title)&&(identical(other.body, body) || other.body == body)&&(identical(other.mediaUrl, mediaUrl) || other.mediaUrl == mediaUrl)&&(identical(other.artworkUrl, artworkUrl) || other.artworkUrl == artworkUrl)&&(identical(other.externalUrl, externalUrl) || other.externalUrl == externalUrl)&&(identical(other.publishedAt, publishedAt) || other.publishedAt == publishedAt)&&(identical(other.playCount, playCount) || other.playCount == playCount)&&(identical(other.likeCount, likeCount) || other.likeCount == likeCount)&&(identical(other.waveformUrl, waveformUrl) || other.waveformUrl == waveformUrl)&&(identical(other.durationSeconds, durationSeconds) || other.durationSeconds == durationSeconds)&&(identical(other.trackCount, trackCount) || other.trackCount == trackCount)&&(identical(other.isNew, isNew) || other.isNew == isNew)&&(identical(other.isUpcoming, isUpcoming) || other.isUpcoming == isUpcoming)&&(identical(other.releaseAt, releaseAt) || other.releaseAt == releaseAt));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,id,platform,artistName,contentType,title,body,mediaUrl,artworkUrl,externalUrl,publishedAt,playCount,likeCount,waveformUrl,durationSeconds,trackCount,isNew);
+int get hashCode => Object.hash(runtimeType,id,platform,artistName,contentType,title,body,mediaUrl,artworkUrl,externalUrl,publishedAt,playCount,likeCount,waveformUrl,durationSeconds,trackCount,isNew,isUpcoming,releaseAt);
 
 @override
 String toString() {
-  return 'FeedItem(id: $id, platform: $platform, artistName: $artistName, contentType: $contentType, title: $title, body: $body, mediaUrl: $mediaUrl, artworkUrl: $artworkUrl, externalUrl: $externalUrl, publishedAt: $publishedAt, playCount: $playCount, likeCount: $likeCount, waveformUrl: $waveformUrl, durationSeconds: $durationSeconds, trackCount: $trackCount, isNew: $isNew)';
+  return 'FeedItem(id: $id, platform: $platform, artistName: $artistName, contentType: $contentType, title: $title, body: $body, mediaUrl: $mediaUrl, artworkUrl: $artworkUrl, externalUrl: $externalUrl, publishedAt: $publishedAt, playCount: $playCount, likeCount: $likeCount, waveformUrl: $waveformUrl, durationSeconds: $durationSeconds, trackCount: $trackCount, isNew: $isNew, isUpcoming: $isUpcoming, releaseAt: $releaseAt)';
 }
 
 
@@ -48,7 +48,7 @@ abstract mixin class $FeedItemCopyWith<$Res>  {
   factory $FeedItemCopyWith(FeedItem value, $Res Function(FeedItem) _then) = _$FeedItemCopyWithImpl;
 @useResult
 $Res call({
- String id, String platform, String artistName, String contentType, String? title, String? body, String? mediaUrl, String? artworkUrl, String externalUrl, DateTime publishedAt, int? playCount, int? likeCount, String? waveformUrl, int? durationSeconds, int? trackCount, bool isNew
+ String id, String platform, String artistName, String contentType, String? title, String? body, String? mediaUrl, String? artworkUrl, String externalUrl, DateTime publishedAt, int? playCount, int? likeCount, String? waveformUrl, int? durationSeconds, int? trackCount, bool isNew, bool isUpcoming, DateTime? releaseAt
 });
 
 
@@ -65,7 +65,7 @@ class _$FeedItemCopyWithImpl<$Res>
 
 /// Create a copy of FeedItem
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? platform = null,Object? artistName = null,Object? contentType = null,Object? title = freezed,Object? body = freezed,Object? mediaUrl = freezed,Object? artworkUrl = freezed,Object? externalUrl = null,Object? publishedAt = null,Object? playCount = freezed,Object? likeCount = freezed,Object? waveformUrl = freezed,Object? durationSeconds = freezed,Object? trackCount = freezed,Object? isNew = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? platform = null,Object? artistName = null,Object? contentType = null,Object? title = freezed,Object? body = freezed,Object? mediaUrl = freezed,Object? artworkUrl = freezed,Object? externalUrl = null,Object? publishedAt = null,Object? playCount = freezed,Object? likeCount = freezed,Object? waveformUrl = freezed,Object? durationSeconds = freezed,Object? trackCount = freezed,Object? isNew = null,Object? isUpcoming = null,Object? releaseAt = freezed,}) {
   return _then(_self.copyWith(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,platform: null == platform ? _self.platform : platform // ignore: cast_nullable_to_non_nullable
@@ -83,7 +83,9 @@ as int?,waveformUrl: freezed == waveformUrl ? _self.waveformUrl : waveformUrl //
 as String?,durationSeconds: freezed == durationSeconds ? _self.durationSeconds : durationSeconds // ignore: cast_nullable_to_non_nullable
 as int?,trackCount: freezed == trackCount ? _self.trackCount : trackCount // ignore: cast_nullable_to_non_nullable
 as int?,isNew: null == isNew ? _self.isNew : isNew // ignore: cast_nullable_to_non_nullable
-as bool,
+as bool,isUpcoming: null == isUpcoming ? _self.isUpcoming : isUpcoming // ignore: cast_nullable_to_non_nullable
+as bool,releaseAt: freezed == releaseAt ? _self.releaseAt : releaseAt // ignore: cast_nullable_to_non_nullable
+as DateTime?,
   ));
 }
 
@@ -168,10 +170,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id,  String platform,  String artistName,  String contentType,  String? title,  String? body,  String? mediaUrl,  String? artworkUrl,  String externalUrl,  DateTime publishedAt,  int? playCount,  int? likeCount,  String? waveformUrl,  int? durationSeconds,  int? trackCount,  bool isNew)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id,  String platform,  String artistName,  String contentType,  String? title,  String? body,  String? mediaUrl,  String? artworkUrl,  String externalUrl,  DateTime publishedAt,  int? playCount,  int? likeCount,  String? waveformUrl,  int? durationSeconds,  int? trackCount,  bool isNew,  bool isUpcoming,  DateTime? releaseAt)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _FeedItem() when $default != null:
-return $default(_that.id,_that.platform,_that.artistName,_that.contentType,_that.title,_that.body,_that.mediaUrl,_that.artworkUrl,_that.externalUrl,_that.publishedAt,_that.playCount,_that.likeCount,_that.waveformUrl,_that.durationSeconds,_that.trackCount,_that.isNew);case _:
+return $default(_that.id,_that.platform,_that.artistName,_that.contentType,_that.title,_that.body,_that.mediaUrl,_that.artworkUrl,_that.externalUrl,_that.publishedAt,_that.playCount,_that.likeCount,_that.waveformUrl,_that.durationSeconds,_that.trackCount,_that.isNew,_that.isUpcoming,_that.releaseAt);case _:
   return orElse();
 
 }
@@ -189,10 +191,10 @@ return $default(_that.id,_that.platform,_that.artistName,_that.contentType,_that
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id,  String platform,  String artistName,  String contentType,  String? title,  String? body,  String? mediaUrl,  String? artworkUrl,  String externalUrl,  DateTime publishedAt,  int? playCount,  int? likeCount,  String? waveformUrl,  int? durationSeconds,  int? trackCount,  bool isNew)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id,  String platform,  String artistName,  String contentType,  String? title,  String? body,  String? mediaUrl,  String? artworkUrl,  String externalUrl,  DateTime publishedAt,  int? playCount,  int? likeCount,  String? waveformUrl,  int? durationSeconds,  int? trackCount,  bool isNew,  bool isUpcoming,  DateTime? releaseAt)  $default,) {final _that = this;
 switch (_that) {
 case _FeedItem():
-return $default(_that.id,_that.platform,_that.artistName,_that.contentType,_that.title,_that.body,_that.mediaUrl,_that.artworkUrl,_that.externalUrl,_that.publishedAt,_that.playCount,_that.likeCount,_that.waveformUrl,_that.durationSeconds,_that.trackCount,_that.isNew);case _:
+return $default(_that.id,_that.platform,_that.artistName,_that.contentType,_that.title,_that.body,_that.mediaUrl,_that.artworkUrl,_that.externalUrl,_that.publishedAt,_that.playCount,_that.likeCount,_that.waveformUrl,_that.durationSeconds,_that.trackCount,_that.isNew,_that.isUpcoming,_that.releaseAt);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -209,10 +211,10 @@ return $default(_that.id,_that.platform,_that.artistName,_that.contentType,_that
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id,  String platform,  String artistName,  String contentType,  String? title,  String? body,  String? mediaUrl,  String? artworkUrl,  String externalUrl,  DateTime publishedAt,  int? playCount,  int? likeCount,  String? waveformUrl,  int? durationSeconds,  int? trackCount,  bool isNew)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id,  String platform,  String artistName,  String contentType,  String? title,  String? body,  String? mediaUrl,  String? artworkUrl,  String externalUrl,  DateTime publishedAt,  int? playCount,  int? likeCount,  String? waveformUrl,  int? durationSeconds,  int? trackCount,  bool isNew,  bool isUpcoming,  DateTime? releaseAt)?  $default,) {final _that = this;
 switch (_that) {
 case _FeedItem() when $default != null:
-return $default(_that.id,_that.platform,_that.artistName,_that.contentType,_that.title,_that.body,_that.mediaUrl,_that.artworkUrl,_that.externalUrl,_that.publishedAt,_that.playCount,_that.likeCount,_that.waveformUrl,_that.durationSeconds,_that.trackCount,_that.isNew);case _:
+return $default(_that.id,_that.platform,_that.artistName,_that.contentType,_that.title,_that.body,_that.mediaUrl,_that.artworkUrl,_that.externalUrl,_that.publishedAt,_that.playCount,_that.likeCount,_that.waveformUrl,_that.durationSeconds,_that.trackCount,_that.isNew,_that.isUpcoming,_that.releaseAt);case _:
   return null;
 
 }
@@ -224,7 +226,7 @@ return $default(_that.id,_that.platform,_that.artistName,_that.contentType,_that
 @JsonSerializable()
 
 class _FeedItem implements FeedItem {
-  const _FeedItem({required this.id, required this.platform, required this.artistName, required this.contentType, this.title, this.body, this.mediaUrl, this.artworkUrl, required this.externalUrl, required this.publishedAt, this.playCount, this.likeCount, this.waveformUrl, this.durationSeconds, this.trackCount, this.isNew = false});
+  const _FeedItem({required this.id, required this.platform, required this.artistName, required this.contentType, this.title, this.body, this.mediaUrl, this.artworkUrl, required this.externalUrl, required this.publishedAt, this.playCount, this.likeCount, this.waveformUrl, this.durationSeconds, this.trackCount, this.isNew = false, this.isUpcoming = false, this.releaseAt});
   factory _FeedItem.fromJson(Map<String, dynamic> json) => _$FeedItemFromJson(json);
 
 @override final  String id;
@@ -243,6 +245,8 @@ class _FeedItem implements FeedItem {
 @override final  int? durationSeconds;
 @override final  int? trackCount;
 @override@JsonKey() final  bool isNew;
+@override@JsonKey() final  bool isUpcoming;
+@override final  DateTime? releaseAt;
 
 /// Create a copy of FeedItem
 /// with the given fields replaced by the non-null parameter values.
@@ -257,16 +261,16 @@ Map<String, dynamic> toJson() {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _FeedItem&&(identical(other.id, id) || other.id == id)&&(identical(other.platform, platform) || other.platform == platform)&&(identical(other.artistName, artistName) || other.artistName == artistName)&&(identical(other.contentType, contentType) || other.contentType == contentType)&&(identical(other.title, title) || other.title == title)&&(identical(other.body, body) || other.body == body)&&(identical(other.mediaUrl, mediaUrl) || other.mediaUrl == mediaUrl)&&(identical(other.artworkUrl, artworkUrl) || other.artworkUrl == artworkUrl)&&(identical(other.externalUrl, externalUrl) || other.externalUrl == externalUrl)&&(identical(other.publishedAt, publishedAt) || other.publishedAt == publishedAt)&&(identical(other.playCount, playCount) || other.playCount == playCount)&&(identical(other.likeCount, likeCount) || other.likeCount == likeCount)&&(identical(other.waveformUrl, waveformUrl) || other.waveformUrl == waveformUrl)&&(identical(other.durationSeconds, durationSeconds) || other.durationSeconds == durationSeconds)&&(identical(other.trackCount, trackCount) || other.trackCount == trackCount)&&(identical(other.isNew, isNew) || other.isNew == isNew));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _FeedItem&&(identical(other.id, id) || other.id == id)&&(identical(other.platform, platform) || other.platform == platform)&&(identical(other.artistName, artistName) || other.artistName == artistName)&&(identical(other.contentType, contentType) || other.contentType == contentType)&&(identical(other.title, title) || other.title == title)&&(identical(other.body, body) || other.body == body)&&(identical(other.mediaUrl, mediaUrl) || other.mediaUrl == mediaUrl)&&(identical(other.artworkUrl, artworkUrl) || other.artworkUrl == artworkUrl)&&(identical(other.externalUrl, externalUrl) || other.externalUrl == externalUrl)&&(identical(other.publishedAt, publishedAt) || other.publishedAt == publishedAt)&&(identical(other.playCount, playCount) || other.playCount == playCount)&&(identical(other.likeCount, likeCount) || other.likeCount == likeCount)&&(identical(other.waveformUrl, waveformUrl) || other.waveformUrl == waveformUrl)&&(identical(other.durationSeconds, durationSeconds) || other.durationSeconds == durationSeconds)&&(identical(other.trackCount, trackCount) || other.trackCount == trackCount)&&(identical(other.isNew, isNew) || other.isNew == isNew)&&(identical(other.isUpcoming, isUpcoming) || other.isUpcoming == isUpcoming)&&(identical(other.releaseAt, releaseAt) || other.releaseAt == releaseAt));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,id,platform,artistName,contentType,title,body,mediaUrl,artworkUrl,externalUrl,publishedAt,playCount,likeCount,waveformUrl,durationSeconds,trackCount,isNew);
+int get hashCode => Object.hash(runtimeType,id,platform,artistName,contentType,title,body,mediaUrl,artworkUrl,externalUrl,publishedAt,playCount,likeCount,waveformUrl,durationSeconds,trackCount,isNew,isUpcoming,releaseAt);
 
 @override
 String toString() {
-  return 'FeedItem(id: $id, platform: $platform, artistName: $artistName, contentType: $contentType, title: $title, body: $body, mediaUrl: $mediaUrl, artworkUrl: $artworkUrl, externalUrl: $externalUrl, publishedAt: $publishedAt, playCount: $playCount, likeCount: $likeCount, waveformUrl: $waveformUrl, durationSeconds: $durationSeconds, trackCount: $trackCount, isNew: $isNew)';
+  return 'FeedItem(id: $id, platform: $platform, artistName: $artistName, contentType: $contentType, title: $title, body: $body, mediaUrl: $mediaUrl, artworkUrl: $artworkUrl, externalUrl: $externalUrl, publishedAt: $publishedAt, playCount: $playCount, likeCount: $likeCount, waveformUrl: $waveformUrl, durationSeconds: $durationSeconds, trackCount: $trackCount, isNew: $isNew, isUpcoming: $isUpcoming, releaseAt: $releaseAt)';
 }
 
 
@@ -277,7 +281,7 @@ abstract mixin class _$FeedItemCopyWith<$Res> implements $FeedItemCopyWith<$Res>
   factory _$FeedItemCopyWith(_FeedItem value, $Res Function(_FeedItem) _then) = __$FeedItemCopyWithImpl;
 @override @useResult
 $Res call({
- String id, String platform, String artistName, String contentType, String? title, String? body, String? mediaUrl, String? artworkUrl, String externalUrl, DateTime publishedAt, int? playCount, int? likeCount, String? waveformUrl, int? durationSeconds, int? trackCount, bool isNew
+ String id, String platform, String artistName, String contentType, String? title, String? body, String? mediaUrl, String? artworkUrl, String externalUrl, DateTime publishedAt, int? playCount, int? likeCount, String? waveformUrl, int? durationSeconds, int? trackCount, bool isNew, bool isUpcoming, DateTime? releaseAt
 });
 
 
@@ -294,7 +298,7 @@ class __$FeedItemCopyWithImpl<$Res>
 
 /// Create a copy of FeedItem
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? platform = null,Object? artistName = null,Object? contentType = null,Object? title = freezed,Object? body = freezed,Object? mediaUrl = freezed,Object? artworkUrl = freezed,Object? externalUrl = null,Object? publishedAt = null,Object? playCount = freezed,Object? likeCount = freezed,Object? waveformUrl = freezed,Object? durationSeconds = freezed,Object? trackCount = freezed,Object? isNew = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? platform = null,Object? artistName = null,Object? contentType = null,Object? title = freezed,Object? body = freezed,Object? mediaUrl = freezed,Object? artworkUrl = freezed,Object? externalUrl = null,Object? publishedAt = null,Object? playCount = freezed,Object? likeCount = freezed,Object? waveformUrl = freezed,Object? durationSeconds = freezed,Object? trackCount = freezed,Object? isNew = null,Object? isUpcoming = null,Object? releaseAt = freezed,}) {
   return _then(_FeedItem(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,platform: null == platform ? _self.platform : platform // ignore: cast_nullable_to_non_nullable
@@ -312,7 +316,9 @@ as int?,waveformUrl: freezed == waveformUrl ? _self.waveformUrl : waveformUrl //
 as String?,durationSeconds: freezed == durationSeconds ? _self.durationSeconds : durationSeconds // ignore: cast_nullable_to_non_nullable
 as int?,trackCount: freezed == trackCount ? _self.trackCount : trackCount // ignore: cast_nullable_to_non_nullable
 as int?,isNew: null == isNew ? _self.isNew : isNew // ignore: cast_nullable_to_non_nullable
-as bool,
+as bool,isUpcoming: null == isUpcoming ? _self.isUpcoming : isUpcoming // ignore: cast_nullable_to_non_nullable
+as bool,releaseAt: freezed == releaseAt ? _self.releaseAt : releaseAt // ignore: cast_nullable_to_non_nullable
+as DateTime?,
   ));
 }
 

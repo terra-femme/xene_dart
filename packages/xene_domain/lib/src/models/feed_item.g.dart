@@ -23,6 +23,10 @@ _FeedItem _$FeedItemFromJson(Map<String, dynamic> json) => _FeedItem(
   durationSeconds: (json['durationSeconds'] as num?)?.toInt(),
   trackCount: (json['trackCount'] as num?)?.toInt(),
   isNew: json['isNew'] as bool? ?? false,
+  isUpcoming: json['isUpcoming'] as bool? ?? false,
+  releaseAt: json['releaseAt'] == null
+      ? null
+      : DateTime.parse(json['releaseAt'] as String),
 );
 
 Map<String, dynamic> _$FeedItemToJson(_FeedItem instance) => <String, dynamic>{
@@ -42,4 +46,6 @@ Map<String, dynamic> _$FeedItemToJson(_FeedItem instance) => <String, dynamic>{
   'durationSeconds': instance.durationSeconds,
   'trackCount': instance.trackCount,
   'isNew': instance.isNew,
+  'isUpcoming': instance.isUpcoming,
+  'releaseAt': instance.releaseAt?.toIso8601String(),
 };

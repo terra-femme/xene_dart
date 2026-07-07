@@ -22,6 +22,8 @@ abstract class FeedItem with _$FeedItem {
     int? durationSeconds,
     int? trackCount,
     @Default(false) bool isNew,
+    @Default(false) bool isUpcoming,
+    DateTime? releaseAt,
   }) = _FeedItem;
 
   factory FeedItem.fromJson(Map<String, dynamic> json) => _$FeedItemFromJson(json);
