@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'config_provider.dart';
 
@@ -63,7 +64,10 @@ final capacityCheckProvider = FutureProvider<CapacityCheckResponse>((
       return CapacityCheckResponse.fromJson(res.data!);
     }
   } catch (e) {
-    throw Exception('Failed to check signup capacity: $e');
+    // Fail open: a failing capacity check must never block sign-in. Log and
+    // fall through to the permissive default below (the backend handler itself
+    // fails open too). The cap still enforces when the endpoint responds.
+    debugPrint('[capacityCheck] check failed, failing open: $e');
   }
 
   return CapacityCheckResponse(
@@ -114,7 +118,10 @@ final checkEmailSignupProvider =
           return CapacityCheckResponse.fromJson(res.data!);
         }
       } catch (e) {
-        throw Exception('Failed to check signup eligibility: $e');
+        // Fail open: a failing capacity check must never block sign-in. Log and
+        // fall through to the permissive default below. The cap still enforces
+        // when the endpoint responds normally.
+        debugPrint('[checkEmailSignup] check failed, failing open: $e');
       }
 
       return CapacityCheckResponse(

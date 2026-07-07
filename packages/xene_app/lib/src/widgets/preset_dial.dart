@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -47,6 +48,14 @@ class _PresetDialState extends State<PresetDial>
     with SingleTickerProviderStateMixin {
   static const double _scalePeak = 1.22;
 
+  // Blur only where GPUs shrug it off. Mobile gets a flat scrim instead.
+  static final bool _useBackdropBlur =
+      kIsWeb ||
+      switch (defaultTargetPlatform) {
+        TargetPlatform.android || TargetPlatform.iOS => false,
+        _ => true,
+      };
+
   late AnimationController _scaleController;
   late Animation<double> _scaleAnimation;
   final LayerLink _layerLink = LayerLink();
@@ -71,7 +80,15 @@ class _PresetDialState extends State<PresetDial>
       duration: const Duration(milliseconds: 200),
     );
     _scaleAnimation = Tween<double>(begin: 1, end: _scalePeak).animate(
-      CurvedAnimation(parent: _scaleController, curve: Curves.easeOutBack),
+      CurvedAnimation(
+        parent: _scaleController,
+        curve: Curves.easeOutBack,
+        // Without an explicit reverseCurve, reverse() traverses easeOutBack
+        // backwards and spends its first frames in the flat overshoot region —
+        // the knob visibly hangs near full size before shrinking. easeIn gives
+        // the release a fast start that settles smoothly.
+        reverseCurve: Curves.easeIn,
+      ),
     );
     _scaleController.addStatusListener(_handleScaleStatus);
     _syncFromActiveSlug();
@@ -178,13 +195,20 @@ class _PresetDialState extends State<PresetDial>
           child: IgnorePointer(
             child: Stack(
               children: [
+                // Full-screen BackdropFilter blur is GPU-expensive on mobile
+                // (re-blurs the whole surface every frame of the 200ms scale
+                // animation, plus a first-use shader-compile hitch). Phones and
+                // tablets get a plain dim scrim at a slightly higher alpha for
+                // similar visual separation; web/desktop keep the blur.
                 Positioned.fill(
-                  child: BackdropFilter(
-                    filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
-                    child: Container(
-                      color: Colors.black.withValues(alpha: 0.12),
-                    ),
-                  ),
+                  child: _useBackdropBlur
+                      ? BackdropFilter(
+                          filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
+                          child: Container(
+                            color: Colors.black.withValues(alpha: 0.12),
+                          ),
+                        )
+                      : Container(color: Colors.black.withValues(alpha: 0.20)),
                 ),
                 CompositedTransformFollower(
                   link: _layerLink,

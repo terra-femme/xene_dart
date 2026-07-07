@@ -7,6 +7,56 @@ import 'package:xene_backend/src/utils/rate_limiter.dart';
 
 final _logger = Logger('proxy.image');
 
+// Shared client: reuses pooled keep-alive connections to the CDNs instead of
+// paying a fresh TCP+TLS handshake per image request.
+final _dio = Dio();
+
+// In-process byte cache. Only the web build hits this route (native loads
+// CDNs directly), so a small in-memory cache absorbs repeat views without an
+// external cache service. Bounded by entry count AND total bytes so it cannot
+// grow past its budget on a small (0.5 GiB) container.
+const _cacheMaxEntries = 300;
+const _cacheMaxBytes = 40 * 1024 * 1024; // 40 MiB
+const _cacheTtl = Duration(hours: 24);
+
+class _CachedImage {
+  _CachedImage(this.bytes, this.contentType) : fetchedAt = DateTime.now();
+  final List<int> bytes;
+  final String contentType;
+  final DateTime fetchedAt;
+  bool get isExpired => DateTime.now().difference(fetchedAt) > _cacheTtl;
+}
+
+// LinkedHashMap insertion order gives us cheap LRU: re-insert on hit,
+// evict from the front when over budget.
+final _imageCache = <String, _CachedImage>{};
+int _imageCacheBytes = 0;
+
+_CachedImage? _cacheGet(String url) {
+  final entry = _imageCache.remove(url);
+  if (entry == null) return null;
+  if (entry.isExpired) {
+    _imageCacheBytes -= entry.bytes.length;
+    return null;
+  }
+  _imageCache[url] = entry; // move to most-recently-used position
+  return entry;
+}
+
+void _cachePut(String url, _CachedImage entry) {
+  final existing = _imageCache.remove(url);
+  if (existing != null) _imageCacheBytes -= existing.bytes.length;
+  _imageCache[url] = entry;
+  _imageCacheBytes += entry.bytes.length;
+  while (_imageCache.length > _cacheMaxEntries ||
+      _imageCacheBytes > _cacheMaxBytes) {
+    final oldestKey = _imageCache.keys.first;
+    final evicted = _imageCache.remove(oldestKey)!;
+    _imageCacheBytes -= evicted.bytes.length;
+    _logger.fine('[proxy.image] Evicted $oldestKey from byte cache');
+  }
+}
+
 /// GET /proxy/image?url=<encoded-url>
 /// Proxies image requests through the backend to bypass CORS restrictions.
 /// Accepts a URL-encoded image URL and returns the image with CORS headers.
@@ -79,10 +129,27 @@ Future<Response> onRequest(RequestContext context) async {
     return Response(statusCode: 403, body: 'Domain not allowed');
   }
 
+  final cached = _cacheGet(encodedUrl);
+  if (cached != null) {
+    _logger.fine(
+      '[proxy.image] Cache HIT — ${cached.bytes.length} bytes for $encodedUrl',
+    );
+    return Response.bytes(
+      statusCode: 200,
+      body: cached.bytes,
+      headers: {
+        'Content-Type': cached.contentType,
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, OPTIONS',
+        'Cache-Control': 'public, max-age=86400',
+        'X-Proxy-Cache': 'HIT',
+      },
+    );
+  }
+
   try {
     _logger.info('[proxy.image] Fetching from $encodedUrl');
-    final dio = Dio();
-    final response = await dio
+    final response = await _dio
         .get<List<int>>(
           encodedUrl,
           options: Options(
@@ -116,6 +183,9 @@ Future<Response> onRequest(RequestContext context) async {
 
     // Return image with CORS headers + cache headers for frontend caching
     final contentType = response.headers.value('content-type') ?? 'image/jpeg';
+    if (bytes.isNotEmpty) {
+      _cachePut(encodedUrl, _CachedImage(bytes, contentType));
+    }
     return Response.bytes(
       statusCode: 200,
       body: bytes,

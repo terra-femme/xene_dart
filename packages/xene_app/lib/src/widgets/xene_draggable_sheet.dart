@@ -143,7 +143,7 @@ class _XeneDraggableSheetState extends ConsumerState<XeneDraggableSheet>
   List<_ArchiveDateSection> _buildDateSections(List<FeedItem> items) {
     final sorted = List<FeedItem>.from(items)
       ..sort((a, b) {
-        final byDate = b.publishedAt.compareTo(a.publishedAt);
+        final byDate = b.timelineAt.compareTo(a.timelineAt);
         if (byDate != 0) return byDate;
 
         final byArtist = a.artistName.compareTo(b.artistName);
@@ -156,7 +156,7 @@ class _XeneDraggableSheetState extends ConsumerState<XeneDraggableSheet>
     _ArchiveDateSection? currentSection;
 
     for (final item in sorted) {
-      final date = _localDate(item.publishedAt);
+      final date = _localDate(item.timelineAt);
 
       if (currentSection == null || currentSection.date != date) {
         currentSection = _ArchiveDateSection(date: date, items: <FeedItem>[]);
@@ -384,7 +384,7 @@ class _XeneDraggableSheetState extends ConsumerState<XeneDraggableSheet>
 
     final isLandscape =
         MediaQuery.of(context).orientation == Orientation.landscape;
-    final logoBottom = isLandscape ? topOffset : topOffset + 277;
+    final logoBottom = isLandscape ? topOffset : topOffset + 290;
 
     final maxRatio = ((screenHeight - logoBottom) / screenHeight).clamp(
       0.1,

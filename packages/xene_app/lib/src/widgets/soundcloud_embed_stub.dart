@@ -10,10 +10,14 @@ class SoundCloudEmbed extends StatelessWidget {
     super.key,
     required this.trackId,
     this.isVisual = false,
+    this.artworkUrl,
   });
 
   final String trackId;
   final bool isVisual;
+
+  // Accepted for facade-signature parity with the native embed.
+  final String? artworkUrl;
 
   @override
   Widget build(BuildContext context) {

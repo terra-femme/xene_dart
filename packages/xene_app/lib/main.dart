@@ -35,6 +35,7 @@ import 'package:xene_app/src/sandbox/av_sphere_sandbox.dart';
 import 'package:xene_app/src/sandbox/av_stream_test.dart';
 import 'package:xene_app/src/sandbox/dancing_points_view.dart';
 import 'package:xene_app/src/widgets/admin_guard.dart';
+import 'package:xene_app/src/widgets/perf_hud.dart';
 import 'package:xene_app/src/providers/ui_config_provider.dart';
 import 'package:xene_app/src/theme/xene_theme.dart';
 import 'package:xene_app/src/providers/accessibility_provider.dart';
@@ -112,7 +113,25 @@ Future<void> main() async {
   // 2. Only fall back to anonymous if no real session was established above
   //    or restored from device storage by initialize().
   if (Supabase.instance.client.auth.currentUser == null) {
-    await Supabase.instance.client.auth.signInAnonymously();
+    try {
+      // Bounded so a slow/throttled anon sign-in can't block startup (it was
+      // freezing the app for minutes before runApp). The underlying call keeps
+      // running after a timeout; onAuthStateChange picks up the session if it
+      // lands late, and authenticated calls retry once a session exists.
+      await Supabase.instance.client.auth.signInAnonymously().timeout(
+        const Duration(seconds: 8),
+      );
+      dev.log('[auth] anonymous session created', name: 'xene.auth');
+    } catch (e) {
+      // Includes TimeoutException. Without a session, authenticated calls (feed,
+      // etc.) 401 until one lands — but the app shows immediately instead of
+      // hanging. Surface the reason instead of failing silently.
+      dev.log(
+        '[auth] signInAnonymously failed/timed out: $e',
+        name: 'xene.auth',
+        error: e,
+      );
+    }
   }
 
   // Await font loading on all platforms so the first frame always renders in
@@ -508,6 +527,11 @@ class XeneScrollBehavior extends MaterialScrollBehavior {
 
 const _showSemantics = bool.fromEnvironment('XENE_SHOW_SEMANTICS');
 
+// On-screen frame-timing overlay for diagnosing jank on touch devices that
+// can't open DevTools. Off by default; enable with
+// --dart-define=XENE_PERF_HUD=true. See widgets/perf_hud.dart.
+const _showPerfHud = bool.fromEnvironment('XENE_PERF_HUD');
+
 class XeneApp extends ConsumerWidget {
   const XeneApp({super.key});
 
@@ -529,6 +553,9 @@ class XeneApp extends ConsumerWidget {
           child: child ?? const SizedBox.shrink(),
         );
         if (_showSemantics) content = SemanticsDebugger(child: content);
+        if (_showPerfHud) {
+          content = Stack(children: [content, const PerfHud()]);
+        }
         return DevicePreview.appBuilder(context, content);
       },
       scrollBehavior: XeneScrollBehavior(),

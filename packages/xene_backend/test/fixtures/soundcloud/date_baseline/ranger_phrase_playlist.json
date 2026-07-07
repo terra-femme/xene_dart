@@ -1,0 +1,35 @@
+{
+  "captured_at": "2026-07-06T00:00:00.000Z",
+  "canonical_url": "https://soundcloud.com/rangerrecords/sets/phrase-kill-plan-final-test",
+  "official_api": {
+    "kind": "playlist",
+    "id": 2181845408,
+    "title": "Phrase - Kill Plan / Final Test [RNGR006]",
+    "created_at": "2026/01/28 02:47:51 +0000",
+    "display_date": null,
+    "release_date": null,
+    "release_year": 2026,
+    "release_month": 11,
+    "release_day": 7,
+    "last_modified": "2026/01/28 02:49:34 +0000",
+    "permalink_url": "https://soundcloud.com/rangerrecords/sets/phrase-kill-plan-final-test",
+    "tracks": [
+      {
+        "id": 2200721063,
+        "title": "Phrase - Kill Plan [Premiere]",
+        "created_at": "2025/10/28 12:57:48 +0000",
+        "display_date": "2025-11-04T18:00:38Z"
+      },
+      {
+        "id": 2210240468,
+        "title": "Phrase - Final Test",
+        "created_at": "2025/11/10 18:50:05 +0000",
+        "display_date": "2025-11-10T18:50:05Z"
+      }
+    ]
+  },
+  "public_page": {
+    "display_date": "2026-01-28T02:47:51Z",
+    "release_date": "2026-11-07T00:00:00Z"
+  }
+}

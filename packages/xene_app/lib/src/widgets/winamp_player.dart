@@ -6,14 +6,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../models/user_media_item.dart';
-import '../providers/accessibility_provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/queue_provider.dart';
 import '../providers/saved_provider.dart';
-import '../providers/track_analysis_provider.dart';
 import 'auth_gate_sheet.dart';
 import 'soundcloud_embed.dart';
-import 'track_visualizer.dart';
 import 'youtube_embed.dart';
 
 // Xene monochrome palette — platform colors appear only on tiny indicator dots.
@@ -57,7 +54,6 @@ class _WinampPlayerState extends ConsumerState<WinampPlayer> {
   Widget build(BuildContext context) {
     final queue = ref.watch(queueProvider);
     final current = queue.currentItem;
-    final reduceMotion = ref.watch(accessibilityProvider).reduceMotion;
 
     // Live region: announce track changes to screen readers
     final _view = View.of(context);
@@ -70,14 +66,6 @@ class _WinampPlayerState extends ConsumerState<WinampPlayer> {
         );
       }
     });
-
-    // Fetch beat/amplitude analysis for the current SC track (null for other platforms)
-    final analysisAsync =
-        (current?.platform == 'soundcloud' && current?.trackId != null)
-        ? ref.watch(
-            trackAnalysisProvider((current!.platform, current.trackId!)),
-          )
-        : null;
 
     if (!queue.isLoaded) {
       return const Padding(
@@ -246,19 +234,6 @@ class _WinampPlayerState extends ConsumerState<WinampPlayer> {
                 ],
               ),
 
-              // Visualizer — data-driven when analysis is available
-              if (current != null) ...[
-                const SizedBox(height: 12),
-                TrackVisualizerWidget(
-                  analysis: analysisAsync?.valueOrNull,
-                  playPositionStream: scPlayPositionStream,
-                  isPlaying: _isPlaying,
-                  durationMs: (current.durationSeconds ?? 0) * 1000,
-                  reduceMotion: reduceMotion,
-                  height: 36,
-                ),
-              ],
-
               // Embed
               if (_isPlaying && _embedExpanded && current != null) ...[
                 const SizedBox(height: 12),
@@ -302,6 +277,7 @@ class _WinampPlayerState extends ConsumerState<WinampPlayer> {
         key: ValueKey('youtube-${item.id}-${item.trackId ?? item.externalUrl}'),
         videoId: item.trackId ?? '',
         externalUrl: item.externalUrl,
+        artworkUrl: item.artworkUrl,
       );
     }
     final scSource =
@@ -309,6 +285,7 @@ class _WinampPlayerState extends ConsumerState<WinampPlayer> {
     return SoundCloudEmbed(
       key: ValueKey('soundcloud-$scSource'),
       trackId: scSource,
+      artworkUrl: item.artworkUrl,
     );
   }
 }

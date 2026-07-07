@@ -24,6 +24,26 @@ class XeneFeedCard extends StatelessWidget {
   final bool dark;
   final bool videoMode;
 
+  // Cached base text styles. GoogleFonts.<family>() does a registry lookup and
+  // allocates a TextStyle on every call; doing that inside build() re-resolves
+  // the same fonts dozens of times per second while the feed crawls/transitions.
+  // Resolve each once here (font family + size + weight are constant) and apply
+  // the only per-card variable — color — with the cheap copyWith below.
+  static final TextStyle _archivoBold13 = GoogleFonts.archivo(
+    fontWeight: FontWeight.bold,
+    fontSize: 13,
+  );
+  static final TextStyle _archivo13w700 = GoogleFonts.archivo(
+    fontSize: 13,
+    fontWeight: FontWeight.w700,
+  );
+  static final TextStyle _archivo10 = GoogleFonts.archivo(fontSize: 10);
+  static final TextStyle _dmMono9 = GoogleFonts.dmMono(fontSize: 9);
+  static final TextStyle _dmMono9w700 = GoogleFonts.dmMono(
+    fontSize: 9,
+    fontWeight: FontWeight.w700,
+  );
+
   @override
   Widget build(BuildContext context) {
     if (videoMode && item.platform.toLowerCase() == 'youtube') {
@@ -159,12 +179,9 @@ class XeneFeedCard extends StatelessWidget {
                       ),
                     Padding(
                       padding: EdgeInsets.all(cardPadding),
-                      child: Column(
+                      child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
                           // 1. Thumbnail (Left) — decorative, described by card label
                           ExcludeSemantics(
                             child: ClipRRect(
@@ -211,16 +228,22 @@ class XeneFeedCard extends StatelessWidget {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  ConstrainedBox(
-                                    constraints: BoxConstraints(
-                                      maxWidth: badgeMaxWidth,
-                                    ),
-                                    child: _TypePill(type: item.contentType),
-                                  ),
-                                  const SizedBox(height: 3),
-                                  Row(
-                                    mainAxisSize: MainAxisSize.min,
+                                  // Top badges wrap instead of overflowing when the feed
+                                  // column gets narrow beside the fixed sidebar.
+                                  Wrap(
+                                    spacing: 4,
+                                    runSpacing: 3,
+                                    crossAxisAlignment:
+                                        WrapCrossAlignment.center,
                                     children: [
+                                      ConstrainedBox(
+                                        constraints: BoxConstraints(
+                                          maxWidth: badgeMaxWidth,
+                                        ),
+                                        child: _TypePill(
+                                          type: item.contentType,
+                                        ),
+                                      ),
                                       ConstrainedBox(
                                         constraints: BoxConstraints(
                                           maxWidth: badgeMaxWidth,
@@ -229,12 +252,101 @@ class XeneFeedCard extends StatelessWidget {
                                           platform: item.platform,
                                         ),
                                       ),
+                                      if (_isPreReleaseItem(item))
+                                        const _PreOrderStar(),
                                     ],
                                   ),
-                                  if (_isPreReleaseItem(item)) ...[
-                                    const SizedBox(height: 3),
-                                    const _PreOrderStar(),
-                                  ],
+                                  const SizedBox(height: 4),
+
+                                  // Title
+                                  Text(
+                                    item.title ?? 'Untitled',
+                                    style: _archivoBold13.copyWith(
+                                      color: titleColor,
+                                    ),
+                                    softWrap: true,
+                                    overflow: TextOverflow.fade,
+                                  ),
+
+                                  // Artist name
+                                  Text(
+                                    item.artistName,
+                                    textAlign: TextAlign.center,
+                                    style: _archivo13w700.copyWith(
+                                      color: dark ? Colors.white : Colors.black,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+
+                                  if (repostAttribution != null)
+                                    Text(
+                                      repostAttribution,
+                                      style: _dmMono9w700.copyWith(
+                                        color: XeneTheme.scOrange,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+
+                                  // Snippet
+                                  if (bodyText != null && bodyText.isNotEmpty)
+                                    Text(
+                                      bodyText,
+                                      style: _archivo10.copyWith(
+                                        color: snippetColor,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+
+                                  // Duration (SC) or track count (BC) — mutually exclusive
+                                  if (item.durationSeconds != null &&
+                                      item.durationSeconds! > 0)
+                                    Align(
+                                      alignment: Alignment.centerRight,
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            Icons.schedule,
+                                            size: 9,
+                                            color: snippetColor,
+                                          ),
+                                          const SizedBox(width: 2),
+                                          Text(
+                                            _formatDuration(
+                                              item.durationSeconds!,
+                                            ),
+                                            style: _dmMono9.copyWith(
+                                              color: snippetColor,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    )
+                                  else if (item.trackCount != null &&
+                                      item.trackCount! > 1)
+                                    Align(
+                                      alignment: Alignment.centerRight,
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            Icons.queue_music,
+                                            size: 9,
+                                            color: snippetColor,
+                                          ),
+                                          const SizedBox(width: 2),
+                                          Text(
+                                            '${item.trackCount} tracks',
+                                            style: _dmMono9.copyWith(
+                                              color: snippetColor,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
                                 ],
                               ),
                             ),
@@ -244,111 +356,6 @@ class XeneFeedCard extends StatelessWidget {
                             'youtube',
                           ].contains(item.platform.toLowerCase()))
                             _SaveButton(item: item, dark: dark),
-                            ],
-                          ),
-                          SizedBox(height: compact ? 4 : 6),
-                          ExcludeSemantics(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  item.title ?? 'Untitled',
-                                  style: GoogleFonts.archivo(
-                                    color: titleColor,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 13,
-                                  ),
-                                  softWrap: true,
-                                  overflow: TextOverflow.fade,
-                                ),
-                                Text(
-                                  item.artistName,
-                                  style: GoogleFonts.archivo(
-                                    color: dark ? Colors.white : Colors.black,
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                if (repostAttribution != null)
-                                  Text(
-                                    repostAttribution,
-                                    style: GoogleFonts.dmMono(
-                                      color: XeneTheme.scOrange,
-                                      fontSize: 9,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                              ],
-                            ),
-                          ),
-                          if (bodyText != null && bodyText.isNotEmpty) ...[
-                            SizedBox(height: compact ? 4 : 5),
-                            ExcludeSemantics(
-                              child: Text(
-                                bodyText,
-                                style: GoogleFonts.archivo(
-                                  color: snippetColor,
-                                  fontSize: 10,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                          if (item.durationSeconds != null &&
-                              item.durationSeconds! > 0)
-                            ExcludeSemantics(
-                              child: Align(
-                                alignment: Alignment.centerRight,
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      Icons.schedule,
-                                      size: 9,
-                                      color: snippetColor,
-                                    ),
-                                    const SizedBox(width: 2),
-                                    Text(
-                                      _formatDuration(item.durationSeconds!),
-                                      style: GoogleFonts.dmMono(
-                                        color: snippetColor,
-                                        fontSize: 9,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            )
-                          else if (item.trackCount != null &&
-                              item.trackCount! > 1)
-                            ExcludeSemantics(
-                              child: Align(
-                                alignment: Alignment.centerRight,
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      Icons.queue_music,
-                                      size: 9,
-                                      color: snippetColor,
-                                    ),
-                                    const SizedBox(width: 2),
-                                    Text(
-                                      '${item.trackCount} tracks',
-                                      style: GoogleFonts.dmMono(
-                                        color: snippetColor,
-                                        fontSize: 9,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
                         ],
                       ),
                     ),
@@ -373,6 +380,16 @@ class _YoutubeVideoCard extends StatelessWidget {
   final FeedItem item;
   final VoidCallback? onTap;
   final bool dark;
+
+  // Cached once (font family + size + weight constant); color varies per card.
+  static final TextStyle _archivoBold13 = GoogleFonts.archivo(
+    fontWeight: FontWeight.bold,
+    fontSize: 13,
+  );
+  static final TextStyle _archivo10w500 = GoogleFonts.archivo(
+    fontSize: 10,
+    fontWeight: FontWeight.w500,
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -482,21 +499,13 @@ class _YoutubeVideoCard extends StatelessWidget {
                   const SizedBox(height: 4),
                   Text(
                     item.title ?? 'Untitled',
-                    style: GoogleFonts.archivo(
-                      color: titleColor,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13,
-                    ),
+                    style: _archivoBold13.copyWith(color: titleColor),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
                   Text(
                     item.artistName,
-                    style: GoogleFonts.archivo(
-                      color: snippetColor,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w500,
-                    ),
+                    style: _archivo10w500.copyWith(color: snippetColor),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -529,7 +538,7 @@ class _SaveButton extends ConsumerWidget {
     );
     final iconColor = isQueued
         ? XeneTheme.purple
-        : const Color(0xFFFFD23F);
+        : (dark ? Colors.white : const Color(0xFFFFD23F));
     final iconShadows = dark
         ? [
             Shadow(
@@ -556,14 +565,16 @@ class _SaveButton extends ConsumerWidget {
           }
         },
         child: SizedBox(
-          width: 32,
+          width: 44,
           height: 44,
           child: Align(
             alignment: Alignment.topCenter,
             child: Padding(
               padding: const EdgeInsets.only(top: 1),
               child: Icon(
-                isQueued ? Icons.bookmark : Icons.bookmark_add,
+                isQueued
+                    ? Icons.bookmark
+                    : (dark ? Icons.bookmark_add : Icons.bookmark_add_outlined),
                 size: 24,
                 color: iconColor,
                 shadows: iconShadows,
@@ -712,9 +723,6 @@ class _PreOrderStar extends StatelessWidget {
               fontWeight: FontWeight.bold,
               fontFamily: 'DM Mono',
             ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            softWrap: false,
           ),
         ],
       ),
@@ -726,26 +734,30 @@ class _PlatformBadge extends StatelessWidget {
   const _PlatformBadge({required this.platform});
   final String platform;
 
+  // Resolved once; only the per-platform color varies (applied via copyWith).
+  static final TextStyle _badgeStyle = GoogleFonts.dmMono(
+    fontSize: 8,
+    fontWeight: FontWeight.w500,
+  );
+
   @override
   Widget build(BuildContext context) {
     final color = _getPlatformColor(platform);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
-      constraints: const BoxConstraints(minHeight: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      height: 18,
       decoration: BoxDecoration(
         border: Border.all(color: color, width: 1),
         borderRadius: BorderRadius.circular(2),
       ),
-      child: Text(
-        platform.toUpperCase(),
-        style: GoogleFonts.dmMono(
-          color: color,
-          fontSize: 8,
-          fontWeight: FontWeight.w500,
+      child: Center(
+        child: Text(
+          platform.toUpperCase(),
+          style: _badgeStyle.copyWith(color: color),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          softWrap: false,
         ),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        softWrap: false,
       ),
     );
   }

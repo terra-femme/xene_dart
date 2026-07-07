@@ -4,10 +4,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../providers/capacity_check_provider.dart';
-import '../providers/config_provider.dart';
 import '../theme/xene_theme.dart';
 
-const _kMobileRedirectUrl = 'com.xene.app://auth/callback';
+// Must match the URL scheme registered natively (AndroidManifest.xml +
+// ios/Runner/Info.plist: io.supabase.xene) AND the Supabase redirect allowlist.
+const _kMobileRedirectUrl = 'io.supabase.xene://login-callback';
 
 /// Shows a bottom sheet prompting the user to sign in or create an account.
 /// [featureHint] is appended after "Sign in or create an account " — keep it
@@ -69,18 +70,13 @@ class _AuthGateSheetState extends ConsumerState<_AuthGateSheet> {
         return;
       }
 
-      // Get redirect URL from config
-      final configAsync = ref.read(appConfigProvider);
-      final webRedirectUrl =
-          configAsync
-              .whenData((config) => config.authRedirectUrl)
-              .asData
-              ?.value ??
-          'http://localhost:4000';
-
+      // On web, redirect back to wherever the app is actually running
+      // (Uri.base.origin = current scheme://host:port) so the magic link returns
+      // to this exact origin regardless of the dev port. This origin must be in
+      // Supabase → Authentication → URL Configuration → Redirect URLs.
       await Supabase.instance.client.auth.signInWithOtp(
         email: email,
-        emailRedirectTo: kIsWeb ? webRedirectUrl : _kMobileRedirectUrl,
+        emailRedirectTo: kIsWeb ? Uri.base.origin : _kMobileRedirectUrl,
       );
       if (mounted) setState(() => _sent = true);
     } on AuthException catch (e) {

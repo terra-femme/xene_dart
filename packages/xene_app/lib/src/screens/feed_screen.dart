@@ -15,6 +15,8 @@ import '../providers/preset_provider.dart';
 import '../providers/ui_config_provider.dart';
 import '../theme/xene_theme.dart';
 import '../widgets/xene_feed_card.dart';
+import '../widgets/xene_lite_feed_card.dart';
+import '../providers/render_mode_provider.dart';
 import '../widgets/xene_content_modal.dart';
 
 class FeedScreen extends ConsumerStatefulWidget {
@@ -55,6 +57,12 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
 
   // Scroll speed multiplier, updated from uiConfigProvider on each build.
   double _scrollSpeedMultiplier = 1.0;
+
+  // Base crawl rate in pixels-per-millisecond (before the remote-config
+  // multiplier). The crawl only runs on integer-DPR devices now (see
+  // _autoCrawlSupported), where it was already smooth — so this stays at the
+  // original rate. Kept as a named constant for easy tuning.
+  static const double _baseCrawlPxPerMs = 0.043;
 
   // Sub-pixel accumulator — banks fractional advance so jumpTo only fires on
   // whole-pixel boundaries, keeping text on the same pixel row every frame.
@@ -174,7 +182,37 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
   // .setPixels is @protected and would require a custom ScrollPosition/Physics
   // subclass — deliberately deferred as separate, test-gated work.
   // ------------------------------------------------------------
+  // The continuous auto-scroll only renders cleanly when one logical pixel maps
+  // to a whole number of physical pixels. On a fractional devicePixelRatio
+  // (e.g. 1.75 on many Android tablets) every per-frame jumpTo re-rasterizes
+  // glyphs and borders onto different sub-pixels → visible "shimmer"/jiggle that
+  // no amount of speed/build tuning removes. Integer DPR (2.0/3.0 on iOS, 1.0/2.0
+  // on desktop) is unaffected, so we gate the crawl on integer DPR: it keeps
+  // running everywhere it looks smooth and is disabled only where it shimmers.
+  // Users on those devices simply scroll the feed themselves.
+  bool get _autoCrawlSupported {
+    final dpr =
+        WidgetsBinding.instance.platformDispatcher.views.first.devicePixelRatio;
+    return (dpr - dpr.roundToDouble()).abs() < 0.001;
+  }
+
   void _startCrawl() {
+    if (!_autoCrawlSupported) {
+      debugPrint(
+        '[FeedScreen] auto-crawl disabled — fractional devicePixelRatio '
+        '(${WidgetsBinding.instance.platformDispatcher.views.first.devicePixelRatio}) '
+        'would shimmer; feed is manual-scroll on this device',
+      );
+      return;
+    }
+    if (ref.read(feedRenderModeProvider) == FeedRenderMode.lite) {
+      debugPrint(
+        '[FeedScreen] auto-crawl disabled — lite render mode (low-end device); '
+        'continuous card builds are the exact cost we avoid here',
+      );
+      return;
+    }
+
     _crawlTicker?.dispose();
     _crawlTicker = null;
     _lastTickTime = Duration.zero;
@@ -258,7 +296,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
 
         // Clamp advance to 2px max per frame — prevents a 1133ms browser
         // freeze from lurching the content by 49px all at once.
-        final rawAdvance = deltaMs * 0.043 * _scrollSpeedMultiplier;
+        final rawAdvance = deltaMs * _baseCrawlPxPerMs * _scrollSpeedMultiplier;
         final clampedAdvance = rawAdvance.clamp(0.0, 2.0);
 
         // Accumulate sub-pixel movement; only call jumpTo on whole-pixel
@@ -371,7 +409,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
   List<_FeedDateSection> _buildDateSections(List<FeedItem> items) {
     final sorted = List<FeedItem>.from(items)
       ..sort((a, b) {
-        final byDate = b.publishedAt.compareTo(a.publishedAt);
+        final byDate = b.timelineAt.compareTo(a.timelineAt);
         if (byDate != 0) return byDate;
 
         final byArtist = a.artistName.compareTo(b.artistName);
@@ -384,7 +422,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
     _FeedDateSection? currentSection;
 
     for (final item in sorted) {
-      final date = _localDate(item.publishedAt);
+      final date = _localDate(item.timelineAt);
 
       if (currentSection == null || currentSection.date != date) {
         currentSection = _FeedDateSection(date: date, items: <FeedItem>[]);
@@ -467,6 +505,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
     Set<String> newItemIds,
     Map<String, int> animIndexMap, {
     bool videoMode = false,
+    bool liteMode = false,
   }) {
     final slivers = <Widget>[];
 
@@ -482,10 +521,35 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
             final item = section.items[itemIndex];
             final compositeId = '${item.platform}_${item.id}';
             final animIndex = animIndexMap[compositeId] ?? -1;
+            final key = ValueKey(
+              'feed_card_${sectionIndex}_${itemIndex}_${item.platform}_${item.id}',
+            );
+            // Low-end devices get the flat, cheap-to-build lite card (raster is
+            // fine; build cost is the bottleneck). No entrance animation either
+            // — that wrapper is build overhead these devices can't spare.
+            if (liteMode) {
+              return XeneLiteFeedCard(
+                key: key,
+                item: item,
+                onTap: () => showXeneContent(context, item),
+              );
+            }
+            // Only brand-new items animate. Building the animated wrapper for
+            // every card means constructing a StatefulWidget + AnimationController
+            // + CurvedAnimations + a provider read for each card that scrolls
+            // into view — pure build-thread overhead on the ~95% that don't
+            // animate. Render those as the plain StatelessWidget card; reserve
+            // the heavy wrapper for cards that are actually animating in.
+            if (animIndex < 0) {
+              return XeneFeedCard(
+                key: key,
+                item: item,
+                onTap: () => showXeneContent(context, item),
+                videoMode: videoMode,
+              );
+            }
             return _AnimatingFeedCard(
-              key: ValueKey(
-                'feed_card_${sectionIndex}_${itemIndex}_${item.platform}_${item.id}',
-              ),
+              key: key,
               item: item,
               onTap: () => showXeneContent(context, item),
               animIndex: animIndex,
@@ -527,6 +591,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
     final availableArtists = ref.watch(feedArtistsProvider);
     final newItemIds = ref.watch(newFeedItemIdsProvider);
     final activeSlug = ref.watch(activePresetSlugProvider);
+    final liteMode = ref.watch(feedRenderModeProvider) == FeedRenderMode.lite;
 
     // Fade out cards and reset crawl when preset changes.
     ref.listen(activePresetSlugProvider, (prev, next) {
@@ -628,6 +693,16 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
             _startCrawl();
           }
         });
+      }
+    });
+
+    // If the runtime watcher demotes this device to lite mid-session, stop the
+    // crawl immediately — the lite feed is a manual scroll.
+    ref.listen(feedRenderModeProvider, (prev, next) {
+      if (next == FeedRenderMode.lite && _crawlTicker != null) {
+        debugPrint('[FeedScreen] render mode → lite; stopping auto-crawl');
+        _crawlTicker?.dispose();
+        _crawlTicker = null;
       }
     });
 
@@ -1021,6 +1096,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen>
                               newItemIds,
                               animIndexMap,
                               videoMode: activeSlug == 'videos',
+                              liteMode: liteMode,
                             ),
                           ),
                         );

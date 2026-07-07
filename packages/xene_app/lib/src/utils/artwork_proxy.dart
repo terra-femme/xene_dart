@@ -39,6 +39,10 @@ const _corsRestrictedHosts = <String>{
 /// safe (idempotent) to call at render time even on already-proxied URLs.
 String? proxyArtworkUrl(String? url) {
   if (url == null || url.isEmpty) return url;
+  // CORS only exists in browsers. On Android/iOS/desktop the CDNs are directly
+  // reachable, so proxying would only add a backend round-trip per image (and
+  // backend cost). Only the web build routes through /proxy/image.
+  if (!kIsWeb) return url;
   try {
     final uri = Uri.parse(url);
     if (_corsRestrictedHosts.contains(uri.host)) {
