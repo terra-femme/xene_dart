@@ -62,7 +62,8 @@ final bool _isProduction =
 // even in production, useful for testing on local networks. Set this in Azure when
 // testing from local machine, remove for production-only security.
 final bool _allowDevOrigins =
-    (Platform.environment['ALLOW_DEV_ORIGINS'] ?? 'false').toLowerCase() == 'true';
+    (Platform.environment['ALLOW_DEV_ORIGINS'] ?? 'false').toLowerCase() ==
+    'true';
 
 // Global singleton instances
 final _db = DatabaseService();
@@ -110,15 +111,20 @@ final _discovery = DiscoveryService(
 
 // Initialize distributed cache at server startup.
 final bool _cacheReady = () {
-  _cache.init(failOpen: true).then((ok) {
-    if (ok) {
-      print('[STARTUP] DragonflyDB cache initialized ✓');
-    } else {
-      print('[STARTUP] DragonflyDB cache disabled (will fall back gracefully)');
-    }
-  }).catchError((e) {
-    print('[STARTUP] DragonflyDB init error (fail-open): $e');
-  });
+  _cache
+      .init(failOpen: true)
+      .then((ok) {
+        if (ok) {
+          print('[STARTUP] DragonflyDB cache initialized ✓');
+        } else {
+          print(
+            '[STARTUP] DragonflyDB cache disabled (will fall back gracefully)',
+          );
+        }
+      })
+      .catchError((e) {
+        print('[STARTUP] DragonflyDB init error (fail-open): $e');
+      });
   return true;
 }();
 
@@ -152,7 +158,9 @@ final bool _envReady = () {
   if (xeneEnv == 'production' && _allowDevOrigins) {
     print('');
     print('⚠️  ALLOW_DEV_ORIGINS=true in production');
-    print('    Local network IPs (192.168.*, 10.*, 172.16-31.*) will be accepted');
+    print(
+      '    Local network IPs (192.168.*, 10.*, 172.16-31.*) will be accepted',
+    );
     print('    REMOVE this for production-only deployments');
     print('');
   }
@@ -171,6 +179,15 @@ final _scheduler = SchedulerService(
   publicationPoller: _publicationPoller,
   publicationRepo: _publicationRepo,
 )..start();
+
+// Start the cron scheduler at server startup. Top-level finals are lazy in
+// Dart: nothing ever calls context.read<SchedulerService>(), so without an
+// explicit reference (see _debugMiddleware) _scheduler is never constructed
+// and none of the 7 cron jobs — including the 3am feed_items cleanup — run.
+final bool _schedulerReady = () {
+  _scheduler; // touching the lazy final constructs SchedulerService and runs ..start()
+  return true;
+}();
 
 // Helper: Check if origin matches a development pattern.
 // In development mode, allow any port on localhost, 127.0.0.1, and private IP ranges.
@@ -244,10 +261,10 @@ Handler _corsMiddleware(Handler handler) {
     if (_allowedOrigins.isNotEmpty) {
       // Allowlist configured: check for exact match first, then pattern match
       // for development (any port on localhost/127.0.0.1/private IPs).
-      bool originAllowed = requestOrigin != null && (
-          _allowedOrigins.contains(requestOrigin) ||
-          (_isDevAllowedOrigin(requestOrigin))
-      );
+      bool originAllowed =
+          requestOrigin != null &&
+          (_allowedOrigins.contains(requestOrigin) ||
+              (_isDevAllowedOrigin(requestOrigin)));
       effectiveOrigin = originAllowed ? requestOrigin : _allowedOrigins.first;
     } else if (_isProduction) {
       // Fail CLOSED in production when no allowlist is set: never echo an
@@ -296,6 +313,7 @@ Handler _debugMiddleware(Handler handler) {
     _loggingReady; // triggers lazy init of the logging listener on first request
     _cacheReady; // triggers DragonflyDB init on first request
     _envReady; // triggers env print on first request if startup didn't fire it
+    _schedulerReady; // triggers scheduler cron registration on first request
     _logger.fine('${context.request.method.value} ${context.request.uri.path}');
     return handler(context);
   };
