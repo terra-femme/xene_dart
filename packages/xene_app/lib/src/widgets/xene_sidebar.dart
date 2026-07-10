@@ -312,8 +312,10 @@ class _XeneSidebarState extends ConsumerState<XeneSidebar>
             0.0,
             double.infinity,
           );
-          final sidebarContentWidth = (sidebarWidth - sidebarPadding * 2)
-              .clamp(0.0, double.infinity);
+          final sidebarContentWidth = (sidebarWidth - sidebarPadding * 2).clamp(
+            0.0,
+            double.infinity,
+          );
           const presetLabelReserve = 28.0;
           // Authored sidebar cycle height. Keep this independent from shared
           // metrics so global density changes cannot move the logo/articles.
@@ -458,6 +460,22 @@ class _ArticlesSliderState extends State<_ArticlesSlider> {
     _startTimer();
   }
 
+  @override
+  void didUpdateWidget(covariant _ArticlesSlider oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Re-evaluate the timer when the inputs to its gate change (orientation,
+    // reduce-motion, article count). Portrait cancels; landscape (re)starts.
+    if (oldWidget.isLandscape != widget.isLandscape ||
+        oldWidget.reduceMotion != widget.reduceMotion ||
+        oldWidget.articles.length != widget.articles.length) {
+      if (widget.isLandscape) {
+        _startTimer();
+      } else {
+        _timer?.cancel();
+      }
+    }
+  }
+
   Future<void> _openArticle(String url) async {
     if (url.isEmpty) return;
     final uri = Uri.tryParse(url);
@@ -469,6 +487,10 @@ class _ArticlesSliderState extends State<_ArticlesSlider> {
     _timer?.cancel();
     if (widget.articles.length <= 1) return;
     if (widget.reduceMotion) return;
+    // Invariant: portrait stays still. The articles carousel only auto-advances
+    // in landscape (matches the vertical auto-crawl gate). Manual swipe still
+    // works in portrait.
+    if (!widget.isLandscape) return;
     _timer = Timer.periodic(const Duration(seconds: 5), (timer) {
       if (!mounted || !_pageController.hasClients) return;
       _currentPage = (_currentPage + 1) % widget.articles.length;
