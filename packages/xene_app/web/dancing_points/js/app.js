@@ -1,9 +1,11 @@
-// Wires UI -> AudioEngine -> Scene. Runs the render loop.
+// @ts-check
+// Wires UI -> StemEngine -> Scene. Runs the render loop.
 (function () {
   'use strict';
 
-  const $ = (id) => document.getElementById(id);
-  const LS = 'dancingPoints.v1';
+  /** @param {string} id */
+  const $ = (id) => /** @type {any} */ (document.getElementById(id));
+  const LS = 'dancingPoints.v2'; // v2: stem sources (was v1 band presets)
 
   // ---- color presets (minimal mono first) ----
   const COLORS = [
@@ -19,41 +21,40 @@
     { name: 'Shards', desc: 'glitch displace' },
   ];
 
-  // ---- log frequency mapping for edge sliders (0..1000 -> 20..20000 Hz) ----
-  const sliderToHz = (s) => Math.round(20 * Math.pow(1000, s / 1000));
-  const hzToSlider = (hz) => Math.round(1000 * Math.log(hz / 20) / Math.log(1000));
-  const fmtHz = (hz) => hz >= 1000 ? (hz / 1000).toFixed(hz >= 10000 ? 0 : 1) + 'k' : hz + ' Hz';
+  /** @type {Record<string, {label:string, stem:string, type:string, lo?:number, hi?:number}>} */
+  const SOURCES = /** @type {any} */ (window).SOURCES;
+
+  /** @param {number} s */
   const fmtTime = (s) => {
     if (!isFinite(s)) s = 0;
     const m = Math.floor(s / 60), ss = Math.floor(s % 60);
     return m + ':' + String(ss).padStart(2, '0');
   };
 
-  const audioEl = $('audio');
-  const engine = new AudioEngine(audioEl);
+  const engine = new (/** @type {any} */ (window).StemEngine)();
   const scene = createScene($('gl'));
 
-  // ---- xene additions: short-clip cap + haptics (the accessibility core) ----
-  const CLIP_SECONDS = 30;        // cap uploaded-clip playback (modest, in-session)
-  let clipCap = true;             // only uploads are capped; SC sources (later) won't be
+  // ---- xene: haptics (the accessibility core). Full-length playback, no cap. ----
+  const capDuration = () => engine.duration || 0;
+
   // Native bridge: inside the Flutter WebView, XeneHaptics routes beats to
   // Flutter's HapticFeedback (works on iOS, where navigator.vibrate is ignored).
-  const hapticBridge = !!(window.XeneHaptics && window.XeneHaptics.postMessage);
+  const XH = /** @type {any} */ (window).XeneHaptics;
+  const hapticBridge = !!(XH && XH.postMessage);
+  /** @param {number} level */
   function fireHaptic(level) {
     if (hapticBridge) {
-      window.XeneHaptics.postMessage(
-        level > 0.75 ? 'heavy' : level > 0.5 ? 'medium' : 'light'
-      );
+      XH.postMessage(level > 0.75 ? 'heavy' : level > 0.5 ? 'medium' : 'light');
     } else if (navigator.vibrate) {
       navigator.vibrate(Math.round(8 + Math.min(1, level) * 32)); // 8-40ms
     }
   }
   let hapticsOn = ('vibrate' in navigator) || hapticBridge;
-  let prevReactForHaptic = 0;     // for rising-edge beat detection
-  const HAPTIC_THRESHOLD = 0.45;  // react level that counts as a "hit"
+  let prevReactForHaptic = 0;
+  const HAPTIC_THRESHOLD = 0.45;
 
   const state = {
-    band: 'kick',
+    source: 'vocals',
     mode: 0,
     color: 0,
     warp: 0.8,
@@ -62,26 +63,23 @@
     rot: 0.18,
   };
 
-  // ---------- build band buttons ----------
+  // ---------- build source buttons (from stem-aware SOURCES) ----------
   const bandsEl = $('bands');
-  Object.entries(window.BANDS).forEach(([key, b]) => {
+  Object.entries(SOURCES).forEach(([key, def]) => {
     const el = document.createElement('button');
-    el.className = 'band' + (key === state.band ? ' active' : '');
+    el.className = 'band' + (key === state.source ? ' active' : '');
     el.dataset.key = key;
-    const short = b.label.split(' / ')[0];
-    el.innerHTML = `<div class="bn">${short}</div><div class="bf">${b.label.includes('/') ? b.label.split(' / ')[1] : ''}</div>`;
-    el.addEventListener('click', () => selectBand(key));
+    const sub = def.stem === 'master' ? 'mix' : def.stem;
+    el.innerHTML = `<div class="bn">${def.label}</div><div class="bf">${sub}</div>`;
+    el.addEventListener('click', () => selectSource(key));
     bandsEl.appendChild(el);
   });
 
-  function selectBand(key) {
-    state.band = key;
-    engine.setBand(key);
-    [...bandsEl.children].forEach(c => c.classList.toggle('active', c.dataset.key === key));
-    // sync edge sliders to the band preset
-    $('lo').value = hzToSlider(engine.lo);
-    $('hi').value = hzToSlider(engine.hi);
-    updateEdgeLabels();
+  /** @param {string} key */
+  function selectSource(key) {
+    state.source = key;
+    engine.setSource(key);
+    [...bandsEl.children].forEach((c) => c.classList.toggle('active', c.dataset.key === key));
     persist();
   }
 
@@ -117,42 +115,23 @@
     swEl.appendChild(el);
   });
 
-  // ---------- isolation edges ----------
-  function updateEdgeLabels() {
-    $('vLo').textContent = fmtHz(engine.lo);
-    $('vHi').textContent = fmtHz(engine.hi);
-    $('bandHz').textContent = `${fmtHz(engine.lo)} – ${fmtHz(engine.hi)}`;
-  }
-  $('lo').addEventListener('input', (e) => {
-    const lo = sliderToHz(+e.target.value);
-    engine.setEdges(lo, engine.hi);
-    $('lo').value = hzToSlider(engine.lo);
-    updateEdgeLabels(); persist();
-  });
-  $('hi').addEventListener('input', (e) => {
-    const hi = sliderToHz(+e.target.value);
-    engine.setEdges(engine.lo, hi);
-    $('hi').value = hzToSlider(engine.hi);
-    updateEdgeLabels(); persist();
-  });
-
   // ---------- reaction controls ----------
-  $('sens').addEventListener('input', (e) => {
+  $('sens').addEventListener('input', (/** @type {any} */ e) => {
     engine.sensitivity = +e.target.value / 100;
     $('vSens').textContent = engine.sensitivity.toFixed(2) + '×';
     persist();
   });
-  $('atk').addEventListener('input', (e) => {
+  $('atk').addEventListener('input', (/** @type {any} */ e) => {
     engine.attack = +e.target.value / 100;
     $('vAtk').textContent = engine.attack.toFixed(2);
     persist();
   });
-  $('rel').addEventListener('input', (e) => {
+  $('rel').addEventListener('input', (/** @type {any} */ e) => {
     engine.decay = 0.80 + (+e.target.value / 100) * 0.19; // 0.80..0.99
     $('vRel').textContent = engine.decay.toFixed(2);
     persist();
   });
-  $('warp').addEventListener('input', (e) => {
+  $('warp').addEventListener('input', (/** @type {any} */ e) => {
     state.warp = +e.target.value / 100;
     scene.setWarp(state.warp);
     $('vWarp').textContent = state.warp.toFixed(2);
@@ -160,46 +139,116 @@
   });
 
   // ---------- form controls ----------
-  let densTimer = null;
-  $('dens').addEventListener('input', (e) => {
+  /** @type {any} */ let densTimer = null;
+  $('dens').addEventListener('input', (/** @type {any} */ e) => {
     state.density = +e.target.value;
-    $('vDens').textContent = state.density;
+    $('vDens').textContent = String(state.density);
     clearTimeout(densTimer);
     densTimer = setTimeout(() => { scene.regen(state.density); }, 120);
     persist();
   });
-  $('size').addEventListener('input', (e) => {
+  $('size').addEventListener('input', (/** @type {any} */ e) => {
     state.size = +e.target.value / 100;
     scene.setSize(state.size);
     $('vSize').textContent = state.size.toFixed(2);
     persist();
   });
-  $('rot').addEventListener('input', (e) => {
+  $('rot').addEventListener('input', (/** @type {any} */ e) => {
     state.rot = (+e.target.value / 100) * 0.5;
     scene.setRotation(state.rot);
     $('vRot').textContent = state.rot.toFixed(2);
     persist();
   });
 
-  // ---------- file upload ----------
-  const drop = $('drop');
-  const fileInput = $('file');
-  drop.addEventListener('click', () => fileInput.click());
-  fileInput.addEventListener('change', (e) => { if (e.target.files[0]) loadFile(e.target.files[0]); });
-  ['dragover', 'dragenter'].forEach(ev => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('drag'); }));
-  ['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('drag'); }));
-  drop.addEventListener('drop', (e) => {
-    const f = e.dataTransfer.files[0];
-    if (f && f.type.startsWith('audio')) loadFile(f);
+  // ---------- stems: per-slot upload (incremental, ghost-track model) ----------
+  // You HEAR `original`; the four stems play silently for analysis only.
+  const SLOTS = [
+    { key: 'original', label: 'Original — you hear this' },
+    { key: 'vocals',   label: 'Vocals' },
+    { key: 'drums',    label: 'Drums' },
+    { key: 'bass',     label: 'Bass' },
+    { key: 'other',    label: 'Other' },
+  ];
+  const slotsEl = $('slots');
+  const slotInput = $('file');        // one hidden input, retargeted per slot click
+  let slotTarget = 'original';
+  /** @type {Record<string, any>} */
+  const slotEls = {};
+
+  SLOTS.forEach((s) => {
+    const el = document.createElement('button');
+    el.type = 'button';
+    el.className = 'slot' + (s.key === 'original' ? ' original' : '');
+    el.dataset.key = s.key;
+    el.innerHTML = `<div class="sl-label">${s.label}</div><div class="sl-file" id="slf-${s.key}">— empty —</div>`;
+    el.addEventListener('click', () => { slotTarget = s.key; slotInput.click(); });
+    ['dragover', 'dragenter'].forEach((ev) => el.addEventListener(ev, (/** @type {any} */ e) => { e.preventDefault(); el.classList.add('drag'); }));
+    ['dragleave', 'drop'].forEach((ev) => el.addEventListener(ev, (/** @type {any} */ e) => { e.preventDefault(); el.classList.remove('drag'); }));
+    el.addEventListener('drop', (/** @type {any} */ e) => {
+      if (e.dataTransfer && e.dataTransfer.files) handleDrop(e.dataTransfer.files, s.key);
+    });
+    slotsEl.appendChild(el);
+    slotEls[s.key] = el;
   });
 
-  function loadFile(file) {
-    const url = URL.createObjectURL(file);
-    audioEl.src = url;
-    $('fname').textContent = file.name;
-    $('status').textContent = 'loaded';
-    $('play').disabled = false;
-    localStorage.removeItem(LS + '.time');
+  slotInput.addEventListener('change', (/** @type {any} */ e) => {
+    const f = e.target.files && e.target.files[0];
+    if (f) assignFile(slotTarget, f);
+    slotInput.value = ''; // let the same file be re-picked later
+  });
+
+  /**
+   * Filename → slot key. StemRoller's `instrumental` is intentionally ignored
+   * (it's mix-minus-vocals, not a single source).
+   * @param {string} name
+   * @returns {string|null}
+   */
+  function classifyStem(name) {
+    const n = name.toLowerCase();
+    if (n.includes('instrumental')) return null;
+    if (n.includes('original') || n.includes('mixdown')) return 'original';
+    if (n.includes('vocal')) return 'vocals';
+    if (n.includes('drum'))  return 'drums';
+    if (n.includes('bass'))  return 'bass';
+    if (n.includes('other')) return 'other';
+    return null;
+  }
+
+  // Drop on a slot: a single file goes to THAT slot; multiple files auto-sort
+  // by filename (so you can still drag the whole folder in if you want).
+  /** @param {FileList} fileList @param {string} targetKey */
+  function handleDrop(fileList, targetKey) {
+    const files = [...fileList].filter((f) => f.type.startsWith('audio') || /\.(wav|mp3|m4a|ogg|flac)$/i.test(f.name));
+    if (files.length === 0) return;
+    if (files.length === 1) { assignFile(targetKey, files[0]); return; }
+    files.forEach((f) => { const k = classifyStem(f.name); if (k) assignFile(k, f); });
+  }
+
+  /** @param {string} key @param {File} file */
+  async function assignFile(key, file) {
+    const fileEl = $('slf-' + key);
+    if (fileEl) fileEl.textContent = 'decoding…';
+    try {
+      const buf = await file.arrayBuffer();
+      await engine.setSlot(key, buf);
+      if (fileEl) fileEl.textContent = file.name.replace(/\.[^.]+$/, '');
+      if (slotEls[key]) slotEls[key].classList.add('filled');
+      onStemsChanged();
+    } catch (err) {
+      console.error('[dancing-points] load failed', key, err);
+      if (fileEl) fileEl.textContent = 'error';
+    }
+  }
+
+  // Reflect current stems into transport + source availability.
+  function onStemsChanged() {
+    $('status').textContent = engine.hasStems ? engine.loadedKeys.length + ' loaded' : 'no stems';
+    $('play').disabled = !engine.hasStems;
+    $('dur').textContent = fmtTime(capDuration());
+    [...bandsEl.children].forEach((c) => {
+      c.classList.toggle('unavail', !engine.isSourceAvailable(c.dataset.key));
+    });
+    syncPlayIcon();
   }
 
   // ---------- transport ----------
@@ -208,34 +257,32 @@
   const scrub = $('scrub');
   let scrubbing = false;
 
+  function syncPlayIcon() {
+    playIco.innerHTML = engine.isPlaying
+      ? '<path d="M6 5h4v14H6zM14 5h4v14h-4z"/>'
+      : '<path d="M8 5v14l11-7z"/>';
+  }
+
   playBtn.addEventListener('click', () => {
-    engine.init();
-    if (engine.ctx && engine.ctx.state === 'suspended') engine.ctx.resume();
-    if (audioEl.paused) audioEl.play(); else audioEl.pause();
+    if (!engine.hasStems) return;
+    if (engine.isPlaying) engine.pause(); else engine.play();
+    syncPlayIcon();
   });
-  audioEl.addEventListener('play', () => { playIco.innerHTML = '<path d="M6 5h4v14H6zM14 5h4v14h-4z"/>'; });
-  audioEl.addEventListener('pause', () => { playIco.innerHTML = '<path d="M8 5v14l11-7z"/>'; });
-  audioEl.addEventListener('loadedmetadata', () => {
-    $('dur').textContent = fmtTime(audioEl.duration);
-    const t = parseFloat(localStorage.getItem(LS + '.time'));
-    if (!isNaN(t) && t < audioEl.duration) audioEl.currentTime = t;
+  scrub.addEventListener('input', () => {
+    scrubbing = true;
+    $('cur').textContent = fmtTime((+scrub.value / 1000) * capDuration());
   });
-  audioEl.addEventListener('timeupdate', () => {
-    // xene: cap the in-session upload clip at CLIP_SECONDS (modest, no storage).
-    if (clipCap && audioEl.currentTime >= CLIP_SECONDS) {
-      audioEl.pause();
-      audioEl.currentTime = 0;
-      return;
-    }
-    if (!scrubbing && audioEl.duration) {
-      const denom = clipCap ? Math.min(audioEl.duration, CLIP_SECONDS) : audioEl.duration;
-      scrub.value = (audioEl.currentTime / denom) * 1000;
-      $('cur').textContent = fmtTime(audioEl.currentTime);
-      localStorage.setItem(LS + '.time', audioEl.currentTime);
-    }
+  scrub.addEventListener('change', () => {
+    engine.seek((+scrub.value / 1000) * capDuration());
+    scrubbing = false;
+    syncPlayIcon();
   });
-  scrub.addEventListener('input', () => { scrubbing = true; $('cur').textContent = fmtTime((scrub.value / 1000) * (audioEl.duration || 0)); });
-  scrub.addEventListener('change', () => { if (audioEl.duration) audioEl.currentTime = (scrub.value / 1000) * audioEl.duration; scrubbing = false; });
+
+  engine.onEnded = () => {
+    scrub.value = '0';
+    $('cur').textContent = '0:00';
+    syncPlayIcon();
+  };
 
   // ---------- haptics toggle (xene) ----------
   const hapticBtn = $('haptics');
@@ -244,7 +291,6 @@
     $('hapticLabel').textContent = hapticsOn ? 'Haptics: ON' : 'Haptics: OFF';
   }
   if (!('vibrate' in navigator) && !hapticBridge) {
-    // iOS Safari / desktops with no vibration AND no native bridge: disable.
     hapticsOn = false;
     $('hapticMeta').textContent = 'unsupported here';
   } else if (hapticBridge) {
@@ -255,7 +301,7 @@
     if (!('vibrate' in navigator) && !hapticBridge) return;
     hapticsOn = !hapticsOn;
     syncHapticUi();
-    if (hapticsOn) fireHaptic(0.3); // confirmation buzz
+    if (hapticsOn) fireHaptic(0.3);
   });
 
   // ---------- panel toggle ----------
@@ -264,21 +310,24 @@
     p.classList.toggle('hidden');
     $('toggle').textContent = p.classList.contains('hidden') ? 'Show' : 'Hide';
   });
+  if (window.matchMedia('(max-width: 720px)').matches) {
+    $('panel').classList.add('hidden');
+    $('toggle').textContent = 'Show';
+  }
 
   // ---------- persistence ----------
   function persist() {
     const save = {
-      band: state.band, mode: state.mode, color: state.color, warp: state.warp,
+      source: state.source, mode: state.mode, color: state.color, warp: state.warp,
       density: state.density, size: state.size, rot: state.rot,
-      lo: engine.lo, hi: engine.hi,
       sens: engine.sensitivity, atk: engine.attack, dec: engine.decay,
     };
     localStorage.setItem(LS, JSON.stringify(save));
   }
   function restore() {
-    let s; try { s = JSON.parse(localStorage.getItem(LS)); } catch (e) { s = null; }
-    if (!s) { selectBand(state.band); updateEdgeLabels(); return; }
-    state.band = s.band || 'kick';
+    let s; try { s = JSON.parse(localStorage.getItem(LS) || 'null'); } catch (e) { s = null; }
+    if (!s) { selectSource(state.source); return; }
+    state.source = SOURCES[s.source] ? s.source : 'vocals';
     state.mode = s.mode || 0;
     state.color = s.color || 0;
     state.warp = s.warp ?? 0.8;
@@ -289,9 +338,7 @@
     engine.attack = s.atk ?? 0.6;
     engine.decay = s.dec ?? 0.90;
 
-    // apply to engine + scene
-    engine.setBand(state.band);
-    if (s.lo && s.hi) engine.setEdges(s.lo, s.hi);
+    engine.setSource(state.source);
     scene.setMode(state.mode);
     scene.setColors(COLORS[state.color].base, COLORS[state.color].hot);
     scene.setWarp(state.warp);
@@ -299,40 +346,44 @@
     scene.setRotation(state.rot);
     scene.regen(state.density);
 
-    // sync UI
-    [...bandsEl.children].forEach(c => c.classList.toggle('active', c.dataset.key === state.band));
+    [...bandsEl.children].forEach((c) => c.classList.toggle('active', c.dataset.key === state.source));
     [...modesEl.children].forEach((c, j) => c.classList.toggle('active', j === state.mode));
     [...swEl.children].forEach((c, j) => c.classList.toggle('active', j === state.color));
     $('vCol').textContent = COLORS[state.color].name;
-    $('lo').value = hzToSlider(engine.lo);
-    $('hi').value = hzToSlider(engine.hi);
     $('sens').value = engine.sensitivity * 100; $('vSens').textContent = engine.sensitivity.toFixed(2) + '×';
     $('atk').value = engine.attack * 100; $('vAtk').textContent = engine.attack.toFixed(2);
     $('rel').value = Math.round((engine.decay - 0.80) / 0.19 * 100); $('vRel').textContent = engine.decay.toFixed(2);
     $('warp').value = state.warp * 100; $('vWarp').textContent = state.warp.toFixed(2);
-    $('dens').value = state.density; $('vDens').textContent = state.density;
+    $('dens').value = state.density; $('vDens').textContent = String(state.density);
     $('size').value = state.size * 100; $('vSize').textContent = state.size.toFixed(2);
     $('rot').value = (state.rot / 0.5) * 100; $('vRot').textContent = state.rot.toFixed(2);
-    updateEdgeLabels();
   }
   restore();
+  onStemsChanged(); // initial: nothing loaded → sources dimmed, play disabled
 
   // ---------- render loop ----------
   const mLevel = $('mLevel'), mReact = $('mReact');
   let last = performance.now();
 
+  /** @param {number} now */
   function tick(now) {
     const dt = Math.min(0.05, (now - last) / 1000) || 0.016;
     last = now;
 
     engine.update();
-    const playing = !audioEl.paused && !audioEl.ended;
+    const playing = engine.isPlaying;
     scene.setIdle(playing ? 0 : 1);
-    scene.update(dt, engine.react, engine.reactSlow);
+    scene.update(dt, engine.react, engine.reactSlow, engine.signals, engine.keyEnergies);
 
-    // xene: fire a haptic pulse on each RISING beat in the isolated band.
-    // The band-isolated transient IS the beat, so this maps the same signal
-    // that warps the sphere onto touch — the accessibility payload.
+    // transport position UI (full-length, no cap)
+    if (engine.hasStems && !scrubbing) {
+      const cur = engine.currentTime;
+      const denom = capDuration() || 1;
+      scrub.value = String(Math.min(1000, (cur / denom) * 1000));
+      $('cur').textContent = fmtTime(cur);
+    }
+
+    // fire a haptic pulse on each RISING beat in the isolated source
     if (hapticsOn && playing) {
       if (engine.react > HAPTIC_THRESHOLD && prevReactForHaptic <= HAPTIC_THRESHOLD) {
         fireHaptic(Math.min(1, engine.react));
@@ -345,18 +396,16 @@
     mReact.style.width = Math.min(100, engine.react * 100) + '%';
   }
 
-  // Drive with requestAnimationFrame, but fall back to a timer if RAF stalls
+  // Drive with requestAnimationFrame, fall back to a timer if RAF stalls
   // (some embedded/backgrounded iframes throttle RAF to zero).
   let rafCount = 0;
+  /** @param {number} now */
   function rafLoop(now) { rafCount++; tick(now); requestAnimationFrame(rafLoop); }
   requestAnimationFrame(rafLoop);
 
   tick(performance.now()); // immediate first paint
 
   setTimeout(() => {
-    if (rafCount < 2) {
-      // RAF isn't ticking — run on an interval instead.
-      setInterval(() => tick(performance.now()), 16);
-    }
+    if (rafCount < 2) setInterval(() => tick(performance.now()), 16);
   }, 250);
 })();

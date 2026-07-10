@@ -1,0 +1,24 @@
+{
+  // Type-checks the buildless browser scripts in ./js WITHOUT a build step.
+  // The browser/WebView still loads the raw .js directly; this only powers
+  // editor IntelliSense and `tsc --noEmit` in CI. JSDoc annotations + the
+  // `// @ts-check` pragma at the top of each file opt a file into checking.
+  "compilerOptions": {
+    // Opt-in per file: only files with a `// @ts-check` pragma are checked
+    // (our audio-engine.js + app.js). The vendored scene.js / shaders.js —
+    // which rely on the CDN `THREE` global — are left alone.
+    "checkJs": false,
+    // Pragmatic for a buildless DOM page: catch real type errors (wrong args,
+    // typos on the Web Audio node graph) without forcing a non-null assertion
+    // on every getElementById. Not full `strict` on purpose.
+    "strict": false,
+    "noImplicitReturns": true,
+    "noEmit": true,
+    "module": "ESNext",
+    "target": "ES2020",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2020", "DOM", "DOM.Iterable", "WebWorker"],
+    "types": []
+  },
+  "include": ["js/**/*.js"]
+}
