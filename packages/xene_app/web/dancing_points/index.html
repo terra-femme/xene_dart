@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Dancing Points — Audio Reactive Sphere</title>
+<title>Xene Resonance Body</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&display=swap" rel="stylesheet" />
@@ -87,6 +87,22 @@
   .drop .ico { font-size: 11px; letter-spacing: 0.2em; color: var(--accent); }
   .drop .fn { margin-top: 8px; font-size: 11px; color: var(--fg); word-break: break-all; }
   .drop .hint { margin-top: 4px; font-size: 9.5px; letter-spacing: 0.1em; color: var(--dim-2); }
+
+  /* stem slots (one file each; add incrementally) */
+  .slots { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .slot {
+    border: 1px dashed var(--line); border-radius: 8px; padding: 10px 8px;
+    text-align: center; cursor: pointer; font-family: var(--mono); color: var(--fg);
+    background: transparent; transition: border-color 0.2s, background 0.2s;
+  }
+  .slot:hover, .slot.drag { border-color: var(--accent); background: rgba(255,255,255,0.03); }
+  .slot.filled { border-style: solid; border-color: rgba(160,210,235,0.4); }
+  .slot.original { grid-column: 1 / -1; }
+  .slot .sl-label { font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); }
+  .slot .sl-file { margin-top: 5px; font-size: 9.5px; color: var(--dim); word-break: break-all; }
+
+  /* a reactive source whose stem isn't loaded yet */
+  .band.unavail { opacity: 0.32; }
 
   .transport { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
   .play {
@@ -185,8 +201,8 @@
   <div id="stage"><canvas id="gl"></canvas></div>
 
   <div class="brand">
-    <h1>Dancing Points</h1>
-    <p>Audio-reactive particle sphere</p>
+    <h1>Resonance Body</h1>
+    <p>Stem-reactive organism draft</p>
   </div>
 
   <button class="toggle" id="toggle">Hide</button>
@@ -197,12 +213,8 @@
       <!-- SOURCE -->
       <div class="sec">
         <div class="sec-h"><span>Source</span><span class="meta" id="status">no file</span></div>
-        <label class="drop" id="drop">
-          <div class="ico">▲ UPLOAD SONG</div>
-          <div class="fn" id="fname">drop an audio file</div>
-          <div class="hint">mp3 · wav · m4a · ogg</div>
-          <input type="file" id="file" accept="audio/*" hidden />
-        </label>
+        <div class="slots" id="slots"></div>
+        <input type="file" id="file" accept="audio/*" hidden />
         <div class="transport">
           <button class="play" id="play" disabled aria-label="play">
             <svg id="playIco" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
@@ -221,19 +233,6 @@
         <div class="meters">
           <div class="meter-row"><label>Band</label><div class="bar"><i id="mLevel"></i></div></div>
           <div class="meter-row"><label>React</label><div class="bar react"><i id="mReact"></i></div></div>
-        </div>
-      </div>
-
-      <!-- ISOLATION -->
-      <div class="sec">
-        <div class="sec-h"><span>Isolation</span><span class="meta" id="bandHz">— Hz</span></div>
-        <div class="ctrl">
-          <div class="ctrl-h"><span class="l">Low edge</span><span class="v" id="vLo">35 Hz</span></div>
-          <input type="range" class="sl" id="lo" min="0" max="1000" value="0" />
-        </div>
-        <div class="ctrl">
-          <div class="ctrl-h"><span class="l">High edge</span><span class="v" id="vHi">110 Hz</span></div>
-          <input type="range" class="sl" id="hi" min="0" max="1000" value="0" />
         </div>
       </div>
 
@@ -273,11 +272,11 @@
         <div class="modes" id="modes"></div>
 
         <div class="ctrl" style="margin-top:16px;">
-          <div class="ctrl-h"><span class="l">Point density</span><span class="v" id="vDens">6000</span></div>
+          <div class="ctrl-h"><span class="l">Network density</span><span class="v" id="vDens">6000</span></div>
           <input type="range" class="sl" id="dens" min="1000" max="20000" step="1000" value="6000" />
         </div>
         <div class="ctrl">
-          <div class="ctrl-h"><span class="l">Point size</span><span class="v" id="vSize">0.70</span></div>
+          <div class="ctrl-h"><span class="l">Organism size</span><span class="v" id="vSize">0.70</span></div>
           <input type="range" class="sl" id="size" min="20" max="220" value="70" />
         </div>
         <div class="ctrl">
@@ -291,20 +290,20 @@
       </div>
 
       <div class="foot">
-        Upload a track, pick the part to isolate, then tune the band edges until the
-        React meter only fires on that sound. The sphere holds calm, warps on each
-        hit, and drifts back.
+        Load the Original (what you hear) plus the separated stems — they play in
+        perfect sync. The organism reads all loaded stems at once: bass swells
+        the body, drums spark surface nodes, melody moves the outer low-poly
+        cage, and vocals animate the inner neural traces. Pick a Reactive
+        Source to inspect one stem's meter and haptics.
       </div>
 
     </div>
   </aside>
 
-  <audio id="audio" crossorigin="anonymous"></audio>
-
   <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
-  <script src="js/shaders.js"></script>
-  <script src="js/audio-engine.js"></script>
-  <script src="js/scene.js"></script>
-  <script src="js/app.js"></script>
+  <script src="js/shaders.js?v=noiseball-3"></script>
+  <script src="js/audio-engine.js?v=noiseball-3"></script>
+  <script src="js/scene.js?v=noiseball-3"></script>
+  <script src="js/app.js?v=noiseball-3"></script>
 </body>
 </html>

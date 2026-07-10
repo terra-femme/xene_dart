@@ -133,3 +133,168 @@ void main(){
   gl_FragColor = vec4(col, a);
 }
 `;
+
+window.RESONANCE_BLOB_VERT = `
+precision highp float;
+uniform float uTime;
+uniform float uBass;
+uniform float uDrums;
+uniform float uVocals;
+uniform float uMelody;
+uniform float uWarp;
+uniform float uSize;
+uniform float uIdle;
+uniform int uMode;
+varying vec3 vNormalW;
+varying vec3 vPosition;
+varying vec3 vPosW;
+varying float vDisplacement;
+varying float vPulse;
+
+void main(){
+  float stemPulse = clamp(uBass * 0.55 + uDrums * 0.28 + uMelody * 0.18 + uVocals * 0.14, 0.0, 1.0);
+  float morphSpeed = 0.92 + uMelody * 0.30 + uDrums * 0.16;
+  float t = uTime * morphSpeed;
+
+  float x = position.x;
+  float y = position.y;
+  float z = position.z;
+  float noise1 = sin(x * 2.0 + t * 0.8) * cos(y * 2.0 + t * 0.6) * sin(z * 2.0);
+  float noise2 = cos(x * 3.0 - t * 0.5) * sin(y * 3.0 + t * 0.4) * 0.5;
+  float noise3 = sin(x * 5.0 + y * 3.0 + t * 0.3) * 0.25;
+  float breath = sin(uTime * 0.75 + y * 1.35) * 0.5 + 0.5;
+  float displacement = 0.18 + uWarp * 0.08 + stemPulse * 0.10;
+  float disp = 1.0 + (noise1 + noise2 + noise3) * displacement;
+  disp += uBass * 0.075 + uIdle * 0.018 * breath;
+  disp += uDrums * 0.026 * sin(length(position.xy) * 9.0 - uTime * 5.5);
+
+  vec3 p = position * disp * uSize;
+  p.y *= 0.96 + sin(t * 0.28 + x * 1.35) * 0.025;
+  p.x *= 1.0 + cos(t * 0.22 + y * 1.1) * 0.018;
+
+  vec4 world = modelMatrix * vec4(p, 1.0);
+  vPosition = position;
+  vPosW = world.xyz;
+  vNormalW = normalize(mat3(modelMatrix) * normalize(normal + position * (disp - 1.0) * 0.55));
+  vDisplacement = disp;
+  vPulse = stemPulse;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+}
+`;
+
+window.RESONANCE_BLOB_FRAG = `
+precision highp float;
+uniform vec3 uColor1;
+uniform vec3 uColor2;
+uniform vec3 uColor3;
+uniform float uTime;
+uniform float uBass;
+uniform float uDrums;
+uniform float uVocals;
+uniform float uMelody;
+varying vec3 vNormalW;
+varying vec3 vPosition;
+varying vec3 vPosW;
+varying float vDisplacement;
+varying float vPulse;
+
+vec3 bassHash3(vec3 p3) {
+  p3 = fract(p3 * vec3(0.1031, 0.11369, 0.13787));
+  p3 += dot(p3, p3.yxz + 19.19);
+  return -1.0 + 2.0 * fract(vec3(
+    (p3.x + p3.y) * p3.z,
+    (p3.x + p3.z) * p3.y,
+    (p3.y + p3.z) * p3.x
+  ));
+}
+
+float bassPerlin(vec3 p) {
+  vec3 pi = floor(p);
+  vec3 pf = p - pi;
+  vec3 w = pf * pf * (3.0 - 2.0 * pf);
+
+  return mix(
+    mix(
+      mix(
+        dot(pf - vec3(0.0, 0.0, 0.0), bassHash3(pi + vec3(0.0, 0.0, 0.0))),
+        dot(pf - vec3(1.0, 0.0, 0.0), bassHash3(pi + vec3(1.0, 0.0, 0.0))),
+        w.x),
+      mix(
+        dot(pf - vec3(0.0, 0.0, 1.0), bassHash3(pi + vec3(0.0, 0.0, 1.0))),
+        dot(pf - vec3(1.0, 0.0, 1.0), bassHash3(pi + vec3(1.0, 0.0, 1.0))),
+        w.x),
+      w.z),
+    mix(
+      mix(
+        dot(pf - vec3(0.0, 1.0, 0.0), bassHash3(pi + vec3(0.0, 1.0, 0.0))),
+        dot(pf - vec3(1.0, 1.0, 0.0), bassHash3(pi + vec3(1.0, 1.0, 0.0))),
+        w.x),
+      mix(
+        dot(pf - vec3(0.0, 1.0, 1.0), bassHash3(pi + vec3(0.0, 1.0, 1.0))),
+        dot(pf - vec3(1.0, 1.0, 1.0), bassHash3(pi + vec3(1.0, 1.0, 1.0))),
+        w.x),
+      w.z),
+    w.y);
+}
+
+float bassNoiseAbs(vec3 p) {
+  float f = 0.0;
+  p *= 3.0;
+  f += 1.0000 * abs(bassPerlin(p)); p *= 2.0;
+  f += 0.5000 * abs(bassPerlin(p)); p *= 2.6;
+  f += 0.2500 * abs(bassPerlin(p)); p *= 3.2;
+  f += 0.1250 * abs(bassPerlin(p)); p *= 3.8;
+  f += 0.0625 * abs(bassPerlin(p));
+  return f;
+}
+
+void main(){
+  vec3 N = normalize(vNormalW);
+  vec3 V = normalize(cameraPosition - vPosW);
+  float t = uTime * 0.3;
+  float fresnel = pow(1.0 - max(dot(N, V), 0.0), 2.0);
+  float band1 = sin(t + vPosition.y * 2.0 + uBass * 0.9) * 0.5 + 0.5;
+  float band2 = cos(t * 0.7 + vPosition.x * 1.5 + uMelody * 1.1) * 0.5 + 0.5;
+  float innerBand = sin(vPosition.x * 3.7 + vPosition.y * 2.4 + vPosition.z * 1.6 + t * 1.8) * 0.5 + 0.5;
+  float innerNoise = bassNoiseAbs(vPosition * 2.4 + vec3(t * 1.1, -t * 0.7, t * 0.45));
+  float innerGlow = smoothstep(0.18, 0.68, innerNoise + innerBand * 0.42);
+  float bassMotion = sin(uTime * 0.10) * cos(uTime * 0.10) * 5.0;
+  vec3 bassDomain = vec3(
+    vPosition.xy * vec2(2.2, 1.65) + N.xy * 0.75,
+    bassMotion + vPosition.z * 2.4
+  );
+  float electricField = 0.88 * bassNoiseAbs(bassDomain);
+  float electricRadius = length(vPosition.xy * vec2(1.0, 0.82)) - 0.36;
+  float electricMass = clamp(1.0 - (electricField + electricRadius), 0.0, 1.0);
+  float electricBands = electricMass;
+  for(int i = 0; i < 7; i++){
+    float level = 0.42 + float(i) * 0.085;
+    electricBands -= step(level, electricBands) * 0.055;
+  }
+  float bassCurrent = clamp(electricBands + 0.72 - 2.55 * electricField, 0.0, 1.0);
+  float bassDrive = smoothstep(0.03, 0.88, uBass) * 0.92 + 0.18;
+
+  vec3 col = mix(uColor1, uColor2, band1);
+  col = mix(col, uColor3, band2 * (0.46 + uVocals * 0.14));
+  col = mix(col, col * 1.30 + uColor2 * 0.20, innerGlow * 0.30);
+  vec3 bassBlue = vec3(0.35, 0.52, 0.82);
+  vec3 bassIce = vec3(0.82, 0.93, 1.0);
+  vec3 innerViolet = vec3(0.58, 0.42, 1.00);
+  col = mix(col, bassBlue, bassCurrent * bassDrive * 0.34);
+
+  vec3 lightDir = normalize(vec3(1.0, 1.0, 1.0));
+  float diffuse = max(dot(N, lightDir), 0.0);
+  float specular = pow(max(dot(reflect(-lightDir, N), V), 0.0), 32.0);
+  float glass = 0.70 + vDisplacement * 0.13 + vPulse * 0.10;
+  vec3 rimTint = mix(uColor3, uColor2, band1);
+  vec3 specTint = mix(vec3(0.82, 0.90, 1.0), uColor3, 0.42);
+
+  col *= glass * (0.84 + diffuse * 0.12);
+  col += innerViolet * innerGlow * (0.13 + bassDrive * 0.20);
+  col += bassIce * bassCurrent * bassDrive * (0.36 + fresnel * 0.22);
+  col += rimTint * fresnel * (0.14 + uVocals * 0.13);
+  col += specTint * specular * (0.08 + uDrums * 0.12 + uBass * 0.08);
+  col = pow(col, vec3(1.02));
+  gl_FragColor = vec4(col, 1.0);
+}
+`;

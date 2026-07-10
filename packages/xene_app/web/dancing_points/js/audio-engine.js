@@ -1,153 +1,377 @@
-// Audio engine: load a song, play it, and isolate one frequency band cleanly so
-// the visual only reacts to (e.g.) the kick and nothing else.
+// @ts-check
+// Stem engine — "ghost track" model.
 //
-// Isolation strategy: a 4-pole band-pass built from two high-pass + two low-pass
-// biquads in series (24 dB/oct skirts) feeding a dedicated analyser. The main
-// audio still plays full-range through a separate gain branch, so you HEAR the
-// whole song but the points only SEE the isolated band.
+// The user HEARS the real `original` mix (stems never reconstruct it cleanly —
+// separation loses phase/spectral detail). The four stems (vocals/drums/bass/
+// other) play SILENTLY, purely as analysis sources, in sample-accurate sync with
+// the original. The Reactive Source selector reads the correct stem's analyser,
+// so "Vocals" reacts to the actual vocal stem while your ears hear the pristine
+// master.
+//
+// Sync: every slot is decoded to an AudioBuffer and played via an
+// AudioBufferSourceNode; all sources start() at ONE shared clock time, so they
+// share the Web Audio hardware sample clock and never drift. (A pool of <audio>
+// elements can't do this — each runs its own clock and slides apart.)
+//
+// Graph (analysers are stable; source nodes are recreated on play/seek):
+//
+//   original → master → destination        (AUDIBLE)  ─→ masterAnalyser  ("Full Mix")
+//   vocals   → vocalsAnalyser               (silent)
+//   bass     → bassAnalyser                 (silent)
+//   other    → otherAnalyser                (silent)
+//   drums    → drumsAnalyser                (silent)
+//   drums    → hp→hp→lp→lp → drumBandAnalyser (silent, kick/snare/hat sub-bands)
+//
+// If `original` is absent, the stems are routed to master too (audible fallback).
 
-window.BANDS = {
-  kick:  { label: 'Kick / Sub',    lo: 35,   hi: 110,   type: 'perc' },
-  bass:  { label: 'Bassline',      lo: 60,   hi: 250,   type: 'sust' },
-  snare: { label: 'Snare / Clap',  lo: 170,  hi: 2200,  type: 'perc' },
-  vocal: { label: 'Vocals / Mid',  lo: 300,  hi: 3400,  type: 'sust' },
-  hat:   { label: 'Hi-hat / Cym',  lo: 7000, hi: 16000, type: 'perc' },
-  full:  { label: 'Full Mix',      lo: 20,   hi: 20000, type: 'sust' },
+/**
+ * @typedef {'vocals'|'drums'|'bass'|'other'} StemKey
+ * @typedef {'original'|StemKey} SlotKey
+ * @typedef {'perc'|'sust'} ReactType
+ * @typedef {Object} SourceDef
+ * @property {string}  label
+ * @property {StemKey|'master'} stem   the stem this source listens to
+ * @property {ReactType} type
+ */
+
+/** @type {StemKey[]} */
+const STEM_KEYS = ['vocals', 'drums', 'bass', 'other'];
+/** @type {SlotKey[]} */
+const SLOT_KEYS = ['original', 'vocals', 'drums', 'bass', 'other'];
+
+// One reactive source per ISOLATED stem — nothing that isn't its own file.
+// (Drums is the whole drum stem; no fake "snare / hi-hat" sub-bands.)
+/** @type {Record<string, SourceDef>} */
+const SOURCES = {
+  vocals: { label: 'Vocals',   stem: 'vocals', type: 'sust' },
+  drums:  { label: 'Drums',    stem: 'drums',  type: 'perc' },
+  bass:   { label: 'Bass',     stem: 'bass',   type: 'sust' },
+  other:  { label: 'Melody',   stem: 'other',  type: 'sust' },
+  full:   { label: 'Full Mix', stem: 'master', type: 'sust' },
 };
+/** @type {any} */ (window).SOURCES = SOURCES;
+/** @type {any} */ (window).SLOT_KEYS = SLOT_KEYS;
 
-class AudioEngine {
-  constructor(audioEl) {
-    this.audioEl = audioEl;
-    this.ctx = null;
-    this.ready = false;
+class StemEngine {
+  constructor() {
+    /** @type {AudioContext|null} */ this.ctx = null;
 
-    this.bandKey = 'kick';
-    this.bandType = 'perc';
-    this.lo = 35;
-    this.hi = 110;
+    // ---- node graph (built lazily) ----
+    /** @type {GainNode|null} */     this.master = null;
+    /** @type {AnalyserNode|null} */ this.masterAnalyser = null;
+    /** @type {Partial<Record<StemKey, AnalyserNode>>} */ this.stemAnalyser = {};
 
-    // tunables (driven by UI)
+    // ---- decoded audio, keyed by slot ----
+    /** @type {Partial<Record<SlotKey, AudioBuffer>>} */ this.buffers = {};
+    /** @type {number} */ this._duration = 0;
+
+    // ---- transport ----
+    /** @type {AudioBufferSourceNode[]} */ this._sources = [];
+    this._playing = false;
+    this._offset = 0;
+    this._startTime = 0;
+
+    // ---- analysis ----
+    /** @type {AnalyserNode|null} */ this._active = null;
+    this.buf = new Float32Array(1024);
+    this.sourceKey = 'vocals';
+    /** @type {ReactType} */ this.sourceType = 'sust';
+
+    // ---- tunables ----
     this.sensitivity = 1.6;
-    this.attack = 0.6;   // 0..1, rise smoothing
-    this.decay = 0.90;   // 0.80..0.99, fall coefficient
+    this.attack = 0.6;
+    this.decay = 0.90;
+    this.noiseGate = 0.0016;
 
-    // live state
+    // ---- live outputs ----
     this.prevLevel = 0;
     this.baseline = 0;
-    this.level = 0;      // raw band RMS (0..~1)
-    this.react = 0;      // fast envelope -> warp
-    this.reactSlow = 0;  // lingering envelope -> trails
-    this.peak = 0.0001;  // running peak for auto-gain
+    this.level = 0;
+    this.react = 0;
+    this.reactSlow = 0;
+    this.peak = 0.0001;
+    this.signals = {};
+    for (const key of Object.keys(SOURCES)) {
+      this.signals[key] = {
+        level: 0,
+        react: 0,
+        reactSlow: 0,
+        peak: 0.0001,
+        baseline: 0,
+        prevLevel: 0,
+      };
+    }
+
+    // ---- melodic spectrum → 88 piano-key energies (node network sections) ----
+    /** @type {Float32Array} */ this.keyEnergies = new Float32Array(88);
+    /** @type {AnalyserNode|null} */ this._melodyFreq = null;
+    /** @type {Uint8Array|null} */ this._freqData = null;
+    /** @type {Array<{start:number,end:number}>} */ this._keyBins = [];
+
+    /** @type {(() => void)|null} */ this.onEnded = null;
   }
 
-  // Must be called from a user gesture (first play).
-  init() {
+  /** @returns {SlotKey[]} */
+  get loadedKeys() { return /** @type {SlotKey[]} */ (Object.keys(this.buffers)); }
+  get hasStems() { return this.loadedKeys.length > 0; }
+  get duration() { return this._duration; }
+  get isPlaying() { return this._playing; }
+  get currentTime() {
+    if (!this.ctx) return this._offset;
+    const t = this._playing
+      ? this._offset + (this.ctx.currentTime - this._startTime)
+      : this._offset;
+    return Math.max(0, Math.min(this._duration, t));
+  }
+
+  _ensureGraph() {
     if (this.ctx) return;
-    const Ctx = window.AudioContext || window.webkitAudioContext;
-    this.ctx = new Ctx();
-    this.src = this.ctx.createMediaElementSource(this.audioEl);
+    const Ctor = window.AudioContext || /** @type {any} */ (window).webkitAudioContext;
+    const ctx = new Ctor();
+    this.ctx = ctx;
 
-    // audible branch — full range
-    this.masterGain = this.ctx.createGain();
-    this.masterGain.gain.value = 1.0;
-    this.src.connect(this.masterGain);
-    this.masterGain.connect(this.ctx.destination);
+    /** @param {AnalyserNode} a */
+    const cfg = (a) => { a.fftSize = 1024; a.smoothingTimeConstant = 0.0; return a; };
 
-    // analysis branch — steep band-pass (2x HP + 2x LP)
-    this.hp1 = this.ctx.createBiquadFilter(); this.hp1.type = 'highpass';
-    this.hp2 = this.ctx.createBiquadFilter(); this.hp2.type = 'highpass';
-    this.lp1 = this.ctx.createBiquadFilter(); this.lp1.type = 'lowpass';
-    this.lp2 = this.ctx.createBiquadFilter(); this.lp2.type = 'lowpass';
-    [this.hp1, this.hp2, this.lp1, this.lp2].forEach(f => { f.Q.value = 0.707; });
+    this.master = ctx.createGain();
+    this.master.gain.value = 1.0;
+    this.master.connect(ctx.destination);
+    this.masterAnalyser = cfg(ctx.createAnalyser());
+    this.master.connect(this.masterAnalyser);
 
-    this.analyser = this.ctx.createAnalyser();
-    this.analyser.fftSize = 1024;
-    this.analyser.smoothingTimeConstant = 0.0; // we do our own smoothing
-    this.buf = new Float32Array(this.analyser.fftSize);
+    for (const key of STEM_KEYS) this.stemAnalyser[key] = cfg(ctx.createAnalyser());
 
-    this.src.connect(this.hp1);
-    this.hp1.connect(this.hp2);
-    this.hp2.connect(this.lp1);
-    this.lp1.connect(this.lp2);
-    this.lp2.connect(this.analyser);
+    // High-res spectrum on the melodic ('other') stem → 88 piano-key bands.
+    const mf = ctx.createAnalyser();
+    mf.fftSize = 8192;
+    mf.smoothingTimeConstant = 0.6;
+    this._melodyFreq = mf;
+    this._freqData = new Uint8Array(mf.frequencyBinCount);
+    this._keyBins = this._computeKeyBins(ctx.sampleRate, mf.fftSize);
 
-    this.applyBand();
-    this.ready = true;
+    this.buf = new Float32Array(1024);
+    this.setSource(this.sourceKey);
   }
 
-  setBand(key) {
-    this.bandKey = key;
-    const b = window.BANDS[key];
-    this.bandType = b.type;
-    this.lo = b.lo;
-    this.hi = b.hi;
+  /**
+   * FFT bin ranges for the 88 equal-tempered piano keys (A0=27.5Hz … C8).
+   * @param {number} sampleRate @param {number} fftSize
+   */
+  _computeKeyBins(sampleRate, fftSize) {
+    const binHz = sampleRate / fftSize;
+    const bins = [];
+    for (let k = 0; k < 88; k++) {
+      const f = 27.5 * Math.pow(2, k / 12);                 // key fundamental
+      const start = Math.max(0, Math.floor((f / Math.pow(2, 1 / 24)) / binHz));
+      const end = Math.max(start, Math.ceil((f * Math.pow(2, 1 / 24)) / binHz));
+      bins.push({ start, end });
+    }
+    return bins;
+  }
+
+  /**
+   * Decode + install ONE slot's file. Incremental — other slots are kept.
+   * If playing, re-locks all sources in sync so the new one joins cleanly.
+   * @param {SlotKey} key
+   * @param {ArrayBuffer} data
+   * @returns {Promise<void>}
+   */
+  async setSlot(key, data) {
+    this._ensureGraph();
+    const ctx = this.ctx;
+    if (!ctx) throw new Error('AudioContext unavailable');
+    const buffer = await ctx.decodeAudioData(data.slice(0)); // slice: decode detaches
+    this.buffers[key] = buffer;
+    this._recomputeDuration();
+    if (this._playing) { this._offset = this.currentTime; this._startPlayback(); }
+  }
+
+  _recomputeDuration() {
+    let d = 0;
+    for (const k of this.loadedKeys) {
+      const b = this.buffers[k];
+      if (b) d = Math.max(d, b.duration);
+    }
+    this._duration = d;
+  }
+
+  /** Which reactive sources currently have their stem loaded. */
+  /** @param {string} sourceKey */
+  isSourceAvailable(sourceKey) {
+    const def = SOURCES[sourceKey];
+    if (!def) return false;
+    if (def.stem === 'master') return !!this.buffers.original || this.hasStems;
+    return !!this.buffers[def.stem];
+  }
+
+  _startPlayback() {
+    const ctx = this.ctx;
+    if (!ctx || !this.hasStems || !this.master) return;
+    this._stopSources();
+
+    const hasOriginal = !!this.buffers.original;
+    const when = ctx.currentTime + 0.03; // shared lead → all start on the same tick
+    /** @type {AudioBufferSourceNode[]} */
+    const sources = [];
+    for (const key of this.loadedKeys) {
+      const buffer = this.buffers[key];
+      if (!buffer) continue;
+      const src = ctx.createBufferSource();
+      src.buffer = buffer;
+
+      if (key === 'original') {
+        src.connect(this.master);                 // audible
+      } else {
+        const a = this.stemAnalyser[key];
+        if (a) src.connect(a);                     // silent analysis
+        if (key === 'other' && this._melodyFreq) src.connect(this._melodyFreq);
+        if (!hasOriginal) src.connect(this.master); // fallback: make stems audible
+      }
+      src.start(when, this._offset);
+      sources.push(src);
+    }
+    if (sources[0]) {
+      sources[0].onended = () => {
+        this._playing = false;
+        this._offset = 0;
+        if (this.onEnded) this.onEnded();
+      };
+    }
+    this._sources = sources;
+    this._startTime = when;
+    this._playing = true;
+  }
+
+  _stopSources() {
+    for (const s of this._sources) {
+      try { s.onended = null; s.stop(); s.disconnect(); } catch (_e) { /* already stopped */ }
+    }
+    this._sources = [];
+  }
+
+  play() {
+    this._ensureGraph();
+    if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
+    if (this._playing) return;
+    this._startPlayback();
+  }
+
+  pause() {
+    if (!this._playing) return;
+    const pos = this.currentTime;
+    this._stopSources();
+    this._offset = pos;
+    this._playing = false;
+  }
+
+  /** @param {number} seconds */
+  seek(seconds) {
+    const t = Math.max(0, Math.min(this._duration || 0, seconds));
+    this._offset = t;
+    if (this._playing) this._startPlayback();
+  }
+
+  stop() {
+    this._stopSources();
+    this._offset = 0;
+    this._playing = false;
+  }
+
+  /** @param {string} key */
+  setSource(key) {
+    const def = SOURCES[key] || SOURCES.full;
+    this.sourceKey = key;
+    this.sourceType = def.type;
+
+    // Full Mix reads the audible original; every other source reads its own stem.
+    this._active = def.stem === 'master'
+      ? this.masterAnalyser
+      : this.stemAnalyser[/** @type {StemKey} */ (def.stem)] || null;
+
     this.peak = 0.0001;
     this.baseline = 0;
-    this.applyBand();
+    this.prevLevel = 0;
   }
 
-  // direct edge control (isolation fine-tune)
-  setEdges(lo, hi) {
-    this.lo = Math.max(20, Math.min(lo, hi - 5));
-    this.hi = Math.min(20000, Math.max(hi, this.lo + 5));
-    this.applyBand();
-  }
-
-  applyBand() {
-    if (!this.ctx) return;
-    const lo = this.lo, hi = this.hi;
-    this.hp1.frequency.value = lo;
-    this.hp2.frequency.value = lo;
-    this.lp1.frequency.value = hi;
-    this.lp2.frequency.value = hi;
-  }
-
-  // Per-frame analysis -> updates this.react / this.reactSlow (0..1).
-  update() {
-    if (!this.ready) {
-      // idle decay
-      this.react *= 0.9;
-      this.reactSlow *= 0.95;
+  /**
+   * @param {AnalyserNode|null} analyser
+   * @param {any} sig
+   * @param {ReactType} type
+   */
+  _updateSignal(analyser, sig, type) {
+    if (!analyser || !this._playing) {
+      sig.react *= this.decay;
+      sig.reactSlow *= Math.min(0.995, this.decay + 0.04);
+      sig.level *= 0.85;
       return;
     }
-    this.analyser.getFloatTimeDomainData(this.buf);
+    analyser.getFloatTimeDomainData(this.buf);
     let sum = 0;
-    for (let i = 0; i < this.buf.length; i++) {
-      const v = this.buf[i];
-      sum += v * v;
-    }
+    for (let i = 0; i < this.buf.length; i++) { const v = this.buf[i]; sum += v * v; }
     const rms = Math.sqrt(sum / this.buf.length);
-    this.level = rms;
+    sig.level = rms;
 
-    // running peak for auto-gain so different songs/bands normalize sanely
-    this.peak = Math.max(this.peak * 0.9995, rms);
-    const norm = rms / (this.peak + 1e-5); // ~0..1
+    if (rms < this.noiseGate) {
+      sig.prevLevel = 0;
+      sig.react *= this.decay;
+      sig.reactSlow *= Math.min(0.995, this.decay + 0.04);
+      return;
+    }
 
-    // slow baseline (noise floor of the band)
-    this.baseline = this.baseline * 0.995 + norm * 0.005;
+    sig.peak = Math.max(sig.peak * 0.9995, rms);
+    const norm = rms / (sig.peak + 1e-5);
+    sig.baseline = sig.baseline * 0.995 + norm * 0.005;
 
     let drive;
-    if (this.bandType === 'perc') {
-      // transient detection: positive flux above the floor -> sharp hits
-      const flux = Math.max(0, norm - this.prevLevel);
+    if (type === 'perc') {
+      const flux = Math.max(0, norm - sig.prevLevel);
       drive = flux * this.sensitivity * 6.0;
     } else {
-      // sustained: how far above the floor the band currently sits
-      drive = Math.max(0, norm - this.baseline) * this.sensitivity * 3.0;
+      drive = Math.max(0, norm - sig.baseline) * this.sensitivity * 3.0;
     }
-    this.prevLevel = norm;
+    sig.prevLevel = norm;
     drive = Math.max(0, Math.min(1, drive));
 
-    // fast envelope: smoothed attack, coefficient decay -> snap with lingering tail
-    if (drive > this.react) {
-      this.react += (drive - this.react) * this.attack;
-    } else {
-      this.react *= this.decay;
-    }
-    // slow envelope lags further for the trailing point layer
+    if (drive > sig.react) sig.react += (drive - sig.react) * this.attack;
+    else sig.react *= this.decay;
     const slowDecay = Math.min(0.995, this.decay + 0.04);
-    this.reactSlow = Math.max(this.reactSlow * slowDecay, this.react * 0.9);
+    sig.reactSlow = Math.max(sig.reactSlow * slowDecay, sig.react * 0.9);
+  }
+
+  update() {
+    for (const [key, def] of Object.entries(SOURCES)) {
+      const analyser = def.stem === 'master'
+        ? this.masterAnalyser
+        : this.stemAnalyser[/** @type {StemKey} */ (def.stem)] || null;
+      this._updateSignal(analyser, this.signals[key], def.type);
+    }
+    this._updateKeyEnergies();
+
+    const active = this.signals[this.sourceKey] || this.signals.full;
+    this.level = active.level;
+    this.react = active.react;
+    this.reactSlow = active.reactSlow;
+    this.peak = active.peak;
+  }
+
+  /** Fill keyEnergies[88] (0..1 per piano key) from the melodic spectrum. */
+  _updateKeyEnergies() {
+    const mf = this._melodyFreq, data = this._freqData, bins = this._keyBins;
+    if (!mf || !data || !this._playing) {
+      for (let k = 0; k < 88; k++) this.keyEnergies[k] *= 0.86; // fade to dark
+      return;
+    }
+    mf.getByteFrequencyData(/** @type {any} */ (data));
+    for (let k = 0; k < 88; k++) {
+      const { start, end } = bins[k];
+      let sum = 0, n = 0;
+      for (let b = start; b <= end && b < data.length; b++) { sum += data[b]; n++; }
+      const avg = n > 0 ? (sum / n) / 255 : 0;
+      const prev = this.keyEnergies[k];
+      // fast attack, smooth release so a struck key lights then fades
+      this.keyEnergies[k] = avg > prev ? avg : prev * 0.82 + avg * 0.18;
+    }
   }
 }
 
-window.AudioEngine = AudioEngine;
+/** @type {any} */ (window).StemEngine = StemEngine;
