@@ -397,7 +397,9 @@
     engine.update();
     const playing = engine.isPlaying;
     scene.setIdle(playing ? 0 : 1);
-    scene.update(dt, engine.react, engine.reactSlow, engine.signals, engine.keyEnergies);
+    // vocals always drive the brain-dot trail (their own asset), via the isolated
+    // vocals stem analyser — independent of the selected reactive source.
+    scene.update(dt, engine.react, engine.reactSlow, engine.signals, engine.keyEnergies, engine.stemAnalyser && engine.stemAnalyser.vocals);
 
     // transport position UI (full-length, no cap)
     if (engine.hasStems && !scrubbing) {
