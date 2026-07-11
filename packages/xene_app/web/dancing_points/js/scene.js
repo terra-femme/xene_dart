@@ -44,6 +44,30 @@ function createScene(canvas) {
   blob.group.position.set(0.06, 0.09, 0.08); // seated in the brain void
   scene.add(blob.group);
 
+  // ── VOCALS asset: brain node-dots trail + waveform streamers ──────────────
+  // Parented to the brain MESH so they stay locked to the baked dots as the brain
+  // breathes. Driven by the isolated vocals stem (pitch + waveform), independent of
+  // the reactive-source selector — vocals always own the dots. Tuned values from
+  // tools/av_debug/brain-vocals-trail.html.
+  const vocalDots = buildBrainDots();
+  brain.mesh.add(vocalDots.points);
+  const vDotPos = vocalDots.geo.attributes.position.array;
+  const vBbox = computeDotBounds(vDotPos, vocalDots.count);
+  const vStream = buildBrainStreamers(vocalDots, vDotPos, vBbox, 28);
+  brain.mesh.add(vStream.points);
+  brain.material.uniforms.uDim.value = 0.31; // dim the baked white nodes so the amber dots read
+  const VOCAL_TUNE = {
+    radius: 0.66, fade: 0.87, wind: 1.15, roam: 0.55, turb: 0.70, pull: 0.90,
+    streamOn: true, streamLen: 1.50, waveAmp: 0.24, smooth: 0.77, sway: 0.11,
+    streamWind: 0.62, streamSize: 0.048, streamBright: 2.31,
+    baseDim: 0.00, vocalBright: 2.90, vocalSize: 0.83, twinkle: 0.51, twinkleSpeed: 15.0,
+    tint: [1.00, 0.56, 0.20],
+  };
+  const vTrail = { lastPy: vBbox.cy };
+  const vPitchState = { td: null, levPeak: 0.02 };
+  const vWaveState = { wtd: null };
+  console.log('[scene] vocals layer built: ' + vocalDots.count + ' dots, ' + (vStream.count * vStream.L) + ' streamer points');
+
   let rotSpeed = 0.1;
   let targetTiltX = 0;
   let targetTiltY = 0;
@@ -96,7 +120,7 @@ function createScene(canvas) {
     };
   }
 
-  function update(dt, react, reactSlow, signals, keyEnergies) {
+  function update(dt, react, reactSlow, signals, keyEnergies, vocalAnalyser) {
     uniforms.uTime.value += dt;
     const sig = readSignals(signals, react, reactSlow);
     uniforms.uBass.value += (sig.bass - uniforms.uBass.value) * 0.16;
@@ -108,9 +132,16 @@ function createScene(canvas) {
     tiltY += (targetTiltY - tiltY) * 0.04;
     const t = uniforms.uTime.value;
 
-    updateBrainFrame(brain, t, sig, tiltX, tiltY);
+    // The brain does NOT breathe to vocals — the dots carry vocals (asset isolation).
+    const brainSig = { bass: sig.bass, drums: sig.drums, vocals: 0, melody: sig.melody, full: sig.full };
+    updateBrainFrame(brain, t, brainSig, tiltX, tiltY);
     updateNodeNetwork(net, sig, keyEnergies, t);
     updateWireframeBlob(blob, t, dt, sig, rotSpeed, tiltX, tiltY);
+
+    // VOCALS: pitch-steered dot trail + waveform streamers, from the vocals stem analyser.
+    const vin = readVocalInput(vocalAnalyser, vPitchState);
+    updateBrainTrail(vocalDots, vDotPos, vBbox, vin, t, VOCAL_TUNE, vTrail);
+    updateBrainStreamers(vStream, vocalDots, vDotPos, vin.level, VOCAL_TUNE, t, vocalAnalyser, vWaveState);
 
     camera.position.x = tiltY * 0.6;
     camera.lookAt(0, -0.05, 0);
@@ -429,7 +460,7 @@ function buildBrainDots(opts) {
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   const mat = new THREE.PointsMaterial({
-    size: opts.size ?? 0.032,
+    size: opts.size ?? 0.064,
     vertexColors: true,
     transparent: true,
     depthWrite: false,
@@ -456,14 +487,14 @@ function buildBrainDots(opts) {
 function updateBrainDots(dots, sig, t, tune) {
   if (!dots || !dots.count) return;
   const T = tune || {};
-  const baseDim    = T.baseDim     ?? 0.10;   // rest floor (faint constellation)
-  const bright     = T.vocalBright ?? 1.40;   // lit brightness scale
+  const baseDim    = T.baseDim     ?? 0.00;   // rest floor (dots dark until a word lights them)
+  const bright     = T.vocalBright ?? 2.90;   // lit brightness scale
   const attack     = T.attack      ?? 0.35;   // env rise speed while held
   const release    = T.release     ?? 0.90;   // env fade per frame after release
-  const sizePulse  = T.vocalSize   ?? 0.70;
-  const twinkleAmt = T.twinkle     ?? 0.12;   // shimmer on lit dots
-  const twinkleSpd = T.twinkleSpeed ?? 3.0;
-  const tint = T.tint || [0.72, 0.86, 1.0];   // cool blue-white, matches the wire
+  const sizePulse  = T.vocalSize   ?? 0.83;
+  const twinkleAmt = T.twinkle     ?? 0.51;   // shimmer on lit dots
+  const twinkleSpd = T.twinkleSpeed ?? 8.0;
+  const tint = T.tint || [1.00, 0.83, 0.69];  // warm amber — reads against a dimmed brain (see brain-dim note)
   const perWord  = Math.max(1, Math.round(T.dotsPerWord ?? 12));
   const onThr    = T.onThreshold  ?? 0.12;    // energy to fire a word from a gap
   const offThr   = T.offThreshold ?? 0.05;    // energy below which a word releases
@@ -520,6 +551,205 @@ function updateBrainDots(dots, sig, t, tune) {
   dots.points.material.size = dots.baseSize * (1 + vocals * sizePulse);
 }
 
+// ── VOCALS asset: pitch-steered dot trail + waveform streamers ───────────────
+// Ported from tools/av_debug/brain-vocals-trail.html (the tuned vocal rig). The
+// brain node-dots light along a pitch-steered "wind head" (spine), and each lit
+// dot sprouts a point-streamer whose sideways wiggle traces the vocal waveform.
+// Driven by the isolated vocals stem's analyser (pitch + time-domain read).
+const VOCAL_MIN_MIDI = 45, VOCAL_MAX_MIDI = 81;
+
+// bounding box of the baked dot positions (plane-local), for head + streamer geometry
+function computeDotBounds(dotPos, count) {
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (let i = 0; i < count; i++) {
+    const x = dotPos[i * 3], y = dotPos[i * 3 + 1];
+    if (x < minX) minX = x; if (x > maxX) maxX = x;
+    if (y < minY) minY = y; if (y > maxY) maxY = y;
+  }
+  return { minX, maxX, minY, maxY, cx: (minX + maxX) / 2, cy: (minY + maxY) / 2, rx: (maxX - minX) / 2, ry: (maxY - minY) / 2 };
+}
+
+// a strip of L points per dot (soft additive sprites), reaching out from the dot
+function buildBrainStreamers(dots, dotPos, bbox, L) {
+  const count = dots.count, total = count * L;
+  const positions = new Float32Array(total * 3);
+  const sizes = new Float32Array(total);
+  const alphas = new Float32Array(total);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3).setUsage(THREE.DynamicDrawUsage));
+  geo.setAttribute('aSize', new THREE.BufferAttribute(sizes, 1).setUsage(THREE.DynamicDrawUsage));
+  geo.setAttribute('aAlpha', new THREE.BufferAttribute(alphas, 1).setUsage(THREE.DynamicDrawUsage));
+  const mat = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending,
+    uniforms: { uColor: { value: new THREE.Color(1, 0.56, 0.20) }, uBright: { value: 2.31 }, uScale: { value: 520.0 } },
+    vertexShader: `
+      attribute float aSize; attribute float aAlpha;
+      varying float vAlpha; uniform float uScale;
+      void main() {
+        vAlpha = aAlpha;
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        gl_PointSize = aSize * uScale / max(-mv.z, 0.001);
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: `
+      precision mediump float;
+      varying float vAlpha; uniform vec3 uColor; uniform float uBright;
+      void main() {
+        float d = length(gl_PointCoord - 0.5);
+        float a = smoothstep(0.5, 0.0, d) * vAlpha;
+        gl_FragColor = vec4(uColor * uBright, a);
+      }`,
+  });
+  const points = new THREE.Points(geo, mat);
+  points.frustumCulled = false; points.renderOrder = 26; // above the dots (25)
+  const dir = new Float32Array(count * 2);
+  for (let i = 0; i < count; i++) {
+    let dx = dotPos[i * 3] - bbox.cx, dy = dotPos[i * 3 + 1] - bbox.cy + bbox.ry * 0.5;
+    const m = Math.hypot(dx, dy) || 1;
+    dir[i * 2] = dx / m; dir[i * 2 + 1] = dy / m;
+  }
+  return { points, geo, positions, sizes, alphas, L, count, dir, wave: new Float32Array(L) };
+}
+
+// autocorrelation F0 (classic ACF + parabolic interp); f0 = -1 when unvoiced/quiet
+function detectVocalPitch(analyser, st) {
+  if (!analyser || !analyser.context) return { f0: -1, rms: 0 };
+  if (!st.td || st.td.length !== analyser.fftSize) st.td = new Float32Array(analyser.fftSize);
+  analyser.getFloatTimeDomainData(st.td);
+  const buf = st.td, SIZE = buf.length, sr = analyser.context.sampleRate;
+  let rms = 0;
+  for (let i = 0; i < SIZE; i++) { const v = buf[i]; rms += v * v; }
+  rms = Math.sqrt(rms / SIZE);
+  if (rms < 0.0001) return { f0: -1, rms };
+  let r1 = 0, r2 = SIZE - 1; const thres = 0.2;
+  for (let i = 0; i < SIZE / 2; i++) { if (Math.abs(buf[i]) < thres) { r1 = i; break; } }
+  for (let i = 1; i < SIZE / 2; i++) { if (Math.abs(buf[SIZE - i]) < thres) { r2 = SIZE - i; break; } }
+  const b = buf.subarray(r1, r2), n = b.length;
+  if (n < 8) return { f0: -1, rms };
+  const c = new Float32Array(n);
+  for (let i = 0; i < n; i++) { let s = 0; for (let j = 0; j < n - i; j++) s += b[j] * b[j + i]; c[i] = s; }
+  let d = 0; while (d < n - 1 && c[d] > c[d + 1]) d++;
+  let maxval = -1, maxpos = -1;
+  for (let i = d; i < n; i++) { if (c[i] > maxval) { maxval = c[i]; maxpos = i; } }
+  if (maxpos <= 0) return { f0: -1, rms };
+  let T0 = maxpos;
+  const x1 = c[T0 - 1] || 0, x2 = c[T0], x3 = c[T0 + 1] || 0;
+  const aa = (x1 + x3 - 2 * x2) / 2, bb = (x3 - x1) / 2;
+  if (aa) T0 = T0 - bb / (2 * aa);
+  const f0 = sr / T0;
+  const clarity = maxval / (c[0] + 1e-6);
+  if (clarity < 0.55 || f0 < 60 || f0 > 1200) return { f0: -1, rms };
+  return { f0, rms };
+}
+
+// per-frame vocal input: { pitchNorm (0..1 or NaN), level (0..1), voiced }
+function readVocalInput(analyser, st) {
+  const { f0, rms } = detectVocalPitch(analyser, st);
+  st.levPeak = Math.max((st.levPeak || 0.02) * 0.999, rms);
+  let level = clamp01(rms / (st.levPeak + 1e-4));
+  let pitchNorm = NaN, voiced = false;
+  if (f0 > 0) {
+    const midi = 69 + 12 * Math.log2(f0 / 440);
+    pitchNorm = clamp01((midi - VOCAL_MIN_MIDI) / (VOCAL_MAX_MIDI - VOCAL_MIN_MIDI));
+    voiced = true;
+    level = Math.max(0.45, level); // a held note keeps the head energised
+  }
+  return { pitchNorm, level, voiced };
+}
+
+// fill `out` (length L) with the vocal waveform (oscilloscope read), normalised, then box-blur
+// toward a clean ribbon by `smooth`. Silence → zeros (streamers vanish since dot brightness is 0).
+function fillVocalWave(analyser, out, L, smooth, st) {
+  let got = false;
+  if (analyser) {
+    if (!st.wtd || st.wtd.length !== analyser.fftSize) st.wtd = new Float32Array(analyser.fftSize);
+    analyser.getFloatTimeDomainData(st.wtd);
+    const SIZE = st.wtd.length, hop = Math.max(1, Math.floor(SIZE / L));
+    let peak = 0.0001;
+    for (let j = 0; j < L; j++) { const v = st.wtd[j * hop] || 0; out[j] = v; if (Math.abs(v) > peak) peak = Math.abs(v); }
+    got = peak > 0.002;
+    const g = 1 / Math.max(peak, 0.05);
+    for (let j = 0; j < L; j++) out[j] *= g;
+  }
+  if (!got) for (let j = 0; j < L; j++) out[j] = 0;
+  const passes = Math.round(smooth * 4);
+  for (let k = 0; k < passes; k++) {
+    let prev = out[0];
+    for (let j = 0; j < L; j++) { const nx = j + 1 < L ? out[j + 1] : out[j]; const cur = out[j]; out[j] = (prev + cur + nx) / 3; prev = cur; }
+  }
+}
+
+// light the dots along a pitch-steered wind head; dots fade behind it → a trail (the spine)
+function updateBrainTrail(dots, dotPos, bbox, sig, t, T, trail) {
+  const env = dots.env, colors = dots.colors, seeds = dots.seeds;
+  const pitchY = bbox.minY + (isNaN(sig.pitchNorm) ? 0.5 : sig.pitchNorm) * (bbox.maxY - bbox.minY);
+  const targetY = bbox.cy + (pitchY - bbox.cy) * T.pull;
+  if (sig.voiced) trail.lastPy = trail.lastPy * 0.85 + targetY * 0.15;
+  const py = trail.lastPy;
+  const energy = 0.35 + sig.level * 0.65;
+  const ws = 0.6 + T.wind * 2.0;
+  const nx = 0.62 * Math.sin(t * ws * 0.31) + 0.38 * Math.sin(t * ws * 0.73 + 1.3);
+  const ny = 0.62 * Math.cos(t * ws * 0.23) + 0.38 * Math.sin(t * ws * 0.53 + 2.1);
+  const hx = bbox.cx + nx * bbox.rx * T.roam * energy;
+  const hy = py + ny * bbox.ry * T.turb * energy * 0.6;
+  const rel = T.fade, R = T.radius, R2 = R * R;
+  const intensity = sig.voiced ? Math.max(0.15, sig.level) : 0;
+  for (let i = 0; i < dots.count; i++) {
+    env[i] *= rel;
+    const dx = dotPos[i * 3] - hx, dy = dotPos[i * 3 + 1] - hy;
+    const d2 = dx * dx + dy * dy;
+    if (d2 < R2 && intensity > 0) {
+      let w = 1 - Math.sqrt(d2) / R; w *= w;
+      const lit = w * intensity;
+      if (lit > env[i]) env[i] = lit;
+    }
+  }
+  const baseDim = T.baseDim, bright = T.vocalBright, tw = T.twinkle, tws = T.twinkleSpeed, tint = T.tint;
+  for (let i = 0; i < dots.count; i++) {
+    const flick = 0.5 + 0.5 * Math.sin(t * tws + seeds[i] * 6.28318);
+    const b = baseDim + env[i] * bright * (1 - tw + tw * flick);
+    colors[i * 3] = tint[0] * b;
+    colors[i * 3 + 1] = tint[1] * b;
+    colors[i * 3 + 2] = tint[2] * b;
+  }
+  dots.geo.attributes.color.needsUpdate = true;
+  dots.points.material.size = dots.baseSize * (1 + sig.level * T.vocalSize);
+}
+
+// redraw the waveform streamers off each lit dot (length + brightness ∝ dot lit-ness)
+function updateBrainStreamers(stream, dots, dotPos, level, T, t, analyser, waveState) {
+  if (!T.streamOn) { stream.points.visible = false; return; }
+  stream.points.visible = true;
+  const L = stream.L, pos = stream.positions, sz = stream.sizes, al = stream.alphas, env = dots.env, seeds = dots.seeds;
+  fillVocalWave(analyser, stream.wave, L, T.smooth, waveState);
+  const amp = T.waveAmp, len = T.streamLen, sway = T.sway, ws = 0.5 + T.streamWind * 3;
+  let p = 0;
+  for (let i = 0; i < stream.count; i++) {
+    const bright = Math.min(1, env[i]);
+    const ox = dotPos[i * 3], oy = dotPos[i * 3 + 1];
+    const dx = stream.dir[i * 2], dy = stream.dir[i * 2 + 1];
+    const px = -dy, py = dx;
+    const seed = seeds[i] * 6.28318;
+    for (let j = 0; j < L; j++, p++) {
+      const tj = j / (L - 1);
+      const reach = tj * len * bright;
+      const wig = stream.wave[j] * amp;
+      const sw = Math.sin(t * ws + seed + j * 0.4) * sway * tj;
+      const trans = (wig + sw) * bright;
+      pos[p * 3] = ox + dx * reach + px * trans;
+      pos[p * 3 + 1] = oy + dy * reach + py * trans;
+      pos[p * 3 + 2] = 0.03 + tj * 0.01;
+      sz[p] = T.streamSize * (1 - 0.5 * tj);
+      al[p] = bright * (1 - tj * 0.85);
+    }
+  }
+  stream.geo.attributes.position.needsUpdate = true;
+  stream.geo.attributes.aSize.needsUpdate = true;
+  stream.geo.attributes.aAlpha.needsUpdate = true;
+  stream.points.material.uniforms.uColor.value.setRGB(T.tint[0], T.tint[1], T.tint[2]);
+  stream.points.material.uniforms.uBright.value = T.streamBright;
+}
+
 function buildBrainReferenceBrain() {
   const group = new THREE.Group();
   group.position.set(0, 0.02, -0.06);
@@ -542,6 +772,7 @@ function buildBrainReferenceBrain() {
       uDrums: { value: 0 },
       uVocals: { value: 0 },
       uMelody: { value: 0 },
+      uDim: { value: 1.0 },   // global brain brightness; createScene dims it so the vocal dots read
     },
     vertexShader: `
       varying vec2 vUv;
@@ -578,6 +809,7 @@ function buildBrainReferenceBrain() {
       uniform float uDrums;
       uniform float uVocals;
       uniform float uMelody;
+      uniform float uDim;
       varying vec2 vUv;
       varying float vTide;
 
@@ -619,7 +851,7 @@ function buildBrainReferenceBrain() {
         vec3 col = mix(blue, white, smoothstep(0.18, 0.85, lum));
         col *= tex.rgb * (1.20 + pulse * 0.50 + centerEase * 0.08) * sparkle;
         col += vec3(0.20, 0.45, 0.82) * alpha * (0.12 + wave * 0.08);
-        gl_FragColor = vec4(col, alpha * (0.82 + wave * 0.12));
+        gl_FragColor = vec4(col * uDim, alpha * (0.82 + wave * 0.12));
       }
     `,
   });
