@@ -363,6 +363,24 @@
 
   // ---------- render loop ----------
   const mLevel = $('mLevel'), mReact = $('mReact');
+  const dbg = $('dbg');
+  // DEV HUD: which stems are loaded + each stem's live react (0-100). Lets us
+  // confirm the drums stem is actually producing signal without flipping the
+  // Reactive Source selector. `peak` monitoring drum → is signal flowing at all?
+  const dbgOrder = [['vocals', 'VOC'], ['drums', 'DRM'], ['bass', 'BAS'], ['other', 'MEL'], ['full', 'MIX']];
+  /** @param {number} v */
+  const bar10 = (v) => '█'.repeat(Math.round(Math.min(1, v) * 10)).padEnd(10, '·');
+  function updateDbg() {
+    if (!dbg) return;
+    const loaded = engine.loadedKeys.join(' ') || 'none';
+    const lines = dbgOrder.map(([key, tag]) => {
+      const s = engine.signals[key] || {};
+      const r = s.react || 0;
+      return `${tag} ${bar10(r)} ${(r * 100).toFixed(0).padStart(3)}`;
+    });
+    dbg.textContent = `stems: ${loaded}\n${lines.join('\n')}`;
+  }
+
   let last = performance.now();
 
   /** @param {number} now */
@@ -394,6 +412,8 @@
     // meters
     mLevel.style.width = Math.min(100, (engine.level / (engine.peak + 1e-5)) * 100) + '%';
     mReact.style.width = Math.min(100, engine.react * 100) + '%';
+
+    updateDbg();
   }
 
   // Drive with requestAnimationFrame, fall back to a timer if RAF stalls
