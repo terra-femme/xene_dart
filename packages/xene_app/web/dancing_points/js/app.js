@@ -370,6 +370,7 @@
   const dbgOrder = [['vocals', 'VOC'], ['drums', 'DRM'], ['bass', 'BAS'], ['other', 'MEL'], ['full', 'MIX']];
   /** @param {number} v */
   const bar10 = (v) => '█'.repeat(Math.round(Math.min(1, v) * 10)).padEnd(10, '·');
+  const glCanvas = $('gl');
   function updateDbg() {
     if (!dbg) return;
     const loaded = engine.loadedKeys.join(' ') || 'none';
@@ -378,7 +379,12 @@
       const r = s.react || 0;
       return `${tag} ${bar10(r)} ${(r * 100).toFixed(0).padStart(3)}`;
     });
-    dbg.textContent = `stems: ${loaded}\n${lines.join('\n')}`;
+    // live layout scale (mirrors scene.js resize()): tells us exactly what the
+    // app is drawing the organism at — 0.72 (mobile) or 1.0 (desktop).
+    const cw = (glCanvas && glCanvas.clientWidth) || window.innerWidth;
+    const ch = (glCanvas && glCanvas.clientHeight) || window.innerHeight;
+    const bodyScale = Math.min(cw, ch) < 640 ? 0.72 : 1.0;
+    dbg.textContent = `SCALE ${bodyScale.toFixed(2)}  canvas ${cw}x${ch}\nstems: ${loaded}\n${lines.join('\n')}`;
   }
 
   let last = performance.now();

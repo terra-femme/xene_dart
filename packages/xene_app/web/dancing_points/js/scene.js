@@ -37,8 +37,9 @@ function createScene(canvas) {
   // 0x000000 which is invisible on the 0x050509 void, so we override to a
   // bright cool-white so it reads inside the brain's central void.
   const blob = buildWireframeBlob({
-    color: 0xeaf4ff, radius: 0.44, strokeCount: 40, pointsPerStroke: 131, step: 0.04,
-    wander: 0.30, centerPull: 2.50, startSpread: 0.67, opacity: 0.43, size: 0.48,
+    color: 0xeaf4ff, radius: 0.44, strokeCount: 23, pointsPerStroke: 131, step: 0.08,
+    wander: 0.30, centerPull: 3.20, startSpread: 0.38, opacity: 0.43, size: 0.25,
+    aspectX: 1.36, aspectY: 0.98, // oblong: threads reach wider than tall to fill the void
   });
   blob.group.position.set(0.06, 0.09, 0.08); // seated in the brain void
   scene.add(blob.group);
@@ -261,7 +262,13 @@ function updateNodeNetwork(net, sig, keyEnergies, t) {
 // emits disconnected edge stubs. `basePositions` holds each stroke's rest shape
 // so update() can dance the vertices around it without redrawing the walk.
 function buildWireframeBlob(opts) {
+  // OUTER shell holds the fixed screen-space oval (aspect) + position and never
+  // rotates, so "wider than tall" stays stable while the INNER ball spins and
+  // reacts inside it. The void the ball lives in is oblong (wider than tall), so
+  // aspectX>aspectY lets the threads reach farther horizontally than vertically.
   const group = new THREE.Group();
+  const inner = new THREE.Group();
+  group.add(inner);
   const lines = [];
   const basePositions = [];
   const color = opts.color || 0xeaf4ff;
@@ -279,6 +286,10 @@ function buildWireframeBlob(opts) {
   const startSpread = opts.startSpread ?? 0.45;
   const lineOpacity = opts.opacity ?? 0.55;
   const size = opts.size ?? 0.42;
+  // Oval reach: how far threads extend horizontally vs vertically (screen space).
+  // 1.0 = round; aspectX>aspectY = wider than tall to fill the oblong void.
+  const aspectX = opts.aspectX ?? 1.0;
+  const aspectY = opts.aspectY ?? 1.0;
 
   for (let s = 0; s < strokeCount; s++) {
     // Per-thread reach A, drawn center-biased (pow with `concentration`): most
@@ -326,12 +337,12 @@ function buildWireframeBlob(opts) {
     });
     const line = new THREE.Line(geo, mat);
     line.renderOrder = 60 + s;
-    group.add(line);
+    inner.add(line);
     lines.push(line);
     basePositions.push(pts.slice());
   }
 
-  return { group, lines, basePositions, radius, size };
+  return { group, inner, lines, basePositions, radius, size, aspectX, aspectY };
 }
 
 function updateWireframeBlob(blob, t, dt, sig, rotSpeed, tiltX, tiltY, tune) {
@@ -348,11 +359,16 @@ function updateWireframeBlob(blob, t, dt, sig, rotSpeed, tiltX, tiltY, tune) {
   const kDrumOpacity = T.drumOpacity ?? 0.34;
 
   const bass = sig.bass, drums = sig.drums, full = sig.full;
-  blob.group.rotation.y += dt * (0.12 + rotSpeed * 0.30 + full * 0.10);
-  blob.group.rotation.x += dt * (0.05 + rotSpeed * 0.15);
-  blob.group.rotation.z = tiltY * 0.08;
+  // Spin + reactive scale live on the INNER ball; the OUTER shell only carries
+  // the fixed screen-space oval so "wider than tall" stays put as the ball spins.
+  const spin = blob.inner || blob.group;
+  spin.rotation.y += dt * (0.12 + rotSpeed * 0.30 + full * 0.10);
+  spin.rotation.x += dt * (0.05 + rotSpeed * 0.15);
+  spin.rotation.z = tiltY * 0.08;
   // DRUMS punch the overall scale so a hit is unmistakable, not just subtle.
-  blob.group.scale.setScalar((blob.layoutScale || 1) * blob.size * (1 + bass * kBassScale + drums * kDrumScale));
+  spin.scale.setScalar((blob.layoutScale || 1) * blob.size * (1 + bass * kBassScale + drums * kDrumScale));
+  // Fixed oval: reach farther horizontally than vertically to fill the oblong void.
+  blob.group.scale.set(blob.aspectX ?? 1.0, blob.aspectY ?? 1.0, 1.0);
 
   // DRUMS drive the dance: displace each vertex around its rest position by an
   // animated noise, amplitude riding the drum transient. At rest (drums≈0) it's
