@@ -37,8 +37,10 @@ function createScene(canvas) {
   // 0x000000 which is invisible on the 0x050509 void, so we override to a
   // bright cool-white so it reads inside the brain's central void.
   const blob = buildWireframeBlob({
-    color: 0xeaf4ff, radius: 0.5, strokeCount: 30, pointsPerStroke: 130, step: 0.04,
+    color: 0xeaf4ff, radius: 0.44, strokeCount: 40, pointsPerStroke: 131, step: 0.04,
+    wander: 0.30, centerPull: 2.50, startSpread: 0.67, opacity: 0.43, size: 0.48,
   });
+  blob.group.position.set(0.06, 0.09, 0.08); // seated in the brain void
   scene.add(blob.group);
 
   let rotSpeed = 0.1;
@@ -267,42 +269,48 @@ function buildWireframeBlob(opts) {
   const pointsPerStroke = opts.pointsPerStroke || 150;
   const radius = opts.radius || 0.9;
   const step = opts.step || 0.055;
-
-  // Cheap deterministic pseudo-3D noise (trig sum). Enough to bend a walk into
-  // organic curves without pulling in a noise library.
-  const noise3 = (x, y, z) =>
-    Math.sin(x * 1.7 + y * 0.9) * 0.6 +
-    Math.cos(y * 1.3 - z * 1.1) * 0.55 +
-    Math.sin(z * 1.9 + x * 0.7) * 0.5 +
-    Math.sin((x + y + z) * 2.6) * 0.25;
+  // Look/shape knobs (defaults = the app's tuned look; the ball-look lab
+  // tools/av_debug/ball-look.html passes live overrides). noiseScale = how fast
+  // the walk turns (curliness), curl = character of the wiggle, containment =
+  // how hard strays are pulled back in, startSpread = how tight the walks begin,
+  // lineOpacity = per-line glow, size = overall render scale.
+  const wander = opts.wander ?? 0.25;           // curviness/jitter of each thread
+  const concentration = opts.centerPull ?? 2.0; // radial density exponent (higher = denser core, thinner rim)
+  const startSpread = opts.startSpread ?? 0.45;
+  const lineOpacity = opts.opacity ?? 0.55;
+  const size = opts.size ?? 0.42;
 
   for (let s = 0; s < strokeCount; s++) {
-    const seed = s * 12.9898;
-    // Start somewhere in the inner ball so strokes cross the center and tangle.
-    let px = (Math.random() * 2 - 1) * radius * 0.45;
-    let py = (Math.random() * 2 - 1) * radius * 0.45;
-    let pz = (Math.random() * 2 - 1) * radius * 0.45;
+    // Per-thread reach A, drawn center-biased (pow with `concentration`): most
+    // threads stay small and pack the core, a few reach the rim → density is
+    // highest at the center and thins out EVENLY with radius. Steering is fully
+    // isotropic random (no fixed noise field), so there's no directional bias and
+    // the ball is radially symmetric — not top-heavy.
+    const A = radius * (0.10 + 0.90 * Math.pow(Math.random(), concentration));
+    let dx = Math.random() * 2 - 1, dy = Math.random() * 2 - 1, dz = Math.random() * 2 - 1;
+    let dl = Math.hypot(dx, dy, dz) || 1; dx /= dl; dy /= dl; dz /= dl;
+    let px = dx * A * startSpread * Math.random();
+    let py = dy * A * startSpread * Math.random();
+    let pz = dz * A * startSpread * Math.random();
+    dx = Math.random() * 2 - 1; dy = Math.random() * 2 - 1; dz = Math.random() * 2 - 1;
+    dl = Math.hypot(dx, dy, dz) || 1; dx /= dl; dy /= dl; dz /= dl;
     const pts = new Float32Array(pointsPerStroke * 3);
 
     for (let i = 0; i < pointsPerStroke; i++) {
       pts[i * 3] = px;
       pts[i * 3 + 1] = py;
       pts[i * 3 + 2] = pz;
-      // Direction from the noise field — smoothly turning, so the line curls.
-      const nx = noise3(px * 2.4 + seed, py * 2.4, pz * 2.4);
-      const ny = noise3(py * 2.4 + seed + 31.4, pz * 2.4, px * 2.4);
-      const nz = noise3(pz * 2.4 + seed + 57.1, px * 2.4, py * 2.4);
-      px += nx * step;
-      py += ny * step;
-      pz += nz * step;
-      // Soft containment: pull back in when the walk strays outside the ball so
-      // it stays a ball of scribbles instead of escaping to infinity.
-      const d = Math.sqrt(px * px + py * py + pz * pz);
-      if (d > radius) {
-        const pull = (d - radius) * 0.55;
-        px -= (px / d) * pull;
-        py -= (py / d) * pull;
-        pz -= (pz / d) * pull;
+      // isotropic smooth steering — a small random nudge to the heading
+      dx += (Math.random() * 2 - 1) * wander;
+      dy += (Math.random() * 2 - 1) * wander;
+      dz += (Math.random() * 2 - 1) * wander;
+      dl = Math.hypot(dx, dy, dz) || 1; dx /= dl; dy /= dl; dz /= dl;
+      px += dx * step; py += dy * step; pz += dz * step;
+      // soft-contain within THIS thread's reach A (a bounded scribble shell)
+      const r = Math.sqrt(px * px + py * py + pz * pz);
+      if (r > A) {
+        const pull = (r - A) * 0.6;
+        px -= (px / r) * pull; py -= (py / r) * pull; pz -= (pz / r) * pull;
       }
     }
 
@@ -311,7 +319,7 @@ function buildWireframeBlob(opts) {
     const mat = new THREE.LineBasicMaterial({
       color,
       transparent: true,
-      opacity: 0.55,
+      opacity: lineOpacity,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
       depthTest: false,
@@ -323,35 +331,177 @@ function buildWireframeBlob(opts) {
     basePositions.push(pts.slice());
   }
 
-  return { group, lines, basePositions, radius, size: 0.42 };
+  return { group, lines, basePositions, radius, size };
 }
 
-function updateWireframeBlob(blob, t, dt, sig, rotSpeed, tiltX, tiltY) {
+function updateWireframeBlob(blob, t, dt, sig, rotSpeed, tiltX, tiltY, tune) {
+  // Drum/bass response coefficients. Defaults = the app's tuned values; the
+  // isolation harness (tools/av_debug/blob-drums.html) passes live overrides so
+  // the drum movement can be dialed in without editing this file each pass.
+  const T = tune || {};
+  const kDrumScale   = T.drumScale   ?? 0.28;
+  const kBassScale   = T.bassScale   ?? 0.08;
+  const kDrumAmp     = T.drumAmp     ?? 0.26;
+  const kBassAmp     = T.bassAmp     ?? 0.03;
+  const kDrumJitter  = T.drumJitter  ?? 0.12;
+  const kJitterFreq  = T.jitterFreq  ?? 9.0;
+  const kDrumOpacity = T.drumOpacity ?? 0.34;
+
   const bass = sig.bass, drums = sig.drums, full = sig.full;
   blob.group.rotation.y += dt * (0.12 + rotSpeed * 0.30 + full * 0.10);
   blob.group.rotation.x += dt * (0.05 + rotSpeed * 0.15);
   blob.group.rotation.z = tiltY * 0.08;
-  // DRUMS also punch the overall scale so a hit is unmistakable, not just subtle.
-  blob.group.scale.setScalar((blob.layoutScale || 1) * blob.size * (1 + bass * 0.08 + drums * 0.16));
+  // DRUMS punch the overall scale so a hit is unmistakable, not just subtle.
+  blob.group.scale.setScalar((blob.layoutScale || 1) * blob.size * (1 + bass * kBassScale + drums * kDrumScale));
 
   // DRUMS drive the dance: displace each vertex around its rest position by an
   // animated noise, amplitude riding the drum transient. At rest (drums≈0) it's
-  // a quiet tangle; on a hit the whole scribble writhes.
-  const amp = 0.008 + drums * 0.15 + bass * 0.03;
+  // a quiet tangle; on a hit the whole scribble writhes. `jitter` is drums²
+  // (squared so only real transients trigger it) feeding a fast high-frequency
+  // shimmer — this reads as an electric "snap" on a hit, distinct from the slow
+  // baseline sway, and is the first step toward drums live-warping the noise.
+  const amp = 0.008 + drums * kDrumAmp + bass * kBassAmp;
+  const jitter = drums * drums * kDrumJitter;
   const w1 = t * 2.1, w2 = t * 1.7, w3 = t * 2.4;
+  const jw = t * kJitterFreq;
   for (let li = 0; li < blob.lines.length; li++) {
     const line = blob.lines[li];
     const base = blob.basePositions[li];
     const arr = /** @type {any} */ (line.geometry.attributes.position.array);
     for (let i = 0; i < arr.length; i += 3) {
       const bx = base[i], by = base[i + 1], bz = base[i + 2];
-      arr[i]     = bx + Math.sin(w1 + bx * 4.0 + li) * amp;
-      arr[i + 1] = by + Math.cos(w2 + by * 4.0 + li * 1.3) * amp;
-      arr[i + 2] = bz + Math.sin(w3 + bz * 4.0 + li * 0.7) * amp;
+      arr[i]     = bx + Math.sin(w1 + bx * 4.0 + li) * amp + Math.sin(jw + bx * 11.0 + li * 2.3) * jitter;
+      arr[i + 1] = by + Math.cos(w2 + by * 4.0 + li * 1.3) * amp + Math.cos(jw + by * 11.0 + li * 1.9) * jitter;
+      arr[i + 2] = bz + Math.sin(w3 + bz * 4.0 + li * 0.7) * amp + Math.sin(jw + bz * 11.0 + li * 3.1) * jitter;
     }
     line.geometry.attributes.position.needsUpdate = true;
-    line.material.opacity = Math.min(0.9, 0.5 + drums * 0.28 + full * 0.10 + sig.vocals * 0.08);
+    line.material.opacity = Math.min(0.95, 0.5 + drums * kDrumOpacity + full * 0.10 + sig.vocals * 0.08);
   }
+}
+
+// ── Brain vocal-reactive dots ─────────────────────────────────────────────
+// Prominent node-dots that sit EXACTLY on the baked dots of the reference brain
+// image. Positions were detected from brain_wire_reference.png and hand-picked
+// to the brain silhouette (tools/av_debug/brain-zone-editor.html), stored in
+// js/brain-dots-data.js as window.BRAIN_VOCAL_DOTS. Parent this layer to the
+// brain MESH (not the group) so the glow inherits every breath/rotation/jitter
+// and can never drift off its dot. VOCALS flare the dots in place — brightness
+// and size only, NEVER position (moving a dot would break the seamless overlay).
+function buildBrainDots(opts) {
+  opts = opts || {};
+  const planeW = opts.planeW ?? 3.35;   // must match the brain PlaneGeometry
+  const planeH = opts.planeH ?? 2.23;
+  const z = opts.z ?? 0.02;             // sit just in front of the plane
+  const data = opts.dots || (typeof window !== 'undefined' ? window.BRAIN_VOCAL_DOTS : null) || [];
+  const count = data.length;
+
+  const positions = new Float32Array(count * 3);
+  const colors = new Float32Array(count * 3);
+  const seeds = new Float32Array(count);
+  for (let i = 0; i < count; i++) {
+    const d = data[i];
+    const nx = d.x !== undefined ? d.x : d[0];
+    const ny = d.y !== undefined ? d.y : d[1];
+    positions[i * 3]     = (nx - 0.5) * planeW;   // image x  → plane-local x
+    positions[i * 3 + 1] = (0.5 - ny) * planeH;   // image y↓ → plane-local y↑
+    positions[i * 3 + 2] = z;
+    colors[i * 3] = colors[i * 3 + 1] = colors[i * 3 + 2] = 0.12; // rest dim
+    let h = Math.sin(nx * 127.1 + ny * 311.7) * 43758.5453;
+    seeds[i] = h - Math.floor(h);                 // stable per-dot phase 0..1
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  const mat = new THREE.PointsMaterial({
+    size: opts.size ?? 0.032,
+    vertexColors: true,
+    transparent: true,
+    depthWrite: false,
+    depthTest: false,
+    sizeAttenuation: true,
+    blending: THREE.AdditiveBlending,
+  });
+  const points = new THREE.Points(geo, mat);
+  points.frustumCulled = false;
+  points.renderOrder = 25; // above the brain plane (renderOrder 20)
+  return {
+    points, geo, colors, seeds, count, baseSize: mat.size,
+    env: new Float32Array(count),   // per-dot brightness envelope (0..1)
+    active: new Uint8Array(count),  // which dots belong to the current word
+    prevVocal: 0, wordActive: false, lastOnset: -999,
+  };
+}
+
+// VOCALS light dots per WORD: each vocal onset lights a fresh random set of
+// dots, and they stay bright for as long as the note is HELD (their envelope
+// tracks the vocal level), then fade on release. A sharp rise mid-phrase
+// retriggers a new word. Set tune.uniform=true for the old all-dots-together
+// behavior. Positions never move — only brightness + size.
+function updateBrainDots(dots, sig, t, tune) {
+  if (!dots || !dots.count) return;
+  const T = tune || {};
+  const baseDim    = T.baseDim     ?? 0.10;   // rest floor (faint constellation)
+  const bright     = T.vocalBright ?? 1.40;   // lit brightness scale
+  const attack     = T.attack      ?? 0.35;   // env rise speed while held
+  const release    = T.release     ?? 0.90;   // env fade per frame after release
+  const sizePulse  = T.vocalSize   ?? 0.70;
+  const twinkleAmt = T.twinkle     ?? 0.12;   // shimmer on lit dots
+  const twinkleSpd = T.twinkleSpeed ?? 3.0;
+  const tint = T.tint || [0.72, 0.86, 1.0];   // cool blue-white, matches the wire
+  const perWord  = Math.max(1, Math.round(T.dotsPerWord ?? 12));
+  const onThr    = T.onThreshold  ?? 0.12;    // energy to fire a word from a gap
+  const offThr   = T.offThreshold ?? 0.05;    // energy below which a word releases
+  const refract  = T.refractory   ?? 0.11;    // min seconds between onsets
+  const syllJump = T.syllableJump ?? 0.18;    // rise that retriggers mid-phrase
+  const uniform  = !!T.uniform;
+
+  const vocals = sig.vocals;
+  const env = dots.env, active = dots.active, colors = dots.colors, seeds = dots.seeds;
+
+  if (uniform) {
+    dots.wordActive = true;
+    for (let i = 0; i < dots.count; i++) active[i] = 1;
+  } else {
+    const canFire = (t - dots.lastOnset) > refract;
+    let startWord;
+    if (T.externalOnset) {
+      // caller did the segmentation (e.g. pitch-note detection) and passes sig.onset
+      startWord = !!sig.onset && canFire;
+    } else {
+      const rise = vocals - dots.prevVocal;
+      startWord =
+        (!dots.wordActive && vocals > onThr && canFire) ||   // onset from a gap
+        (dots.wordActive && rise > syllJump && canFire);     // new syllable mid-phrase
+    }
+    if (startWord) {
+      for (let i = 0; i < dots.count; i++) active[i] = 0;
+      const k = Math.min(perWord, dots.count);
+      let picked = 0;
+      while (picked < k) { const idx = (Math.random() * dots.count) | 0; if (!active[idx]) { active[idx] = 1; picked++; } }
+      dots.wordActive = true;
+      dots.lastOnset = t;
+    } else if (dots.wordActive && vocals < offThr) {
+      dots.wordActive = false; // note released → members fall to the fade branch
+    }
+  }
+  dots.prevVocal = vocals;
+
+  for (let i = 0; i < dots.count; i++) {
+    if (active[i] && dots.wordActive) {
+      // held: rise fast toward the vocal level, fall slowly so a hold stays lit
+      const d = vocals - env[i];
+      env[i] += d * (d > 0 ? attack : attack * 0.25);
+    } else {
+      env[i] *= release;       // released / non-member → fade out
+    }
+    const tw = 0.5 + 0.5 * Math.sin(t * twinkleSpd + seeds[i] * 6.28318);
+    const b = baseDim + env[i] * bright * (0.7 + 0.3 * tw);
+    colors[i * 3]     = tint[0] * b;
+    colors[i * 3 + 1] = tint[1] * b;
+    colors[i * 3 + 2] = tint[2] * b;
+  }
+  dots.geo.attributes.color.needsUpdate = true;
+  dots.points.material.size = dots.baseSize * (1 + vocals * sizePulse);
 }
 
 function buildBrainReferenceBrain() {
