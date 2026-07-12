@@ -374,13 +374,15 @@ function buildBrainBassWaves(opts) {
       varying float vAlpha;
       void main() {
         float age = uTime - aSpawn;
-        float active = (aSpawn > 0.0 && age >= 0.0 && age <= uLife) ? 1.0 : 0.0;
+        // 'alive', not 'active' — 'active' is a RESERVED word in GLSL ES 3.00,
+        // which three.js auto-targets on WebGL2 (#version 300 es conversion)
+        float alive = (aSpawn > 0.0 && age >= 0.0 && age <= uLife) ? 1.0 : 0.0;
         float r = age * uSpeed + aJit * uThick;
         vec3 pos = aBase + aDir * r;
         vec4 mv = modelViewMatrix * vec4(pos, 1.0);
         float lifeT = clamp(age / uLife, 0.0, 1.0);
-        vAlpha = active * (1.0 - lifeT) * smoothstep(0.0, 0.10, lifeT);
-        gl_PointSize = uSize * uScale / max(-mv.z, 0.001) * active;
+        vAlpha = alive * (1.0 - lifeT) * smoothstep(0.0, 0.10, lifeT);
+        gl_PointSize = uSize * uScale / max(-mv.z, 0.001) * alive;
         gl_Position = projectionMatrix * mv;
       }`,
     fragmentShader: `
