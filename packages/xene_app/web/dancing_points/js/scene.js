@@ -284,10 +284,11 @@ function buildBrainOtherRegions(opts) {
 function updateBrainOtherRegions(reg, keyEnergies, tune) {
   if (!reg || !reg.count) return;
   const T = tune || {};
-  const gamma  = T.gamma  ?? 1.6;
-  const bright = T.bright ?? 0.9;
-  const cold   = T.cold || [0.30, 0.55, 0.78];   // color at the lit floor …
-  const hot    = T.hot  || [0.60, 0.90, 1.00];   // … blending to this at full energy
+  const gamma  = T.gamma  ?? 0.88;
+  const bright = T.bright ?? 1.25;
+  const cold   = T.cold || [0.12, 0.42, 0.78];   // color at the lit floor …
+  const hot    = T.hot  || [0.53, 0.74, 1.00];   // … blending to this at full energy
+  // (baked from the user's brain-other.html readout 2026-07-12: hue/sat 213/0.85)
   const colors = reg.colors, keys = reg.keys;
   for (let i = 0; i < reg.count; i++) {
     const e = keyEnergies && keys[i] >= 0 ? keyEnergies[keys[i]] : 0;

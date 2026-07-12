@@ -124,9 +124,11 @@ class StemEngine {
     // and candidate extraction keeps running down to noteOffThresh so held
     // notes can sustain quieter than they attacked. maxPolyphony caps how many
     // simultaneous notes can be lit (Guitar-Hero-style: 3 keys → 3 regions).
-    this.noteOnThresh = 0.50;
-    this.noteOffThresh = 0.25;
-    this.maxPolyphony = 6;
+    // (baked from real-stem tuning in the brain-other.html lab, 2026-07-12:
+    // high gate + poly 2 kills harmonic ghosts and ringing-tail regions)
+    this.noteOnThresh = 0.74;
+    this.noteOffThresh = 0.54;
+    this.maxPolyphony = 2;
 
     /** @type {(() => void)|null} */ this.onEnded = null;
   }
