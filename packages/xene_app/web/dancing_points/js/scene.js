@@ -64,8 +64,9 @@ function createScene(canvas) {
     tint: [1.00, 0.56, 0.20],
   };
   const vTrail = { lastPy: vBbox.cy };
-  const vPitchState = { td: null, levPeak: 0.02 };
+  const vPitchState = { td: null, levPeak: 0.02, frame: 0, last: null };
   const vWaveState = { wtd: null };
+  let isMobile = false; // set in resize(); throttles the O(n²) vocal pitch detection on phones
   console.log('[scene] vocals layer built: ' + vocalDots.count + ' dots, ' + (vStream.count * vStream.L) + ' streamer points');
 
   let rotSpeed = 0.1;
@@ -89,6 +90,7 @@ function createScene(canvas) {
     camera.updateProjectionMatrix();
 
     const mobile = Math.min(w, h) < 640;
+    isMobile = mobile;
     const bodyScale = mobile ? 0.72 : 1.0;
     brain.layoutScale = bodyScale;
     blob.layoutScale = bodyScale;
@@ -139,7 +141,15 @@ function createScene(canvas) {
     updateWireframeBlob(blob, t, dt, sig, rotSpeed, tiltX, tiltY);
 
     // VOCALS: pitch-steered dot trail + waveform streamers, from the vocals stem analyser.
-    const vin = readVocalInput(vocalAnalyser, vPitchState);
+    // The pitch detector is O(n²) autocorrelation — the heaviest per-frame CPU cost — so on
+    // mobile run it every 3rd frame and reuse the result between (pitch moves slowly; the
+    // trail/streamer envelopes smooth the gaps). Streamers still read the waveform every frame.
+    vPitchState.frame++;
+    const pitchEvery = isMobile ? 3 : 1;
+    if (!vPitchState.last || (vPitchState.frame % pitchEvery) === 0) {
+      vPitchState.last = readVocalInput(vocalAnalyser, vPitchState);
+    }
+    const vin = vPitchState.last;
     updateBrainTrail(vocalDots, vDotPos, vBbox, vin, t, VOCAL_TUNE, vTrail);
     updateBrainStreamers(vStream, vocalDots, vDotPos, vin.level, VOCAL_TUNE, t, vocalAnalyser, vWaveState);
 
