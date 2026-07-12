@@ -349,19 +349,18 @@ function buildWireframeBlob(opts) {
 }
 
 function updateWireframeBlob(blob, t, dt, sig, rotSpeed, tiltX, tiltY, tune) {
-  // Drum/bass response coefficients. Defaults = the app's tuned values; the
-  // isolation harness (tools/av_debug/blob-drums.html) passes live overrides so
-  // the drum movement can be dialed in without editing this file each pass.
+  // Drum response coefficients. Defaults = the app's tuned values; the isolation
+  // harness (tools/av_debug/blob-drums.html) passes live overrides so the drum
+  // movement can be dialed in without editing this file each pass. The ball reacts
+  // to DRUMS only — bass reactivity was removed (bass is becoming its own asset).
   const T = tune || {};
   const kDrumScale   = T.drumScale   ?? 0.28;
-  const kBassScale   = T.bassScale   ?? 0.08;
   const kDrumAmp     = T.drumAmp     ?? 0.26;
-  const kBassAmp     = T.bassAmp     ?? 0.03;
   const kDrumJitter  = T.drumJitter  ?? 0.12;
   const kJitterFreq  = T.jitterFreq  ?? 9.0;
   const kDrumOpacity = T.drumOpacity ?? 0.34;
 
-  const bass = sig.bass, drums = sig.drums, full = sig.full;
+  const drums = sig.drums, full = sig.full;
   // Spin + reactive scale live on the INNER ball; the OUTER shell only carries
   // the fixed screen-space oval so "wider than tall" stays put as the ball spins.
   const spin = blob.inner || blob.group;
@@ -369,7 +368,7 @@ function updateWireframeBlob(blob, t, dt, sig, rotSpeed, tiltX, tiltY, tune) {
   spin.rotation.x += dt * (0.05 + rotSpeed * 0.15);
   spin.rotation.z = tiltY * 0.08;
   // DRUMS punch the overall scale so a hit is unmistakable, not just subtle.
-  spin.scale.setScalar((blob.layoutScale || 1) * blob.size * (1 + bass * kBassScale + drums * kDrumScale));
+  spin.scale.setScalar((blob.layoutScale || 1) * blob.size * (1 + drums * kDrumScale));
   // Fixed oval: reach farther horizontally than vertically to fill the oblong void.
   blob.group.scale.set(blob.aspectX ?? 1.0, blob.aspectY ?? 1.0, 1.0);
 
@@ -379,7 +378,7 @@ function updateWireframeBlob(blob, t, dt, sig, rotSpeed, tiltX, tiltY, tune) {
   // (squared so only real transients trigger it) feeding a fast high-frequency
   // shimmer — this reads as an electric "snap" on a hit, distinct from the slow
   // baseline sway, and is the first step toward drums live-warping the noise.
-  const amp = 0.008 + drums * kDrumAmp + bass * kBassAmp;
+  const amp = 0.008 + drums * kDrumAmp;
   const jitter = drums * drums * kDrumJitter;
   const w1 = t * 2.1, w2 = t * 1.7, w3 = t * 2.4;
   const jw = t * kJitterFreq;
