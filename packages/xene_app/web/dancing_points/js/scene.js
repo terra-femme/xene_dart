@@ -66,7 +66,7 @@ function createScene(canvas) {
   const vTrail = { lastPy: vBbox.cy };
   const vPitchState = { td: null, levPeak: 0.02, frame: 0, last: null };
   const vWaveState = { wtd: null };
-  let isMobile = false; // set in resize(); throttles the O(n²) vocal pitch detection on phones
+  let smoothDt = 0.016; // EMA of frame time → adaptive throttle (throttle pitch only when FPS drops)
   console.log('[scene] vocals layer built: ' + vocalDots.count + ' dots, ' + (vStream.count * vStream.L) + ' streamer points');
 
   let rotSpeed = 0.1;
@@ -90,7 +90,6 @@ function createScene(canvas) {
     camera.updateProjectionMatrix();
 
     const mobile = Math.min(w, h) < 640;
-    isMobile = mobile;
     const bodyScale = mobile ? 0.72 : 1.0;
     brain.layoutScale = bodyScale;
     blob.layoutScale = bodyScale;
@@ -141,11 +140,14 @@ function createScene(canvas) {
     updateWireframeBlob(blob, t, dt, sig, rotSpeed, tiltX, tiltY);
 
     // VOCALS: pitch-steered dot trail + waveform streamers, from the vocals stem analyser.
-    // The pitch detector is O(n²) autocorrelation — the heaviest per-frame CPU cost — so on
-    // mobile run it every 3rd frame and reuse the result between (pitch moves slowly; the
-    // trail/streamer envelopes smooth the gaps). Streamers still read the waveform every frame.
+    // The pitch detector is O(n²) autocorrelation — the heaviest per-frame CPU cost. Throttle it
+    // ADAPTIVELY: measure smoothed FPS and only skip frames when the device is actually struggling
+    // (a flagship runs it every frame; a laboring/overheating phone auto-backs-off). Pitch moves
+    // slowly and the trail/streamer envelopes smooth the gaps; streamers still read the wave every frame.
+    smoothDt += (dt - smoothDt) * 0.05;
+    const fps = 1 / smoothDt;
+    const pitchEvery = fps < 45 ? 3 : fps < 55 ? 2 : 1;
     vPitchState.frame++;
-    const pitchEvery = isMobile ? 3 : 1;
     if (!vPitchState.last || (vPitchState.frame % pitchEvery) === 0) {
       vPitchState.last = readVocalInput(vocalAnalyser, vPitchState);
     }
