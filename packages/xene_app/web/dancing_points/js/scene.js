@@ -66,7 +66,8 @@ function createScene(canvas) {
   const vTrail = { lastPy: vBbox.cy };
   const vPitchState = { td: null, levPeak: 0.02, frame: 0, last: null };
   const vWaveState = { wtd: null };
-  let smoothDt = 0.016; // EMA of frame time → adaptive throttle (throttle pitch only when FPS drops)
+  let smoothDt = 0.016; // EMA of frame time → adaptive throttle (back off only when FPS drops)
+  let frameNo = 0;      // frame counter for the heavy-loop gating (ball verts, streamers)
   console.log('[scene] vocals layer built: ' + vocalDots.count + ' dots, ' + (vStream.count * vStream.L) + ' streamer points');
 
   let rotSpeed = 0.1;
@@ -132,20 +133,28 @@ function createScene(canvas) {
     tiltY += (targetTiltY - tiltY) * 0.04;
     const t = uniforms.uTime.value;
 
+    // ── Perf gating ─────────────────────────────────────────────────────────
+    // The two legacy CPU loops (ball vertex-dance ~3k pts, vocal streamers ~2.5k pts)
+    // are gated: IDLE (nothing playing) → every 3rd frame; FPS sagging → every 2nd.
+    // Rotation/scale/envelopes still run every frame so nothing visibly stutters.
+    smoothDt += (dt - smoothDt) * 0.05;
+    const fps = 1 / smoothDt;
+    frameNo++;
+    const idle = uniforms.uIdle.value >= 0.5;
+    const heavyEvery = idle ? 3 : fps < 45 ? 2 : 1;
+    const doHeavy = (frameNo % heavyEvery) === 0;
+
     // The brain does NOT react to vocals or the melodic/"other" stem — their own assets carry
     // them (vocals → brain dots, melodic → perimeter regions). Asset isolation.
     const brainSig = { bass: sig.bass, drums: sig.drums, vocals: 0, melody: 0, full: sig.full };
     updateBrainFrame(brain, t, brainSig, tiltX, tiltY);
     updateBrainOtherRegions(otherRegions, keyEnergies);
-    updateWireframeBlob(blob, t, dt, sig, rotSpeed, tiltX, tiltY);
+    updateWireframeBlob(blob, t, dt, sig, rotSpeed, tiltX, tiltY, undefined, doHeavy);
 
     // VOCALS: pitch-steered dot trail + waveform streamers, from the vocals stem analyser.
     // The pitch detector is O(n²) autocorrelation — the heaviest per-frame CPU cost. Throttle it
-    // ADAPTIVELY: measure smoothed FPS and only skip frames when the device is actually struggling
-    // (a flagship runs it every frame; a laboring/overheating phone auto-backs-off). Pitch moves
-    // slowly and the trail/streamer envelopes smooth the gaps; streamers still read the wave every frame.
-    smoothDt += (dt - smoothDt) * 0.05;
-    const fps = 1 / smoothDt;
+    // ADAPTIVELY (full rate ≥55fps, ÷2 at 45–55, ÷3 below): pitch moves slowly and the trail
+    // envelope smooths the gaps, so a struggling/overheating device backs off invisibly.
     const pitchEvery = fps < 45 ? 3 : fps < 55 ? 2 : 1;
     vPitchState.frame++;
     if (!vPitchState.last || (vPitchState.frame % pitchEvery) === 0) {
@@ -153,7 +162,9 @@ function createScene(canvas) {
     }
     const vin = vPitchState.last;
     updateBrainTrail(vocalDots, vDotPos, vBbox, vin, t, VOCAL_TUNE, vTrail);
-    updateBrainStreamers(vStream, vocalDots, vDotPos, vin.level, VOCAL_TUNE, t, vocalAnalyser, vWaveState);
+    if (doHeavy) {
+      updateBrainStreamers(vStream, vocalDots, vDotPos, vin.level, VOCAL_TUNE, t, vocalAnalyser, vWaveState);
+    }
 
     camera.position.x = tiltY * 0.6;
     camera.lookAt(0, -0.05, 0);
@@ -360,7 +371,7 @@ function buildWireframeBlob(opts) {
   return { group, inner, lines, basePositions, radius, size, aspectX, aspectY };
 }
 
-function updateWireframeBlob(blob, t, dt, sig, rotSpeed, tiltX, tiltY, tune) {
+function updateWireframeBlob(blob, t, dt, sig, rotSpeed, tiltX, tiltY, tune, doVerts) {
   // Drum response coefficients. Defaults = the app's tuned values; the isolation
   // harness (tools/av_debug/blob-drums.html) passes live overrides so the drum
   // movement can be dialed in without editing this file each pass. The ball reacts
@@ -390,6 +401,10 @@ function updateWireframeBlob(blob, t, dt, sig, rotSpeed, tiltX, tiltY, tune) {
   // (squared so only real transients trigger it) feeding a fast high-frequency
   // shimmer — this reads as an electric "snap" on a hit, distinct from the slow
   // baseline sway, and is the first step toward drums live-warping the noise.
+  // Vertex-dance loop (~3k points, the ball's main CPU cost) — skippable via doVerts
+  // so createScene can gate it when idle or when FPS sags. Rotation/scale above still
+  // ran, so the ball keeps spinning smoothly; the dance just holds its last pose a frame.
+  if (doVerts === false) return;
   const amp = 0.008 + drums * kDrumAmp;
   const jitter = drums * drums * kDrumJitter;
   const w1 = t * 2.1, w2 = t * 1.7, w3 = t * 2.4;
