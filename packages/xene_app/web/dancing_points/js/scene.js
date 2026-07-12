@@ -131,8 +131,9 @@ function createScene(canvas) {
     tiltY += (targetTiltY - tiltY) * 0.04;
     const t = uniforms.uTime.value;
 
-    // The brain does NOT breathe to vocals — the dots carry vocals (asset isolation).
-    const brainSig = { bass: sig.bass, drums: sig.drums, vocals: 0, melody: sig.melody, full: sig.full };
+    // The brain does NOT react to vocals or the melodic/"other" stem — their own assets carry
+    // them (vocals → brain dots, melodic → perimeter regions). Asset isolation.
+    const brainSig = { bass: sig.bass, drums: sig.drums, vocals: 0, melody: 0, full: sig.full };
     updateBrainFrame(brain, t, brainSig, tiltX, tiltY);
     updateBrainOtherRegions(otherRegions, keyEnergies);
     updateWireframeBlob(blob, t, dt, sig, rotSpeed, tiltX, tiltY);
