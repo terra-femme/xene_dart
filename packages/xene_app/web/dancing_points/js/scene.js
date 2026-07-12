@@ -33,6 +33,11 @@ function createScene(canvas) {
   const otherRegions = buildBrainOtherRegions();
   brain.mesh.add(otherRegions.mesh);
 
+  // ── BASS asset: pulse waves expanding outward from the "other" perimeter ──
+  // Each bass onset fires one GPU-expanded ring (see buildBrainBassWaves).
+  const bassWaves = buildBrainBassWaves();
+  brain.mesh.add(bassWaves.mesh);
+
   // Center noise-ball (drums drive it). Luminous white — the reference used
   // 0x000000 which is invisible on the 0x050509 void, so we override to a
   // bright cool-white so it reads inside the brain's central void.
@@ -151,6 +156,9 @@ function createScene(canvas) {
     const brainSig = { bass: sig.bass, drums: sig.drums, vocals: 0, melody: 0, full: 0 };
     updateBrainFrame(brain, t, brainSig, tiltX, tiltY);
     updateBrainOtherRegions(otherRegions, keyEnergies);
+    // waves fire on onsets of the RAW bass react (percussive edge), not the
+    // smoothed readSignals mix — smoothing would blur the rising edge away.
+    updateBrainBassWaves(bassWaves, t, (signals && signals.bass && signals.bass.react) || 0);
     updateWireframeBlob(blob, t, dt, sig, rotSpeed, tiltX, tiltY, undefined, doHeavy);
 
     // VOCALS: pitch-steered dot trail + waveform streamers, from the vocals stem analyser.
@@ -303,6 +311,116 @@ function updateBrainOtherRegions(reg, keyEnergies, tune) {
     }
   }
   reg.geo.attributes.color.needsUpdate = true;
+}
+
+// ── BASS stem: pulse waves expanding outward from the "other" perimeter ──────
+// A pool of W rings × P points sharing ONE vertex shader: each bass onset
+// stamps a spawn time onto the next ring in the pool, and the GPU pushes its
+// points radially by (uTime - aSpawn) * speed. Per-frame CPU cost ≈ setting one
+// uniform, so it stays cheap on mobile. The emit loop is the convex hull of the
+// baked "other" region nodes (js/brain-other-data.js) — the waves visually
+// radiate from the melodic perimeter band. Prototyped in
+// tools/av_debug/brain-bass-waves.html, which drives these same functions.
+function buildBrainBassWaves(opts) {
+  opts = opts || {};
+  const planeW = opts.planeW ?? 3.35, planeH = opts.planeH ?? 2.23, z = opts.z ?? 0.02;
+  const W = opts.rings ?? 8, P = opts.pointsPerRing ?? 240;
+  const data = (typeof window !== 'undefined' ? window.BRAIN_OTHER_REGIONS : null) || { nodes: [] };
+  const planeNodes = (data.nodes || []).map((nd) => [(nd[0] - 0.5) * planeW, (0.5 - nd[1]) * planeH]);
+
+  // convex hull (monotone chain) → even resample into a P-point loop
+  function convexHull(ptsIn) {
+    const pts = ptsIn.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+    const lo = []; for (const p of pts) { while (lo.length >= 2 && cross(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); }
+    const up = []; for (let i = pts.length - 1; i >= 0; i--) { const p = pts[i]; while (up.length >= 2 && cross(up[up.length - 2], up[up.length - 1], p) <= 0) up.pop(); up.push(p); }
+    lo.pop(); up.pop(); return lo.concat(up);
+  }
+  function sampleLoop(hull, count) {
+    const seg = []; let total = 0;
+    for (let i = 0; i < hull.length; i++) { const a = hull[i], b = hull[(i + 1) % hull.length]; const L = Math.hypot(b[0] - a[0], b[1] - a[1]); seg.push({ a, b, L }); total += L; }
+    const out = []; let acc = 0, si = 0; const step = total / count;
+    for (let k = 0; k < count; k++) { const target = k * step; while (si < seg.length - 1 && acc + seg[si].L < target) { acc += seg[si].L; si++; } const t = seg[si].L ? (target - acc) / seg[si].L : 0; out.push([seg[si].a[0] + (seg[si].b[0] - seg[si].a[0]) * t, seg[si].a[1] + (seg[si].b[1] - seg[si].a[1]) * t]); }
+    return out;
+  }
+  const hull = planeNodes.length >= 3 ? convexHull(planeNodes) : [[-1, -0.6], [1, -0.6], [1, 0.6], [-1, 0.6]];
+  const loop = sampleLoop(hull, P);
+  const cx = loop.reduce((s, p) => s + p[0], 0) / P, cy = loop.reduce((s, p) => s + p[1], 0) / P;
+
+  const N = W * P;
+  const aBase = new Float32Array(N * 3), aDir = new Float32Array(N * 3), aSpawn = new Float32Array(N), aJit = new Float32Array(N);
+  for (let w = 0; w < W; w++) {
+    for (let i = 0; i < P; i++) {
+      const idx = w * P + i, p = loop[i];
+      let dx = p[0] - cx, dy = p[1] - cy; const m = Math.hypot(dx, dy) || 1;
+      aBase[idx * 3] = p[0]; aBase[idx * 3 + 1] = p[1]; aBase[idx * 3 + 2] = z;
+      aDir[idx * 3] = dx / m; aDir[idx * 3 + 1] = dy / m; aDir[idx * 3 + 2] = 0;
+      aSpawn[idx] = -999; aJit[idx] = Math.random() * 2 - 1;
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(N * 3), 3)); // unused; shader builds from aBase
+  geo.setAttribute('aBase', new THREE.BufferAttribute(aBase, 3));
+  geo.setAttribute('aDir', new THREE.BufferAttribute(aDir, 3));
+  geo.setAttribute('aSpawn', new THREE.BufferAttribute(aSpawn, 1).setUsage(THREE.DynamicDrawUsage));
+  geo.setAttribute('aJit', new THREE.BufferAttribute(aJit, 1));
+  const mat = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending,
+    uniforms: { uTime: { value: 0 }, uSpeed: { value: 1.2 }, uLife: { value: 1.2 }, uThick: { value: 0.35 },
+      uSize: { value: 0.018 }, uScale: { value: 620 }, uColor: { value: new THREE.Color().setHSL(330 / 360, 0.85, 0.6) }, uBright: { value: 1.5 } },
+    vertexShader: `
+      attribute vec3 aBase; attribute vec3 aDir; attribute float aSpawn; attribute float aJit;
+      uniform float uTime, uSpeed, uLife, uThick, uSize, uScale;
+      varying float vAlpha;
+      void main() {
+        float age = uTime - aSpawn;
+        float active = (aSpawn > 0.0 && age >= 0.0 && age <= uLife) ? 1.0 : 0.0;
+        float r = age * uSpeed + aJit * uThick;
+        vec3 pos = aBase + aDir * r;
+        vec4 mv = modelViewMatrix * vec4(pos, 1.0);
+        float lifeT = clamp(age / uLife, 0.0, 1.0);
+        vAlpha = active * (1.0 - lifeT) * smoothstep(0.0, 0.10, lifeT);
+        gl_PointSize = uSize * uScale / max(-mv.z, 0.001) * active;
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: `
+      precision mediump float; varying float vAlpha; uniform vec3 uColor; uniform float uBright;
+      void main() { float d = length(gl_PointCoord - 0.5); float a = smoothstep(0.5, 0.0, d) * vAlpha; gl_FragColor = vec4(uColor * uBright, a); }`,
+  });
+  const mesh = new THREE.Points(geo, mat);
+  mesh.frustumCulled = false;
+  mesh.renderOrder = 24;
+  return { mesh, geo, mat, aSpawn, W, P, loop, cursor: 0, lastSpawn: -999, prevReact: 0 };
+}
+
+// Fire one wave (respects minGap so machine-gun onsets don't strobe).
+function spawnBrainBassWave(wv, t, intensity, tune) {
+  const T = tune || {};
+  if (t - wv.lastSpawn < (T.minGap ?? 0.12)) return;
+  wv.lastSpawn = t;
+  const w = wv.cursor; wv.cursor = (wv.cursor + 1) % wv.W;
+  for (let i = 0; i < wv.P; i++) wv.aSpawn[w * wv.P + i] = t;
+  wv.geo.attributes.aSpawn.needsUpdate = true;
+  wv.mat.uniforms.uBright.value = (T.bright ?? 1.5) * (0.5 + 0.5 * intensity);
+}
+
+// BASS drives the waves: a rising edge of the bass stem's react crossing
+// onsetThr fires one expanding ring. `tune` overrides (lab pattern) — defaults
+// are the app's baked values.
+function updateBrainBassWaves(wv, t, bassReact, tune) {
+  if (!wv) return;
+  const T = tune || {};
+  const u = wv.mat.uniforms;
+  u.uTime.value = t;
+  u.uSpeed.value = T.speed ?? 1.2;
+  u.uLife.value = T.life ?? 1.2;
+  u.uThick.value = T.thick ?? 0.35;
+  u.uSize.value = T.size ?? 0.018;
+  if (T.color) u.uColor.value.setRGB(T.color[0], T.color[1], T.color[2]);
+  const thr = T.onsetThr ?? 0.30;
+  const r = bassReact || 0;
+  if (r > thr && wv.prevReact <= thr) spawnBrainBassWave(wv, t, Math.min(1, r), T);
+  wv.prevReact = r;
 }
 
 // A "ball of scribbles": each stroke is a CONTINUOUS polyline (THREE.Line) that
