@@ -266,14 +266,23 @@ function buildBrainOtherRegions(opts) {
 }
 
 // MELODIC stem lights each region by its key's energy; gamma makes the dominant pop.
-function updateBrainOtherRegions(reg, keyEnergies) {
+// Optional `tune` overrides (same pattern as updateWireframeBlob) let the isolation lab
+// (tools/av_debug/brain-other.html) dial the look live; defaults = the app's baked values.
+function updateBrainOtherRegions(reg, keyEnergies, tune) {
   if (!reg || !reg.count) return;
+  const T = tune || {};
+  const gamma  = T.gamma  ?? 1.6;
+  const bright = T.bright ?? 0.9;
+  const cold   = T.cold || [0.30, 0.55, 0.78];   // color at the lit floor …
+  const hot    = T.hot  || [0.60, 0.90, 1.00];   // … blending to this at full energy
   const colors = reg.colors, keys = reg.keys;
   for (let i = 0; i < reg.count; i++) {
     const e = keyEnergies ? keyEnergies[keys[i]] : 0;
-    const lit = Math.pow(e < 0 ? 0 : e > 1 ? 1 : e, 1.6);
-    const b = lit * 0.9;                                   // additive → color IS the emitted light (0 = invisible)
-    const r = (0.30 + lit * 0.30) * b, g = (0.55 + lit * 0.35) * b, bl = (0.78 + lit * 0.22) * b;
+    const lit = Math.pow(e < 0 ? 0 : e > 1 ? 1 : e, gamma);
+    const b = lit * bright;                                // additive → color IS the emitted light (0 = invisible)
+    const r = (cold[0] + lit * (hot[0] - cold[0])) * b;
+    const g = (cold[1] + lit * (hot[1] - cold[1])) * b;
+    const bl = (cold[2] + lit * (hot[2] - cold[2])) * b;
     for (let j = 0; j < 3; j++) {
       const vi = (i * 3 + j) * 3;
       colors[vi] = r; colors[vi + 1] = g; colors[vi + 2] = bl;
