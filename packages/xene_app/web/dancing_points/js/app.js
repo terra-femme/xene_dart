@@ -33,6 +33,8 @@
 
   const engine = new (/** @type {any} */ (window).StemEngine)();
   const scene = createScene($('gl'));
+  // dev: console handle for live-tuning (e.g. xeneEngine.noteOnThresh = 0.4)
+  /** @type {any} */ (window).xeneEngine = engine;
 
   // ---- xene: haptics (the accessibility core). Full-length playback, no cap. ----
   const capDuration = () => engine.duration || 0;

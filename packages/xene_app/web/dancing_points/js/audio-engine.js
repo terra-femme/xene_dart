@@ -107,6 +107,13 @@ class StemEngine {
     /** @type {AnalyserNode|null} */ this._melodyFreq = null;
     /** @type {Uint8Array|null} */ this._freqData = null;
     /** @type {Array<{start:number,end:number}>} */ this._keyBins = [];
+    // note gate state: which keys are currently "held", plus a raw-band scratch.
+    /** @type {Uint8Array} */ this._noteOn = new Uint8Array(88);
+    /** @type {Float32Array} */ this._keyRaw = new Float32Array(88);
+    // note gate hysteresis on raw band energy (0..1): a key must exceed
+    // noteOnThresh to light, and stays lit until it drops below noteOffThresh.
+    this.noteOnThresh = 0.32;
+    this.noteOffThresh = 0.16;
 
     /** @type {(() => void)|null} */ this.onEnded = null;
   }
@@ -354,11 +361,20 @@ class StemEngine {
     this.peak = active.peak;
   }
 
-  /** Fill keyEnergies[88] (0..1 per piano key) from the melodic spectrum. */
+  /**
+   * Fill keyEnergies[88] with NOTE envelopes (0..1 per piano key), not raw band
+   * energy. A key lights only on a real note onset — a local spectral peak above
+   * noteOnThresh that is not the octave harmonic of a stronger note 12 keys
+   * below (kills the skirt of neighbours + overtones that lit many regions per
+   * note). It then HOLDS steady while the band sustains above noteOffThresh,
+   * and releases fast when the note ends — one region, lit for the note's
+   * duration, then done (vocals-style).
+   */
   _updateKeyEnergies() {
     const mf = this._melodyFreq, data = this._freqData, bins = this._keyBins;
+    const e = this.keyEnergies, on = this._noteOn, raw = this._keyRaw;
     if (!mf || !data || !this._playing) {
-      for (let k = 0; k < 88; k++) this.keyEnergies[k] *= 0.86; // fade to dark
+      for (let k = 0; k < 88; k++) { e[k] *= 0.70; on[k] = 0; } // fade to dark
       return;
     }
     mf.getByteFrequencyData(/** @type {any} */ (data));
@@ -366,10 +382,24 @@ class StemEngine {
       const { start, end } = bins[k];
       let sum = 0, n = 0;
       for (let b = start; b <= end && b < data.length; b++) { sum += data[b]; n++; }
-      const avg = n > 0 ? (sum / n) / 255 : 0;
-      const prev = this.keyEnergies[k];
-      // fast attack, smooth release so a struck key lights then fades
-      this.keyEnergies[k] = avg > prev ? avg : prev * 0.82 + avg * 0.18;
+      raw[k] = n > 0 ? (sum / n) / 255 : 0;
+    }
+    const ON = this.noteOnThresh, OFF = this.noteOffThresh;
+    for (let k = 0; k < 88; k++) {
+      if (!on[k]) {
+        const peak = raw[k] > ON
+          && raw[k] >= (k > 0 ? raw[k - 1] : 0)
+          && raw[k] >= (k < 87 ? raw[k + 1] : 0);
+        const harmonic = k >= 12 && raw[k - 12] > ON && raw[k - 12] > raw[k] * 0.85;
+        if (peak && !harmonic) { on[k] = 1; e[k] = Math.min(1, 0.55 + raw[k] * 0.6); }
+        else e[k] *= 0.70; // dark / finishing its release
+      } else if (raw[k] < OFF) {
+        on[k] = 0; e[k] *= 0.70; // note ended → fast release, done
+      } else {
+        // sustain: ease toward the note's current level so it stays lit
+        // without pulsing hard with every tremolo of the band
+        e[k] += (Math.min(1, 0.55 + raw[k] * 0.6) - e[k]) * 0.10;
+      }
     }
   }
 }

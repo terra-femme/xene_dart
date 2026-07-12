@@ -146,7 +146,9 @@ function createScene(canvas) {
 
     // The brain does NOT react to vocals or the melodic/"other" stem — their own assets carry
     // them (vocals → brain dots, melodic → perimeter regions). Asset isolation.
-    const brainSig = { bass: sig.bass, drums: sig.drums, vocals: 0, melody: 0, full: sig.full };
+    // full is zeroed too: it's the WHOLE mix, so any melodic note would leak back
+    // into the brain's breath through it. The brain body breathes on bass only.
+    const brainSig = { bass: sig.bass, drums: sig.drums, vocals: 0, melody: 0, full: 0 };
     updateBrainFrame(brain, t, brainSig, tiltX, tiltY);
     updateBrainOtherRegions(otherRegions, keyEnergies);
     updateWireframeBlob(blob, t, dt, sig, rotSpeed, tiltX, tiltY, undefined, doHeavy);
@@ -241,9 +243,20 @@ function buildBrainOtherRegions(opts) {
   const positions = new Float32Array(T * 9);
   const colors = new Float32Array(T * 9);
   const keys = new Int16Array(T);
+  // ONE dedicated region per key: the data has more triangles than keys (105 vs
+  // 88), so some keys own two — sometimes disjoint patches. Keep only the
+  // largest triangle per key; the rest get key -1 and never light.
+  const bestByKey = new Map();
   for (let i = 0; i < T; i++) {
     const tr = tris[i];
-    keys[i] = tr[3];
+    const a = nodes[tr[0]] || [0, 0], b = nodes[tr[1]] || [0, 0], c = nodes[tr[2]] || [0, 0];
+    const area = Math.abs((b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1]));
+    const best = bestByKey.get(tr[3]);
+    if (!best || area > best.area) bestByKey.set(tr[3], { i, area });
+  }
+  for (let i = 0; i < T; i++) {
+    const tr = tris[i];
+    keys[i] = bestByKey.get(tr[3]).i === i ? tr[3] : -1;
     for (let j = 0; j < 3; j++) {
       const nd = nodes[tr[j]] || [0.5, 0.5];
       const vi = (i * 3 + j) * 3;
@@ -277,7 +290,7 @@ function updateBrainOtherRegions(reg, keyEnergies, tune) {
   const hot    = T.hot  || [0.60, 0.90, 1.00];   // … blending to this at full energy
   const colors = reg.colors, keys = reg.keys;
   for (let i = 0; i < reg.count; i++) {
-    const e = keyEnergies ? keyEnergies[keys[i]] : 0;
+    const e = keyEnergies && keys[i] >= 0 ? keyEnergies[keys[i]] : 0;
     const lit = Math.pow(e < 0 ? 0 : e > 1 ? 1 : e, gamma);
     const b = lit * bright;                                // additive → color IS the emitted light (0 = invisible)
     const r = (cold[0] + lit * (hot[0] - cold[0])) * b;
