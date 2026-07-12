@@ -324,7 +324,9 @@ function updateBrainOtherRegions(reg, keyEnergies, tune) {
 function buildBrainBassWaves(opts) {
   opts = opts || {};
   const planeW = opts.planeW ?? 3.35, planeH = opts.planeH ?? 2.23, z = opts.z ?? 0.02;
-  const W = opts.rings ?? 8, P = opts.pointsPerRing ?? 240;
+  // P must be dense enough that neighboring sprites overlap into a continuous
+  // band (the "solid glowing ring" look) instead of reading as separate dots.
+  const W = opts.rings ?? 8, P = opts.pointsPerRing ?? 720;
   const data = (typeof window !== 'undefined' ? window.BRAIN_OTHER_REGIONS : null) || { nodes: [] };
   const planeNodes = (data.nodes || []).map((nd) => [(nd[0] - 0.5) * planeW, (0.5 - nd[1]) * planeH]);
 
@@ -366,8 +368,8 @@ function buildBrainBassWaves(opts) {
   geo.setAttribute('aJit', new THREE.BufferAttribute(aJit, 1));
   const mat = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending,
-    uniforms: { uTime: { value: 0 }, uSpeed: { value: 1.2 }, uLife: { value: 1.2 }, uThick: { value: 0.35 },
-      uSize: { value: 0.018 }, uScale: { value: 620 }, uColor: { value: new THREE.Color().setHSL(330 / 360, 0.85, 0.6) }, uBright: { value: 1.5 } },
+    uniforms: { uTime: { value: 0 }, uSpeed: { value: 1.2 }, uLife: { value: 1.2 }, uThick: { value: 0.05 },
+      uSize: { value: 0.022 }, uScale: { value: 620 }, uColor: { value: new THREE.Color().setHSL(330 / 360, 0.85, 0.6) }, uBright: { value: 1.5 } },
     vertexShader: `
       attribute vec3 aBase; attribute vec3 aDir; attribute float aSpawn; attribute float aJit;
       uniform float uTime, uSpeed, uLife, uThick, uSize, uScale;
@@ -381,13 +383,22 @@ function buildBrainBassWaves(opts) {
         vec3 pos = aBase + aDir * r;
         vec4 mv = modelViewMatrix * vec4(pos, 1.0);
         float lifeT = clamp(age / uLife, 0.0, 1.0);
-        vAlpha = alive * (1.0 - lifeT) * smoothstep(0.0, 0.10, lifeT);
+        // gaussian shell: full brightness at the band center, soft falloff at
+        // the jittered edges — concentrates the ring instead of scattering it
+        float shell = exp(-aJit * aJit * 3.0);
+        vAlpha = alive * shell * (1.0 - lifeT) * smoothstep(0.0, 0.10, lifeT);
         gl_PointSize = uSize * uScale / max(-mv.z, 0.001) * alive;
         gl_Position = projectionMatrix * mv;
       }`,
     fragmentShader: `
       precision mediump float; varying float vAlpha; uniform vec3 uColor; uniform float uBright;
-      void main() { float d = length(gl_PointCoord - 0.5); float a = smoothstep(0.5, 0.0, d) * vAlpha; gl_FragColor = vec4(uColor * uBright, a); }`,
+      void main() {
+        float d = length(gl_PointCoord - 0.5);
+        float g = smoothstep(0.5, 0.0, d);
+        // g*g sharpens each sprite so overlaps fuse into a crisp band; the
+        // (0.55 + 0.9*g) term gives a hot core with a softer halo around it
+        gl_FragColor = vec4(uColor * uBright * (0.55 + 0.9 * g), g * g * vAlpha);
+      }`,
   });
   const mesh = new THREE.Points(geo, mat);
   mesh.frustumCulled = false;
@@ -416,8 +427,8 @@ function updateBrainBassWaves(wv, t, bassReact, tune) {
   u.uTime.value = t;
   u.uSpeed.value = T.speed ?? 1.2;
   u.uLife.value = T.life ?? 1.2;
-  u.uThick.value = T.thick ?? 0.35;
-  u.uSize.value = T.size ?? 0.018;
+  u.uThick.value = T.thick ?? 0.05;
+  u.uSize.value = T.size ?? 0.022;
   if (T.color) u.uColor.value.setRGB(T.color[0], T.color[1], T.color[2]);
   const thr = T.onsetThr ?? 0.30;
   const r = bassReact || 0;
