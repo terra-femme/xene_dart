@@ -1,0 +1,3 @@
+# generated artifacts — the tool's outputs, not source
+*.wav
+*.chart.json
