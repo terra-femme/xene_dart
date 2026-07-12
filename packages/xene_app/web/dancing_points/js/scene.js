@@ -326,7 +326,8 @@ function buildBrainBassWaves(opts) {
   const planeW = opts.planeW ?? 3.35, planeH = opts.planeH ?? 2.23, z = opts.z ?? 0.02;
   // P must be dense enough that neighboring sprites overlap into a continuous
   // band (the "solid glowing ring" look) instead of reading as separate dots.
-  const W = opts.rings ?? 8, P = opts.pointsPerRing ?? 720;
+  // 8 × 2600 = 20.8k points is still a trivial draw for the GPU pool.
+  const W = opts.rings ?? 8, P = opts.pointsPerRing ?? 2600;
   const data = (typeof window !== 'undefined' ? window.BRAIN_OTHER_REGIONS : null) || { nodes: [] };
   const planeNodes = (data.nodes || []).map((nd) => [(nd[0] - 0.5) * planeW, (0.5 - nd[1]) * planeH]);
 
@@ -369,10 +370,11 @@ function buildBrainBassWaves(opts) {
   const mat = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending,
     uniforms: { uTime: { value: 0 }, uSpeed: { value: 1.2 }, uLife: { value: 1.2 }, uThick: { value: 0.05 },
-      uSize: { value: 0.022 }, uScale: { value: 620 }, uColor: { value: new THREE.Color().setHSL(330 / 360, 0.85, 0.6) }, uBright: { value: 1.5 } },
+      uSize: { value: 0.022 }, uScale: { value: 620 }, uFade: { value: 1.8 },
+      uColor: { value: new THREE.Color().setHSL(330 / 360, 0.85, 0.6) }, uBright: { value: 1.5 } },
     vertexShader: `
       attribute vec3 aBase; attribute vec3 aDir; attribute float aSpawn; attribute float aJit;
-      uniform float uTime, uSpeed, uLife, uThick, uSize, uScale;
+      uniform float uTime, uSpeed, uLife, uThick, uSize, uScale, uFade;
       varying float vAlpha;
       void main() {
         float age = uTime - aSpawn;
@@ -386,7 +388,9 @@ function buildBrainBassWaves(opts) {
         // gaussian shell: full brightness at the band center, soft falloff at
         // the jittered edges — concentrates the ring instead of scattering it
         float shell = exp(-aJit * aJit * 3.0);
-        vAlpha = alive * shell * (1.0 - lifeT) * smoothstep(0.0, 0.10, lifeT);
+        // born at FULL opacity (no fade-in), then a pow-curve fade-out:
+        // uFade > 1 holds near-solid early and drops late; < 1 dims fast
+        vAlpha = alive * shell * pow(1.0 - lifeT, uFade);
         gl_PointSize = uSize * uScale / max(-mv.z, 0.001) * alive;
         gl_Position = projectionMatrix * mv;
       }`,
@@ -429,6 +433,7 @@ function updateBrainBassWaves(wv, t, bassReact, tune) {
   u.uLife.value = T.life ?? 1.2;
   u.uThick.value = T.thick ?? 0.05;
   u.uSize.value = T.size ?? 0.022;
+  u.uFade.value = T.fade ?? 1.8;
   if (T.color) u.uColor.value.setRGB(T.color[0], T.color[1], T.color[2]);
   const thr = T.onsetThr ?? 0.30;
   const r = bassReact || 0;
