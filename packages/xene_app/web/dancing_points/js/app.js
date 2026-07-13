@@ -85,8 +85,13 @@
     hapticDot.style.transform = 'translateX(-50%) scale(0.7)';
   }
   let hapticsOn = ('vibrate' in navigator) || hapticBridge;
-  let prevReactForHaptic = 0;
   const HAPTIC_THRESHOLD = 0.45;
+  // Haptics listen to BASS + DRUMS together (each with its own rising-edge
+  // state), independent of the selected Reactive Source. 'full' is the
+  // fallback when neither stem is loaded (e.g. master-only playback).
+  const HAPTIC_SOURCES = ['drums', 'bass'];
+  /** @type {Record<string, number>} */
+  const prevReactForHaptic = { drums: 0, bass: 0, full: 0 };
 
   const state = {
     source: 'vocals',
@@ -591,13 +596,23 @@
       engine.seek(crop.start);
     }
 
-    // fire a haptic pulse on each RISING beat in the isolated source
-    if (hapticsOn && playing) {
-      if (engine.react > HAPTIC_THRESHOLD && prevReactForHaptic <= HAPTIC_THRESHOLD) {
-        fireHaptic(Math.min(1, engine.react));
+    // fire a haptic pulse on each RISING beat in bass OR drums (fallback:
+    // the full-mix signal when neither stem is present). One pulse per frame
+    // max — simultaneous kick+bass fires once at the stronger intensity.
+    const chart = engine.chart;
+    const hapticKeys = HAPTIC_SOURCES.some((k) =>
+      chart ? !!chart.signals[k] : !!engine.buffers[k])
+      ? HAPTIC_SOURCES
+      : ['full'];
+    let hapticHit = 0;
+    for (const k of hapticKeys) {
+      const r = (engine.signals[k] && engine.signals[k].react) || 0;
+      if (playing && r > HAPTIC_THRESHOLD && prevReactForHaptic[k] <= HAPTIC_THRESHOLD) {
+        hapticHit = Math.max(hapticHit, r);
       }
+      prevReactForHaptic[k] = r;
     }
-    prevReactForHaptic = engine.react;
+    if (hapticsOn && hapticHit > 0) fireHaptic(Math.min(1, hapticHit));
 
     // meters
     mLevel.style.width = Math.min(100, (engine.level / (engine.peak + 1e-5)) * 100) + '%';
