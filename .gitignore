@@ -35,6 +35,7 @@ supabase/*
 !supabase/migrations/
 supabase/migrations/*
 !supabase/migrations/20260706000000_add_soundcloud_date_evidence.sql
+!supabase/migrations/20260712000000_add_av_tracks.sql
 
 # Local IDE / agent state
 .claude/

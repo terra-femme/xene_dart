@@ -16,6 +16,7 @@ import {
   Activity,
   LogOut,
   Search,
+  AudioWaveform,
 } from 'lucide-react'
 import { Separator } from '@/components/ui/separator'
 
@@ -31,6 +32,7 @@ const navItems = [
   { href: '/dashboard/social', label: 'Social', Icon: Share2 },
   { href: '/dashboard/users', label: 'Users', Icon: Users },
   { href: '/dashboard/game', label: 'Game', Icon: Gamepad2 },
+  { href: '/dashboard/av-tracks', label: 'AV Tracks', Icon: AudioWaveform },
   { href: '/dashboard/press-scout', label: 'Press Scout', Icon: Search },
   { href: '/dashboard/monitor', label: 'Monitor', Icon: Activity },
 ]
