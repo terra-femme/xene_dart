@@ -403,9 +403,9 @@ function buildBrainBassWaves(opts) {
         // born at FULL opacity, then a pow-curve fade-out: uFade > 1 holds
         // near-solid early and drops late; < 1 dims fast then lingers
         vAlpha = alive * pow(1.0 - lifeT, uFade);
-        // 1.0 at the leading (outer) edge, 0.0 at the trailing (inner) edge —
-        // the fragment shader turns this into the comet-tail gradient
-        vEdge = aEdge + 0.5;
+        // 1.0 at the INNER edge (closest to the brain), 0.0 at the outer —
+        // the band is opaque near the brain and dissolves as it reaches away
+        vEdge = 0.5 - aEdge;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
       }`,
     fragmentShader: `
