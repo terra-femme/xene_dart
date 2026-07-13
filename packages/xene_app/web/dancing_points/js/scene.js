@@ -313,142 +313,146 @@ function updateBrainOtherRegions(reg, keyEnergies, tune) {
   reg.geo.attributes.color.needsUpdate = true;
 }
 
-// ── BASS stem: pulse waves expanding outward from the "other" perimeter ──────
-// A pool of W ring RIBBONS sharing ONE vertex shader: each bass onset stamps a
-// spawn time onto the next ring in the pool, and the GPU slides that ribbon
-// radially by (uTime - aSpawn) * speed. Per-frame CPU cost ≈ setting one
-// uniform, so it stays cheap on mobile. The emit loop is the convex hull of the
-// baked "other" region nodes (js/brain-other-data.js) — the waves visually
-// radiate from the melodic perimeter band. Prototyped in
+// ── BASS stem: ripple droplets in the open space around the brain ────────────
+// Each bass onset spawns one DROPLET — a solid center dot plus R concentric
+// rings that expand outward and fade off ring by ring (a water-drop ripple) —
+// at a spot OUTSIDE the brain/network "no zone" ellipse. A pool of D droplets
+// shares ONE vertex shader; spawning stamps a center + time and the GPU does
+// the rest, so per-frame CPU cost stays ≈ one uniform. Prototyped in
 // tools/av_debug/brain-bass-waves.html, which drives these same functions.
 function buildBrainBassWaves(opts) {
   opts = opts || {};
-  const planeW = opts.planeW ?? 3.35, planeH = opts.planeH ?? 2.23, z = opts.z ?? 0.02;
-  // P = segments around the loop. Each ring is a solid RIBBON (see below),
-  // so P only controls curve smoothness — 512 is plenty for a convex hull.
-  // W = 20 concurrent rings: life 1.76s / minGap 0.09s ≈ 20 alive worst-case.
-  const W = opts.rings ?? 20, P = opts.segments ?? 512;
-  const data = (typeof window !== 'undefined' ? window.BRAIN_OTHER_REGIONS : null) || { nodes: [] };
-  const planeNodes = (data.nodes || []).map((nd) => [(nd[0] - 0.5) * planeW, (0.5 - nd[1]) * planeH]);
+  const D = opts.droplets ?? 10; // concurrent droplets in the pool
+  const R = opts.rings ?? 4;     // expanding rings per droplet
+  const P = opts.segments ?? 48; // segments per circle (droplets are small)
+  const z = opts.z ?? 0.02;
 
-  // convex hull (monotone chain) → even resample into a P-point loop
-  function convexHull(ptsIn) {
-    const pts = ptsIn.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-    const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
-    const lo = []; for (const p of pts) { while (lo.length >= 2 && cross(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); }
-    const up = []; for (let i = pts.length - 1; i >= 0; i--) { const p = pts[i]; while (up.length >= 2 && cross(up[up.length - 2], up[up.length - 1], p) <= 0) up.pop(); up.push(p); }
-    lo.pop(); up.pop(); return lo.concat(up);
-  }
-  function sampleLoop(hull, count) {
-    const seg = []; let total = 0;
-    for (let i = 0; i < hull.length; i++) { const a = hull[i], b = hull[(i + 1) % hull.length]; const L = Math.hypot(b[0] - a[0], b[1] - a[1]); seg.push({ a, b, L }); total += L; }
-    const out = []; let acc = 0, si = 0; const step = total / count;
-    for (let k = 0; k < count; k++) { const target = k * step; while (si < seg.length - 1 && acc + seg[si].L < target) { acc += seg[si].L; si++; } const t = seg[si].L ? (target - acc) / seg[si].L : 0; out.push([seg[si].a[0] + (seg[si].b[0] - seg[si].a[0]) * t, seg[si].a[1] + (seg[si].b[1] - seg[si].a[1]) * t]); }
-    return out;
-  }
-  const hull = planeNodes.length >= 3 ? convexHull(planeNodes) : [[-1, -0.6], [1, -0.6], [1, 0.6], [-1, 0.6]];
-  const loop = sampleLoop(hull, P);
-  const cx = loop.reduce((s, p) => s + p[0], 0) / P, cy = loop.reduce((s, p) => s + p[1], 0) / P;
-
-  // Each ring is a closed triangle-strip RIBBON: every loop point contributes
-  // an inner and an outer vertex (aEdge ∓0.5), joined into quads around the
-  // loop. The shader slides the whole ribbon outward — a solid continuous
-  // stroke with hard edges and exact width (the crisp concentric-circles
-  // look). Point sprites can't do this: they always read as dots or glow.
-  const VPR = P * 2; // vertices per ring
-  const N = W * VPR;
-  const aBase = new Float32Array(N * 3), aDir = new Float32Array(N * 3), aEdge = new Float32Array(N), aSpawn = new Float32Array(N);
+  // Per droplet: a filled dot disc (ribbon from r=0 to the rim) followed by R
+  // ring ribbons (aEdge ∓0.5 across the stroke). All circles share aUnit (the
+  // unit-circle direction); the shader scales it by each part's live radius.
+  const VPD = P * 2 * (1 + R); // vertices per droplet
+  const N = D * VPD;
+  const aCenter = new Float32Array(N * 3), aUnit = new Float32Array(N * 2);
+  const aEdge = new Float32Array(N), aRing = new Float32Array(N), aSpawn = new Float32Array(N);
   const index = [];
-  for (let w = 0; w < W; w++) {
-    for (let i = 0; i < P; i++) {
-      const p = loop[i];
-      let dx = p[0] - cx, dy = p[1] - cy; const m = Math.hypot(dx, dy) || 1;
-      for (let e = 0; e < 2; e++) {
-        const idx = (w * P + i) * 2 + e;
-        aBase[idx * 3] = p[0]; aBase[idx * 3 + 1] = p[1]; aBase[idx * 3 + 2] = z;
-        aDir[idx * 3] = dx / m; aDir[idx * 3 + 1] = dy / m; aDir[idx * 3 + 2] = 0;
-        aEdge[idx] = e === 0 ? -0.5 : 0.5;
-        aSpawn[idx] = -999;
+  for (let d = 0; d < D; d++) {
+    for (let k = 0; k <= R; k++) { // k=0 → dot, k≥1 → ring k
+      const off = d * VPD + k * P * 2;
+      for (let i = 0; i < P; i++) {
+        const ang = (i / P) * Math.PI * 2, ca = Math.cos(ang), sa = Math.sin(ang);
+        for (let e = 0; e < 2; e++) {
+          const idx = off + i * 2 + e;
+          aUnit[idx * 2] = ca; aUnit[idx * 2 + 1] = sa;
+          aEdge[idx] = k === 0 ? e : (e === 0 ? -0.5 : 0.5);
+          aRing[idx] = k;
+          aSpawn[idx] = -999;
+          aCenter[idx * 3 + 2] = z;
+        }
+        const a = off + i * 2, b = off + ((i + 1) % P) * 2;
+        index.push(a, b, a + 1, a + 1, b, b + 1);
       }
-      const a = (w * P + i) * 2, b = (w * P + ((i + 1) % P)) * 2;
-      index.push(a, b, a + 1, a + 1, b, b + 1);
     }
   }
   const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(N * 3), 3)); // unused; shader builds from aBase
-  geo.setAttribute('aBase', new THREE.BufferAttribute(aBase, 3));
-  geo.setAttribute('aDir', new THREE.BufferAttribute(aDir, 3));
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(N * 3), 3)); // unused; shader builds from aCenter/aUnit
+  geo.setAttribute('aCenter', new THREE.BufferAttribute(aCenter, 3).setUsage(THREE.DynamicDrawUsage));
+  geo.setAttribute('aUnit', new THREE.BufferAttribute(aUnit, 2));
   geo.setAttribute('aEdge', new THREE.BufferAttribute(aEdge, 1));
+  geo.setAttribute('aRing', new THREE.BufferAttribute(aRing, 1));
   geo.setAttribute('aSpawn', new THREE.BufferAttribute(aSpawn, 1).setUsage(THREE.DynamicDrawUsage));
   geo.setIndex(index);
   const mat = new THREE.ShaderMaterial({
-    // NORMAL blending (not additive): the reference strokes are flat solid
-    // color — born opaque, alpha-faded out. Additive would bloom to white.
+    // NORMAL blending: flat solid color, alpha-faded — no additive bloom
     transparent: true, depthWrite: false, depthTest: false, side: THREE.DoubleSide,
-    // baked from the user's 2026-07-12 lab session (brain-bass-waves.html)
-    uniforms: { uTime: { value: 0 }, uSpeed: { value: 1.2 }, uLife: { value: 1.76 }, uThick: { value: 0.301 },
-      uFade: { value: 4.0 }, uTail: { value: 2.1 },
-      uColor: { value: new THREE.Color().setHSL(217 / 360, 0.85, 0.6) }, uBright: { value: 0.6 } },
+    uniforms: { uTime: { value: 0 }, uSpeed: { value: 0.5 }, uLife: { value: 1.6 },
+      uDotR: { value: 0.055 }, uStroke: { value: 0.02 }, uRingGap: { value: 0.18 },
+      uReach: { value: 0.5 }, uTail: { value: 1.6 }, uFade: { value: 2.5 },
+      uColor: { value: new THREE.Color().setHSL(217 / 360, 0.85, 0.6) }, uBright: { value: 0.8 } },
     vertexShader: `
-      attribute vec3 aBase; attribute vec3 aDir; attribute float aEdge; attribute float aSpawn;
-      uniform float uTime, uSpeed, uLife, uThick, uFade;
-      varying float vAlpha; varying float vEdge;
+      attribute vec3 aCenter; attribute vec2 aUnit;
+      attribute float aEdge, aRing, aSpawn;
+      uniform float uTime, uSpeed, uLife, uDotR, uStroke, uRingGap, uReach, uTail, uFade;
+      varying float vAlpha;
       void main() {
         float age = uTime - aSpawn;
         // 'alive', not 'active' — 'active' is a RESERVED word in GLSL ES 3.00,
         // which three.js auto-targets on WebGL2 (#version 300 es conversion)
         float alive = (aSpawn > 0.0 && age >= 0.0 && age <= uLife) ? 1.0 : 0.0;
         float lifeT = clamp(age / uLife, 0.0, 1.0);
-        // dead rings collapse to zero-area triangles at the base loop
-        vec3 pos = aBase + aDir * (age * uSpeed + aEdge * uThick) * alive;
-        // born at FULL opacity, then a pow-curve fade-out: uFade > 1 holds
-        // near-solid early and drops late; < 1 dims fast then lingers
-        vAlpha = alive * pow(1.0 - lifeT, uFade);
-        // 1.0 at the INNER edge (closest to the brain), 0.0 at the outer —
-        // the band is opaque near the brain and dissolves as it reaches away
-        vEdge = 0.5 - aEdge;
+        float r, ringA;
+        if (aRing < 0.5) {
+          // solid center dot: aEdge 0 = center, 1 = rim
+          r = aEdge * uDotR;
+          ringA = 1.0;
+        } else {
+          // ring k leaves the dot rim after its stagger delay, expands at
+          // uSpeed, and fades to none by the time it has traveled uReach
+          float ringAge = age - (aRing - 1.0) * uRingGap;
+          float travel = max(ringAge, 0.0) * uSpeed;
+          r = uDotR + travel + aEdge * uStroke;
+          float x = clamp(travel / uReach, 0.0, 1.0);
+          ringA = (ringAge > 0.0 ? 1.0 : 0.0) * pow(1.0 - x, uTail);
+        }
+        // dead droplets collapse to zero-area triangles at their center
+        vec3 pos = vec3(aCenter.xy + aUnit * r * alive, aCenter.z);
+        // whole droplet also fades out over its life (uFade pow curve)
+        vAlpha = alive * ringA * pow(1.0 - lifeT, uFade);
         gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
       }`,
     fragmentShader: `
-      precision mediump float; varying float vAlpha; varying float vEdge;
-      uniform vec3 uColor; uniform float uBright, uTail;
-      void main() {
-        // comet band: opaque at the wavefront, gradient tail dissolving to
-        // none behind it. uTail > 1 hugs the alpha to the front edge.
-        gl_FragColor = vec4(uColor * uBright, vAlpha * pow(vEdge, uTail));
-      }`,
+      precision mediump float; varying float vAlpha;
+      uniform vec3 uColor; uniform float uBright;
+      void main() { gl_FragColor = vec4(uColor * uBright, vAlpha); }`,
   });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.frustumCulled = false;
   mesh.renderOrder = 24;
-  return { mesh, geo, mat, aSpawn, W, P, VPR, loop, cursor: 0, lastSpawn: -999, prevReact: 0 };
+  return { mesh, geo, mat, aSpawn, aCenter, D, VPD, cursor: 0, lastSpawn: -999, prevReact: 0 };
 }
 
-// Fire one wave (respects minGap so machine-gun onsets don't strobe).
+// Fire one droplet (respects minGap so machine-gun onsets don't strobe).
+// Placement: rejection-sample inside the spread box but OUTSIDE the no-zone
+// ellipse (brain + network); after 24 tries keep the most-outside candidate.
 function spawnBrainBassWave(wv, t, intensity, tune) {
   const T = tune || {};
-  if (t - wv.lastSpawn < (T.minGap ?? 0.09)) return;
+  if (t - wv.lastSpawn < (T.minGap ?? 0.16)) return;
   wv.lastSpawn = t;
-  const w = wv.cursor; wv.cursor = (wv.cursor + 1) % wv.W;
-  const vpr = wv.VPR || wv.P;
-  for (let i = 0; i < vpr; i++) wv.aSpawn[w * vpr + i] = t;
+  const inX = T.zoneW ?? 2.05, inY = T.zoneH ?? 1.5;
+  const outX = T.spreadW ?? 2.45, outY = T.spreadH ?? 1.32;
+  let x = outX, y = 0, best = -1;
+  for (let tries = 0; tries < 24; tries++) {
+    const cx = (Math.random() * 2 - 1) * outX, cy = (Math.random() * 2 - 1) * outY;
+    const m = (cx / inX) * (cx / inX) + (cy / inY) * (cy / inY);
+    if (m > best) { best = m; x = cx; y = cy; }
+    if (m > 1) break;
+  }
+  const d = wv.cursor; wv.cursor = (wv.cursor + 1) % wv.D;
+  for (let i = 0; i < wv.VPD; i++) {
+    const idx = d * wv.VPD + i;
+    wv.aSpawn[idx] = t;
+    wv.aCenter[idx * 3] = x; wv.aCenter[idx * 3 + 1] = y;
+  }
   wv.geo.attributes.aSpawn.needsUpdate = true;
-  wv.mat.uniforms.uBright.value = (T.bright ?? 0.6) * (0.5 + 0.5 * intensity);
+  wv.geo.attributes.aCenter.needsUpdate = true;
+  wv.mat.uniforms.uBright.value = (T.bright ?? 0.8) * (0.5 + 0.5 * intensity);
 }
 
-// BASS drives the waves: a rising edge of the bass stem's react crossing
-// onsetThr fires one expanding ring. `tune` overrides (lab pattern) — defaults
-// are the app's baked values.
+// BASS drives the droplets: a rising edge of the bass stem's react crossing
+// onsetThr fires one ripple. `tune` overrides (lab pattern) — defaults are the
+// app's baked values.
 function updateBrainBassWaves(wv, t, bassReact, tune) {
   if (!wv) return;
   const T = tune || {};
   const u = wv.mat.uniforms;
   u.uTime.value = t;
-  u.uSpeed.value = T.speed ?? 1.2;
-  u.uLife.value = T.life ?? 1.76;
-  u.uThick.value = T.thick ?? 0.301;
-  u.uFade.value = T.fade ?? 4.0;
-  u.uTail.value = T.tail ?? 2.1;
+  u.uSpeed.value = T.speed ?? 0.5;
+  u.uLife.value = T.life ?? 1.6;
+  u.uDotR.value = T.dotR ?? 0.055;
+  u.uStroke.value = T.stroke ?? 0.02;
+  u.uRingGap.value = T.ringGap ?? 0.18;
+  u.uReach.value = T.reach ?? 0.5;
+  u.uTail.value = T.tail ?? 1.6;
+  u.uFade.value = T.fade ?? 2.5;
   if (T.color) u.uColor.value.setRGB(T.color[0], T.color[1], T.color[2]);
   const thr = T.onsetThr ?? 0.30;
   const r = bassReact || 0;
