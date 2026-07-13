@@ -314,9 +314,9 @@ function updateBrainOtherRegions(reg, keyEnergies, tune) {
 }
 
 // ── BASS stem: pulse waves expanding outward from the "other" perimeter ──────
-// A pool of W rings × P points sharing ONE vertex shader: each bass onset
-// stamps a spawn time onto the next ring in the pool, and the GPU pushes its
-// points radially by (uTime - aSpawn) * speed. Per-frame CPU cost ≈ setting one
+// A pool of W ring RIBBONS sharing ONE vertex shader: each bass onset stamps a
+// spawn time onto the next ring in the pool, and the GPU slides that ribbon
+// radially by (uTime - aSpawn) * speed. Per-frame CPU cost ≈ setting one
 // uniform, so it stays cheap on mobile. The emit loop is the convex hull of the
 // baked "other" region nodes (js/brain-other-data.js) — the waves visually
 // radiate from the melodic perimeter band. Prototyped in
@@ -324,10 +324,10 @@ function updateBrainOtherRegions(reg, keyEnergies, tune) {
 function buildBrainBassWaves(opts) {
   opts = opts || {};
   const planeW = opts.planeW ?? 3.35, planeH = opts.planeH ?? 2.23, z = opts.z ?? 0.02;
-  // P must be dense enough that neighboring sprites overlap into a continuous
-  // band (the "solid glowing ring" look) instead of reading as separate dots.
-  // 8 × 2600 = 20.8k points is still a trivial draw for the GPU pool.
-  const W = opts.rings ?? 8, P = opts.pointsPerRing ?? 2600;
+  // P = segments around the loop. Each ring is a solid RIBBON (see below),
+  // so P only controls curve smoothness — 512 is plenty for a convex hull.
+  // W = 12 concurrent rings: life 1.2s / minGap 0.12s ≈ 10 alive at once.
+  const W = opts.rings ?? 12, P = opts.segments ?? 512;
   const data = (typeof window !== 'undefined' ? window.BRAIN_OTHER_REGIONS : null) || { nodes: [] };
   const planeNodes = (data.nodes || []).map((nd) => [(nd[0] - 0.5) * planeW, (0.5 - nd[1]) * planeH]);
 
@@ -350,74 +350,69 @@ function buildBrainBassWaves(opts) {
   const loop = sampleLoop(hull, P);
   const cx = loop.reduce((s, p) => s + p[0], 0) / P, cy = loop.reduce((s, p) => s + p[1], 0) / P;
 
-  const N = W * P;
-  const aBase = new Float32Array(N * 3), aDir = new Float32Array(N * 3), aSpawn = new Float32Array(N), aJit = new Float32Array(N), aLife = new Float32Array(N);
+  // Each ring is a closed triangle-strip RIBBON: every loop point contributes
+  // an inner and an outer vertex (aEdge ∓0.5), joined into quads around the
+  // loop. The shader slides the whole ribbon outward — a solid continuous
+  // stroke with hard edges and exact width (the crisp concentric-circles
+  // look). Point sprites can't do this: they always read as dots or glow.
+  const VPR = P * 2; // vertices per ring
+  const N = W * VPR;
+  const aBase = new Float32Array(N * 3), aDir = new Float32Array(N * 3), aEdge = new Float32Array(N), aSpawn = new Float32Array(N);
+  const index = [];
   for (let w = 0; w < W; w++) {
     for (let i = 0; i < P; i++) {
-      const idx = w * P + i, p = loop[i];
+      const p = loop[i];
       let dx = p[0] - cx, dy = p[1] - cy; const m = Math.hypot(dx, dy) || 1;
-      aBase[idx * 3] = p[0]; aBase[idx * 3 + 1] = p[1]; aBase[idx * 3 + 2] = z;
-      aDir[idx * 3] = dx / m; aDir[idx * 3 + 1] = dy / m; aDir[idx * 3 + 2] = 0;
-      aSpawn[idx] = -999; aJit[idx] = Math.random() * 2 - 1;
-      // per-point lifetime multiplier: points die at DIFFERENT times, so the
-      // ring dissolves particle-by-particle (fades in NUMBER, not just alpha)
-      aLife[idx] = 0.45 + 0.55 * Math.random();
+      for (let e = 0; e < 2; e++) {
+        const idx = (w * P + i) * 2 + e;
+        aBase[idx * 3] = p[0]; aBase[idx * 3 + 1] = p[1]; aBase[idx * 3 + 2] = z;
+        aDir[idx * 3] = dx / m; aDir[idx * 3 + 1] = dy / m; aDir[idx * 3 + 2] = 0;
+        aEdge[idx] = e === 0 ? -0.5 : 0.5;
+        aSpawn[idx] = -999;
+      }
+      const a = (w * P + i) * 2, b = (w * P + ((i + 1) % P)) * 2;
+      index.push(a, b, a + 1, a + 1, b, b + 1);
     }
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(N * 3), 3)); // unused; shader builds from aBase
   geo.setAttribute('aBase', new THREE.BufferAttribute(aBase, 3));
   geo.setAttribute('aDir', new THREE.BufferAttribute(aDir, 3));
+  geo.setAttribute('aEdge', new THREE.BufferAttribute(aEdge, 1));
   geo.setAttribute('aSpawn', new THREE.BufferAttribute(aSpawn, 1).setUsage(THREE.DynamicDrawUsage));
-  geo.setAttribute('aJit', new THREE.BufferAttribute(aJit, 1));
-  geo.setAttribute('aLife', new THREE.BufferAttribute(aLife, 1));
+  geo.setIndex(index);
   const mat = new THREE.ShaderMaterial({
-    transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending,
-    uniforms: { uTime: { value: 0 }, uSpeed: { value: 1.2 }, uLife: { value: 1.2 }, uThick: { value: 0.05 },
-      uSize: { value: 0.028 }, uScale: { value: 620 }, uFade: { value: 1.8 },
+    // NORMAL blending (not additive): the reference strokes are flat solid
+    // color — born opaque, alpha-faded out. Additive would bloom to white.
+    transparent: true, depthWrite: false, depthTest: false, side: THREE.DoubleSide,
+    uniforms: { uTime: { value: 0 }, uSpeed: { value: 1.2 }, uLife: { value: 1.2 }, uThick: { value: 0.03 },
+      uFade: { value: 1.8 },
       uColor: { value: new THREE.Color().setHSL(330 / 360, 0.85, 0.6) }, uBright: { value: 1.5 } },
     vertexShader: `
-      attribute vec3 aBase; attribute vec3 aDir; attribute float aSpawn; attribute float aJit; attribute float aLife;
-      uniform float uTime, uSpeed, uLife, uThick, uSize, uScale, uFade;
+      attribute vec3 aBase; attribute vec3 aDir; attribute float aEdge; attribute float aSpawn;
+      uniform float uTime, uSpeed, uLife, uThick, uFade;
       varying float vAlpha;
       void main() {
         float age = uTime - aSpawn;
-        // each point owns its lifetime (uLife × aLife ∈ [0.45,1.0]) so the ring
-        // dissolves particle-by-particle instead of blinking out all at once
-        float pLife = uLife * aLife;
         // 'alive', not 'active' — 'active' is a RESERVED word in GLSL ES 3.00,
         // which three.js auto-targets on WebGL2 (#version 300 es conversion)
-        float alive = (aSpawn > 0.0 && age >= 0.0 && age <= pLife) ? 1.0 : 0.0;
-        float r = age * uSpeed + aJit * uThick;
-        vec3 pos = aBase + aDir * r;
-        vec4 mv = modelViewMatrix * vec4(pos, 1.0);
-        float lifeT = clamp(age / pLife, 0.0, 1.0);
-        // gaussian shell: full brightness at the band center, soft falloff at
-        // the jittered edges — concentrates the ring instead of scattering it
-        float shell = exp(-aJit * aJit * 3.0);
-        // born at FULL opacity (no fade-in), then a pow-curve fade-out:
-        // uFade > 1 holds near-solid early and drops late; < 1 dims fast
-        vAlpha = alive * shell * pow(1.0 - lifeT, uFade);
-        // circumference grows as the ring expands — grow the sprites with it
-        // so coverage stays continuous instead of opening into dots
-        float grow = 1.0 + age * uSpeed * 0.55;
-        gl_PointSize = uSize * uScale * grow / max(-mv.z, 0.001) * alive;
-        gl_Position = projectionMatrix * mv;
+        float alive = (aSpawn > 0.0 && age >= 0.0 && age <= uLife) ? 1.0 : 0.0;
+        float lifeT = clamp(age / uLife, 0.0, 1.0);
+        // dead rings collapse to zero-area triangles at the base loop
+        vec3 pos = aBase + aDir * (age * uSpeed + aEdge * uThick) * alive;
+        // born at FULL opacity, then a pow-curve fade-out: uFade > 1 holds
+        // near-solid early and drops late; < 1 dims fast then lingers
+        vAlpha = alive * pow(1.0 - lifeT, uFade);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
       }`,
     fragmentShader: `
       precision mediump float; varying float vAlpha; uniform vec3 uColor; uniform float uBright;
-      void main() {
-        float d = length(gl_PointCoord - 0.5);
-        float g = smoothstep(0.5, 0.0, d);
-        // g*g sharpens each sprite so overlaps fuse into a crisp band; the
-        // (0.55 + 0.9*g) term gives a hot core with a softer halo around it
-        gl_FragColor = vec4(uColor * uBright * (0.55 + 0.9 * g), g * g * vAlpha);
-      }`,
+      void main() { gl_FragColor = vec4(uColor * uBright, vAlpha); }`,
   });
-  const mesh = new THREE.Points(geo, mat);
+  const mesh = new THREE.Mesh(geo, mat);
   mesh.frustumCulled = false;
   mesh.renderOrder = 24;
-  return { mesh, geo, mat, aSpawn, W, P, loop, cursor: 0, lastSpawn: -999, prevReact: 0 };
+  return { mesh, geo, mat, aSpawn, W, P, VPR, loop, cursor: 0, lastSpawn: -999, prevReact: 0 };
 }
 
 // Fire one wave (respects minGap so machine-gun onsets don't strobe).
@@ -426,7 +421,8 @@ function spawnBrainBassWave(wv, t, intensity, tune) {
   if (t - wv.lastSpawn < (T.minGap ?? 0.12)) return;
   wv.lastSpawn = t;
   const w = wv.cursor; wv.cursor = (wv.cursor + 1) % wv.W;
-  for (let i = 0; i < wv.P; i++) wv.aSpawn[w * wv.P + i] = t;
+  const vpr = wv.VPR || wv.P;
+  for (let i = 0; i < vpr; i++) wv.aSpawn[w * vpr + i] = t;
   wv.geo.attributes.aSpawn.needsUpdate = true;
   wv.mat.uniforms.uBright.value = (T.bright ?? 1.5) * (0.5 + 0.5 * intensity);
 }
@@ -441,8 +437,7 @@ function updateBrainBassWaves(wv, t, bassReact, tune) {
   u.uTime.value = t;
   u.uSpeed.value = T.speed ?? 1.2;
   u.uLife.value = T.life ?? 1.2;
-  u.uThick.value = T.thick ?? 0.05;
-  u.uSize.value = T.size ?? 0.028;
+  u.uThick.value = T.thick ?? 0.03;
   u.uFade.value = T.fade ?? 1.8;
   if (T.color) u.uColor.value.setRGB(T.color[0], T.color[1], T.color[2]);
   const thr = T.onsetThr ?? 0.30;
