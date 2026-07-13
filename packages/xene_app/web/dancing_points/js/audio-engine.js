@@ -130,6 +130,13 @@ class StemEngine {
     this.noteOffThresh = 0.54;
     this.maxPolyphony = 2;
 
+    // ---- chart drive mode (playlist playback) ----
+    // A precomputed reactivity chart (see chart-gen.js). When set, signals +
+    // keyEnergies are read from the chart at currentTime instead of live DSP —
+    // so playlist tracks only ship the audible master (+ vocal stem for the
+    // waveform trail). NULL = normal live-DSP analysis of the loaded stems.
+    /** @type {any} */ this.chart = null;
+
     /** @type {(() => void)|null} */ this.onEnded = null;
   }
 
@@ -299,6 +306,36 @@ class StemEngine {
     this._playing = false;
   }
 
+  /** Drop every decoded slot (the playlist swaps tracks wholesale). */
+  reset() {
+    this.stop();
+    this.buffers = {};
+    this._duration = 0;
+    this.chart = null;
+    for (const sig of Object.values(this.signals)) {
+      sig.level = 0; sig.react = 0; sig.reactSlow = 0;
+      sig.peak = 0.0001; sig.baseline = 0; sig.prevLevel = 0;
+    }
+    this.keyEnergies.fill(0);
+    this._noteOn.fill(0);
+    this._noteHold.fill(0);
+  }
+
+  /**
+   * Install (or clear) a precomputed reactivity chart. Invalid charts are
+   * rejected loudly and playback falls back to live DSP.
+   * @param {any} chart
+   */
+  setChart(chart) {
+    if (chart && (chart.version !== 1 || !chart.rate || !chart.signals)) {
+      console.warn('[stem-engine] unsupported chart, falling back to DSP', chart && chart.version);
+      this.chart = null;
+      return;
+    }
+    this.chart = chart || null;
+    console.log('[stem-engine] chart mode', this.chart ? 'ON rate=' + this.chart.rate : 'off');
+  }
+
   /** @param {string} key */
   setSource(key) {
     const def = SOURCES[key] || SOURCES.full;
@@ -361,19 +398,85 @@ class StemEngine {
   }
 
   update() {
-    for (const [key, def] of Object.entries(SOURCES)) {
-      const analyser = def.stem === 'master'
-        ? this.masterAnalyser
-        : this.stemAnalyser[/** @type {StemKey} */ (def.stem)] || null;
-      this._updateSignal(analyser, this.signals[key], def.type);
+    if (this.chart) {
+      this._updateFromChart();
+    } else {
+      for (const [key, def] of Object.entries(SOURCES)) {
+        const analyser = def.stem === 'master'
+          ? this.masterAnalyser
+          : this.stemAnalyser[/** @type {StemKey} */ (def.stem)] || null;
+        this._updateSignal(analyser, this.signals[key], def.type);
+      }
+      this._updateKeyEnergies();
     }
-    this._updateKeyEnergies();
 
     const active = this.signals[this.sourceKey] || this.signals.full;
     this.level = active.level;
     this.react = active.react;
     this.reactSlow = active.reactSlow;
     this.peak = active.peak;
+  }
+
+  /**
+   * Chart drive: read signals + note events from the precomputed chart at the
+   * transport position. Charted signals are quantised 0..250 at chart.rate Hz
+   * and linearly interpolated; keys not covered by a note event get the same
+   * 0.70 release the live note gate uses, so the look matches DSP playback.
+   */
+  _updateFromChart() {
+    const chart = this.chart;
+    const t = this.currentTime;
+    const playing = this._playing;
+
+    for (const key of Object.keys(SOURCES)) {
+      const sig = this.signals[key];
+      const ch = playing ? chart.signals[key] : null;
+      if (!ch) {
+        // not charted (or paused) → decay exactly like a missing analyser
+        sig.react *= this.decay;
+        sig.reactSlow *= Math.min(0.995, this.decay + 0.04);
+        sig.level *= 0.85;
+        continue;
+      }
+      sig.react = this._sampleChart(ch.react, t, chart.rate);
+      sig.reactSlow = this._sampleChart(ch.reactSlow, t, chart.rate);
+      sig.level = this._sampleChart(ch.level, t, chart.rate);
+      sig.peak = 1.0; // charted levels are already normalised for the meters
+    }
+
+    // note events → keyEnergies, mirroring the live gate's envelopes
+    const e = this.keyEnergies, on = this._noteOn;
+    const notes = playing && chart.notes ? chart.notes : null;
+    for (let k = 0; k < 88; k++) {
+      let v = 0;
+      if (notes) {
+        for (let i = 0; i < notes.length; i++) {
+          const ev = notes[i];
+          if (ev.k === k && t >= ev.t0 && t <= ev.t1) { v = ev.v; break; }
+        }
+      }
+      if (v > 0) {
+        const target = Math.min(1, 0.35 + v * 0.55);
+        if (!on[k]) { on[k] = 1; e[k] = target; }        // onset: snap on
+        else e[k] += (target - e[k]) * 0.10;             // sustain: ease
+      } else {
+        on[k] = 0;
+        e[k] *= 0.70;                                    // release: fast dim
+      }
+    }
+  }
+
+  /**
+   * Linear interpolation into a quantised (0..250) chart array.
+   * @param {number[]} arr @param {number} t @param {number} rate
+   */
+  _sampleChart(arr, t, rate) {
+    if (!arr || arr.length === 0) return 0;
+    const x = Math.max(0, Math.min(arr.length - 1, t * rate));
+    const i = Math.floor(x);
+    const f = x - i;
+    const a = arr[i], b = arr[Math.min(arr.length - 1, i + 1)];
+    return ((a + (b - a) * f) / 250);
   }
 
   /**

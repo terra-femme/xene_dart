@@ -184,6 +184,55 @@
   .sw:hover { transform: scale(1.12); }
   .sw.active { box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px var(--fg); }
 
+  /* save-track section */
+  .txt {
+    width: 100%; background: rgba(255,255,255,0.04); border: 1px solid var(--line);
+    border-radius: 6px; color: var(--fg); font-family: var(--mono); font-size: 11px;
+    padding: 9px 10px; outline: none; letter-spacing: 0.04em;
+  }
+  .txt::placeholder { color: var(--dim-2); }
+  .txt:focus { border-color: var(--accent); }
+  .mode:disabled { opacity: 0.35; cursor: not-allowed; }
+  .hintline { margin-top: 8px; font-size: 9px; letter-spacing: 0.08em; color: var(--dim-2); min-height: 12px; word-break: break-all; }
+
+  /* ------- playlist panel (floating, draggable) ------- */
+  #playlistPanel {
+    position: fixed; left: 18px; top: 84px; z-index: 15;
+    width: 236px; max-height: 60vh; display: flex; flex-direction: column;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    backdrop-filter: blur(18px) saturate(1.1); -webkit-backdrop-filter: blur(18px) saturate(1.1);
+    overflow: hidden;
+  }
+  #playlistPanel .pl-head {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 12px; cursor: grab; user-select: none; touch-action: none;
+    border-bottom: 1px solid var(--line-2);
+  }
+  #playlistPanel .pl-title { font-size: 9.5px; letter-spacing: 0.26em; text-transform: uppercase; color: var(--dim); }
+  #playlistPanel .pl-btn {
+    border: none; background: transparent; color: var(--dim); cursor: pointer;
+    font-family: var(--mono); font-size: 12px; padding: 2px 6px;
+  }
+  #playlistPanel .pl-btn:hover { color: var(--fg); }
+  #playlistPanel .pl-status { padding: 8px 12px; font-size: 9px; letter-spacing: 0.1em; color: var(--dim-2); }
+  #playlistPanel .pl-list { overflow-y: auto; padding: 6px; display: grid; gap: 4px; }
+  #playlistPanel .pl-list::-webkit-scrollbar { width: 6px; }
+  #playlistPanel .pl-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 4px; }
+  #playlistPanel.min .pl-list, #playlistPanel.min .pl-status { display: none; }
+  .pl-track {
+    display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+    border: 1px solid transparent; background: transparent; border-radius: 7px;
+    padding: 8px 10px; cursor: pointer; font-family: var(--mono); color: var(--fg);
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .pl-track:hover { background: rgba(255,255,255,0.04); }
+  .pl-track.active { border-color: var(--accent); background: rgba(160,210,235,0.07); }
+  .pl-track.loading { opacity: 0.55; }
+  .pl-track .pl-n { font-size: 9px; color: var(--dim-2); min-width: 14px; }
+  .pl-track .pl-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .pl-track .pl-name { font-size: 10.5px; letter-spacing: 0.04em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pl-track .pl-sub { font-size: 8.5px; color: var(--dim-2); letter-spacing: 0.06em; }
+
   /* panel toggle */
   .toggle {
     position: fixed; top: 22px; right: 26px; z-index: 11;
@@ -266,7 +315,7 @@
         <div class="sec-h"><span>Accessibility</span><span class="meta" id="hapticMeta">vibration</span></div>
         <button class="mode active" id="haptics" style="width:100%;">
           <div class="mn" id="hapticLabel">Haptics: ON</div>
-          <div class="md">vibrate on each isolated hit Â· Android browsers (not iOS Safari)</div>
+          <div class="md">vibrate on bass + drum hits Â· Android browsers (not iOS Safari)</div>
         </button>
       </div>
 
@@ -293,6 +342,25 @@
         </div>
       </div>
 
+      <!-- SAVE TRACK (producer flow: crop 30s + export bundle) -->
+      <div class="sec">
+        <div class="sec-h"><span>Save Track</span><span class="meta" id="vCrop">—</span></div>
+        <div class="ctrl">
+          <div class="ctrl-h"><span class="l">Crop start</span><span class="v">30s window</span></div>
+          <input type="range" class="sl" id="cropStart" min="0" max="0" step="0.1" value="0" disabled />
+        </div>
+        <button class="mode" id="cropLoop" style="width:100%;margin-top:14px;">
+          <div class="mn" id="cropLoopLabel">Preview loop: OFF</div>
+          <div class="md">play only the crop window on repeat</div>
+        </button>
+        <input type="text" class="txt" id="trackTitle" placeholder="track title" maxlength="80" style="margin-top:12px;" />
+        <button class="mode" id="exportTrack" style="width:100%;margin-top:8px;" disabled>
+          <div class="mn">Export bundle (.zip)</div>
+          <div class="md">cropped WAV per loaded stem + track.json settings</div>
+        </button>
+        <div class="hintline" id="exportStatus"></div>
+      </div>
+
       <div class="foot">
         Load the Original (what you hear) plus the separated stems â€” they play in
         perfect sync. The organism reads all loaded stems at once: bass swells
@@ -305,11 +373,15 @@
   </aside>
 
   <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
-  <script src="js/shaders.js?v=other-15"></script>
-  <script src="js/audio-engine.js?v=other-15"></script>
-  <script src="js/brain-dots-data.js?v=other-15"></script>
-  <script src="js/brain-other-data.js?v=other-15"></script>
-  <script src="js/scene.js?v=other-15"></script>
-  <script src="js/app.js?v=other-15"></script>
+  <script src="js/av-config.js?v=playlist-2"></script>
+  <script src="js/shaders.js?v=playlist-2"></script>
+  <script src="js/audio-engine.js?v=playlist-2"></script>
+  <script src="js/brain-dots-data.js?v=playlist-2"></script>
+  <script src="js/brain-other-data.js?v=playlist-2"></script>
+  <script src="js/scene.js?v=playlist-2"></script>
+  <script src="js/chart-gen.js?v=playlist-2"></script>
+  <script src="js/track-export.js?v=playlist-2"></script>
+  <script src="js/playlist.js?v=playlist-2"></script>
+  <script src="js/app.js?v=playlist-2"></script>
 </body>
 </html>
