@@ -1,0 +1,5 @@
+# Chart transcription tooling — Python 3.11 (basic-pitch does not support 3.13:
+# its numpy pin has no cp313 wheel and fails to build from source).
+basic-pitch
+# resampy (basic-pitch dep) imports pkg_resources, which setuptools >= 81 removed.
+setuptools==80.9.0

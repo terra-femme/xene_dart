@@ -39,6 +39,12 @@ const STEM_KEYS = ['vocals', 'drums', 'bass', 'other'];
 /** @type {SlotKey[]} */
 const SLOT_KEYS = ['original', 'vocals', 'drums', 'bass', 'other'];
 
+// Harmonic series of a piano note in KEY-space: overtones 2f/3f/4f/5f land
+// ≈ +12/+19/+24/+28 semitones above the fundamental. Weights taper the way a
+// real note's overtones do. Used by the multi-pitch extractor (_updateKeyEnergies).
+const NOTE_HARM_OFF = [0, 12, 19, 24, 28];
+const NOTE_HARM_W = [1.0, 0.6, 0.4, 0.25, 0.15];
+
 // One reactive source per ISOLATED stem — nothing that isn't its own file.
 // (Drums is the whole drum stem; no fake "snare / hi-hat" sub-bands.)
 /** @type {Record<string, SourceDef>} */
@@ -107,6 +113,22 @@ class StemEngine {
     /** @type {AnalyserNode|null} */ this._melodyFreq = null;
     /** @type {Uint8Array|null} */ this._freqData = null;
     /** @type {Array<{start:number,end:number}>} */ this._keyBins = [];
+    // note gate state: which keys are currently "held", plus per-frame scratch.
+    /** @type {Uint8Array} */ this._noteOn = new Uint8Array(88);
+    /** @type {Float32Array} */ this._keyRaw = new Float32Array(88);
+    /** @type {Float32Array} */ this._keyWork = new Float32Array(88);
+    /** @type {Float32Array} */ this._keyTarget = new Float32Array(88);
+    /** @type {Float32Array} */ this._noteHold = new Float32Array(88);
+    // note gate thresholds in SALIENCE units (harmonic-weighted sum, ~0..1.5
+    // for a strong clean note): a key needs salience > noteOnThresh to light,
+    // and candidate extraction keeps running down to noteOffThresh so held
+    // notes can sustain quieter than they attacked. maxPolyphony caps how many
+    // simultaneous notes can be lit (Guitar-Hero-style: 3 keys → 3 regions).
+    // (baked from real-stem tuning in the brain-other.html lab, 2026-07-12:
+    // high gate + poly 2 kills harmonic ghosts and ringing-tail regions)
+    this.noteOnThresh = 0.74;
+    this.noteOffThresh = 0.54;
+    this.maxPolyphony = 2;
 
     /** @type {(() => void)|null} */ this.onEnded = null;
   }
@@ -354,11 +376,29 @@ class StemEngine {
     this.peak = active.peak;
   }
 
-  /** Fill keyEnergies[88] (0..1 per piano key) from the melodic spectrum. */
+  /**
+   * Fill keyEnergies[88] with NOTE envelopes (0..1 per piano key) via greedy
+   * multi-pitch extraction (simplified Klapuri harmonic-salience method):
+   *
+   *   1. Raw band energy per key from the melodic spectrum.
+   *   2. Score every key by harmonic SALIENCE — weighted sum of energy at its
+   *      fundamental and overtones (+12/+19/+24/+28 keys ≈ 2f/3f/4f/5f). A real
+   *      note scores high at its fundamental; its overtone keys score low
+   *      because they lack their own harmonic series above them.
+   *   3. Accept the strongest key as a note, SUBTRACT its harmonic series from
+   *      the working spectrum (so its overtones can't win as fake notes), and
+   *      repeat — up to maxPolyphony notes per frame.
+   *   4. Hysteresis + envelope per key: snap on at note onset, hold steady
+   *      while the note sustains (short grace so one dropped frame doesn't
+   *      flicker), fast-release when it ends — one region per audible note,
+   *      lit for the note's duration, then a quick dim-out.
+   */
   _updateKeyEnergies() {
     const mf = this._melodyFreq, data = this._freqData, bins = this._keyBins;
+    const e = this.keyEnergies, on = this._noteOn, raw = this._keyRaw;
+    const work = this._keyWork, tgt = this._keyTarget, hold = this._noteHold;
     if (!mf || !data || !this._playing) {
-      for (let k = 0; k < 88; k++) this.keyEnergies[k] *= 0.86; // fade to dark
+      for (let k = 0; k < 88; k++) { e[k] *= 0.70; on[k] = 0; hold[k] = 0; } // fade to dark
       return;
     }
     mf.getByteFrequencyData(/** @type {any} */ (data));
@@ -366,10 +406,46 @@ class StemEngine {
       const { start, end } = bins[k];
       let sum = 0, n = 0;
       for (let b = start; b <= end && b < data.length; b++) { sum += data[b]; n++; }
-      const avg = n > 0 ? (sum / n) / 255 : 0;
-      const prev = this.keyEnergies[k];
-      // fast attack, smooth release so a struck key lights then fades
-      this.keyEnergies[k] = avg > prev ? avg : prev * 0.82 + avg * 0.18;
+      raw[k] = n > 0 ? (sum / n) / 255 : 0;
+    }
+
+    // greedy extraction: strongest salience wins, its harmonics are removed
+    work.set(raw);
+    tgt.fill(0);
+    const OFF = this.noteOffThresh;
+    for (let it = 0; it < this.maxPolyphony; it++) {
+      let bestK = -1, bestS = 0;
+      for (let k = 0; k < 88; k++) {
+        if (work[k] <= 0.02) continue; // a note needs SOME fundamental energy
+        let s = 0;
+        for (let h = 0; h < NOTE_HARM_OFF.length; h++) {
+          const j = k + NOTE_HARM_OFF[h];
+          if (j < 88) s += NOTE_HARM_W[h] * work[j];
+        }
+        if (s > bestS) { bestS = s; bestK = k; }
+      }
+      if (bestK < 0 || bestS < OFF) break;
+      tgt[bestK] = Math.min(1, bestS);
+      const f = work[bestK];
+      for (let h = 0; h < NOTE_HARM_OFF.length; h++) {
+        const j = bestK + NOTE_HARM_OFF[h];
+        if (j < 88) work[j] = Math.max(0, work[j] - NOTE_HARM_W[h] * f);
+      }
+    }
+
+    // hysteresis + envelopes
+    const ON = this.noteOnThresh;
+    for (let k = 0; k < 88; k++) {
+      if (!on[k]) {
+        if (tgt[k] > ON) { on[k] = 1; hold[k] = 5; e[k] = Math.min(1, 0.35 + tgt[k] * 0.55); }
+        else e[k] *= 0.70; // dark / finishing its release
+      } else if (tgt[k] > 0) {
+        hold[k] = 5; // still sounding: refresh grace, ease toward its level
+        e[k] += (Math.min(1, 0.35 + tgt[k] * 0.55) - e[k]) * 0.10;
+      } else if (--hold[k] <= 0) {
+        on[k] = 0; e[k] *= 0.70; // note ended → fast release, done
+      }
+      // else: within grace — hold the current lit level, no flicker
     }
   }
 }

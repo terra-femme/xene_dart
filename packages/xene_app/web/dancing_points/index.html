@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
@@ -202,7 +202,7 @@
 
   <!-- DEV: live per-stem react readout. Confirms signal is flowing per stem
        without touching the Reactive Source selector. Remove before ship. -->
-  <div id="dbg" style="position:fixed;left:14px;bottom:12px;z-index:20;font-family:var(--mono);font-size:10px;line-height:1.5;letter-spacing:0.06em;color:#7fd0ff;background:rgba(6,8,12,0.6);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:8px 10px;pointer-events:none;white-space:pre;">dev · load stems + play</div>
+  <div id="dbg" style="position:fixed;left:14px;bottom:12px;z-index:20;font-family:var(--mono);font-size:10px;line-height:1.5;letter-spacing:0.06em;color:#7fd0ff;background:rgba(6,8,12,0.6);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:8px 10px;pointer-events:none;white-space:pre;">dev Â· load stems + play</div>
 
   <div class="brand">
     <h1>Resonance Body</h1>
@@ -244,7 +244,7 @@
       <div class="sec">
         <div class="sec-h"><span>Reaction</span></div>
         <div class="ctrl">
-          <div class="ctrl-h"><span class="l">Sensitivity</span><span class="v" id="vSens">1.6×</span></div>
+          <div class="ctrl-h"><span class="l">Sensitivity</span><span class="v" id="vSens">1.6Ã—</span></div>
           <input type="range" class="sl" id="sens" min="20" max="400" value="160" />
         </div>
         <div class="ctrl">
@@ -266,7 +266,7 @@
         <div class="sec-h"><span>Accessibility</span><span class="meta" id="hapticMeta">vibration</span></div>
         <button class="mode active" id="haptics" style="width:100%;">
           <div class="mn" id="hapticLabel">Haptics: ON</div>
-          <div class="md">vibrate on each isolated hit · Android browsers (not iOS Safari)</div>
+          <div class="md">vibrate on each isolated hit Â· Android browsers (not iOS Safari)</div>
         </button>
       </div>
 
@@ -294,7 +294,7 @@
       </div>
 
       <div class="foot">
-        Load the Original (what you hear) plus the separated stems — they play in
+        Load the Original (what you hear) plus the separated stems â€” they play in
         perfect sync. The organism reads all loaded stems at once: bass swells
         the body, drums spark surface nodes, melody moves the outer low-poly
         cage, and vocals animate the inner neural traces. Pick a Reactive
@@ -305,10 +305,11 @@
   </aside>
 
   <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
-  <script src="js/shaders.js?v=vocals-1"></script>
-  <script src="js/audio-engine.js?v=vocals-1"></script>
-  <script src="js/brain-dots-data.js?v=vocals-1"></script>
-  <script src="js/scene.js?v=vocals-1"></script>
-  <script src="js/app.js?v=vocals-1"></script>
+  <script src="js/shaders.js?v=other-15"></script>
+  <script src="js/audio-engine.js?v=other-15"></script>
+  <script src="js/brain-dots-data.js?v=other-15"></script>
+  <script src="js/brain-other-data.js?v=other-15"></script>
+  <script src="js/scene.js?v=other-15"></script>
+  <script src="js/app.js?v=other-15"></script>
 </body>
 </html>

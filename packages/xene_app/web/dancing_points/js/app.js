@@ -33,6 +33,8 @@
 
   const engine = new (/** @type {any} */ (window).StemEngine)();
   const scene = createScene($('gl'));
+  // dev: console handle for live-tuning (e.g. xeneEngine.noteOnThresh = 0.4)
+  /** @type {any} */ (window).xeneEngine = engine;
 
   // ---- xene: haptics (the accessibility core). Full-length playback, no cap. ----
   const capDuration = () => engine.duration || 0;
@@ -48,6 +50,39 @@
     } else if (navigator.vibrate) {
       navigator.vibrate(Math.round(8 + Math.min(1, level) * 32)); // 8-40ms
     }
+    pulseHapticIndicator(level); // visual mirror — SEE the tap timing where you can't feel it (desktop/iOS web)
+  }
+
+  // Visual haptic indicator (dev aid): a dot that flashes exactly when a haptic tap
+  // fires, sized + coloured by intensity (green light / amber medium / pink heavy).
+  const hapticDot = document.createElement('div');
+  Object.assign(hapticDot.style, {
+    position: 'fixed', left: '50%', top: '20px', transform: 'translateX(-50%) scale(0.7)',
+    width: '20px', height: '20px', borderRadius: '50%', background: '#8fe6c2',
+    opacity: '0.14', pointerEvents: 'none', zIndex: '30',
+  });
+  const hapticLbl = document.createElement('div');
+  Object.assign(hapticLbl.style, {
+    position: 'fixed', left: '50%', top: '42px', transform: 'translateX(-50%)',
+    font: '9px ui-monospace, Menlo, monospace', letterSpacing: '0.18em',
+    color: 'rgba(255,255,255,0.4)', pointerEvents: 'none', zIndex: '30',
+  });
+  hapticLbl.textContent = 'HAPTIC';
+  document.body.appendChild(hapticDot);
+  document.body.appendChild(hapticLbl);
+  /** @param {number} level */
+  function pulseHapticIndicator(level) {
+    const lvl = Math.min(1, Math.max(0, level));
+    const color = lvl > 0.75 ? '#ff5a7a' : lvl > 0.5 ? '#ffb14a' : '#8fe6c2';
+    hapticDot.style.transition = 'none';
+    hapticDot.style.background = color;
+    hapticDot.style.boxShadow = '0 0 18px ' + color;
+    hapticDot.style.opacity = '1';
+    hapticDot.style.transform = 'translateX(-50%) scale(' + (0.9 + lvl * 1.2) + ')';
+    void hapticDot.offsetWidth; // reflow so the fade re-triggers on every hit
+    hapticDot.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+    hapticDot.style.opacity = '0.14';
+    hapticDot.style.transform = 'translateX(-50%) scale(0.7)';
   }
   let hapticsOn = ('vibrate' in navigator) || hapticBridge;
   let prevReactForHaptic = 0;

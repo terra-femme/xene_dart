@@ -30,8 +30,13 @@ function createScene(canvas) {
   const brain = buildBrainReferenceBrain();
   scene.add(brain.group);
 
-  const net = buildNodeNetwork();
-  scene.add(net.group);
+  const otherRegions = buildBrainOtherRegions();
+  brain.mesh.add(otherRegions.mesh);
+
+  // ── BASS asset: pulse waves expanding outward from the "other" perimeter ──
+  // Each bass onset fires one GPU-expanded ring (see buildBrainBassWaves).
+  const bassWaves = buildBrainBassWaves();
+  brain.mesh.add(bassWaves.mesh);
 
   // Center noise-ball (drums drive it). Luminous white — the reference used
   // 0x000000 which is invisible on the 0x050509 void, so we override to a
@@ -64,8 +69,10 @@ function createScene(canvas) {
     tint: [1.00, 0.56, 0.20],
   };
   const vTrail = { lastPy: vBbox.cy };
-  const vPitchState = { td: null, levPeak: 0.02 };
+  const vPitchState = { td: null, levPeak: 0.02, frame: 0, last: null };
   const vWaveState = { wtd: null };
+  let smoothDt = 0.016; // EMA of frame time → adaptive throttle (back off only when FPS drops)
+  let frameNo = 0;      // frame counter for the heavy-loop gating (ball verts, streamers)
   console.log('[scene] vocals layer built: ' + vocalDots.count + ' dots, ' + (vStream.count * vStream.L) + ' streamer points');
 
   let rotSpeed = 0.1;
@@ -90,7 +97,6 @@ function createScene(canvas) {
 
     const mobile = Math.min(w, h) < 640;
     const bodyScale = mobile ? 0.72 : 1.0;
-    net.group.scale.setScalar(bodyScale);
     brain.layoutScale = bodyScale;
     blob.layoutScale = bodyScale;
   }
@@ -132,16 +138,43 @@ function createScene(canvas) {
     tiltY += (targetTiltY - tiltY) * 0.04;
     const t = uniforms.uTime.value;
 
-    // The brain does NOT breathe to vocals — the dots carry vocals (asset isolation).
-    const brainSig = { bass: sig.bass, drums: sig.drums, vocals: 0, melody: sig.melody, full: sig.full };
+    // ── Perf gating ─────────────────────────────────────────────────────────
+    // The two legacy CPU loops (ball vertex-dance ~3k pts, vocal streamers ~2.5k pts)
+    // are gated: IDLE (nothing playing) → every 3rd frame; FPS sagging → every 2nd.
+    // Rotation/scale/envelopes still run every frame so nothing visibly stutters.
+    smoothDt += (dt - smoothDt) * 0.05;
+    const fps = 1 / smoothDt;
+    frameNo++;
+    const idle = uniforms.uIdle.value >= 0.5;
+    const heavyEvery = idle ? 3 : fps < 45 ? 2 : 1;
+    const doHeavy = (frameNo % heavyEvery) === 0;
+
+    // The brain does NOT react to vocals or the melodic/"other" stem — their own assets carry
+    // them (vocals → brain dots, melodic → perimeter regions). Asset isolation.
+    // full is zeroed too: it's the WHOLE mix, so any melodic note would leak back
+    // into the brain's breath through it. The brain body breathes on bass only.
+    const brainSig = { bass: sig.bass, drums: sig.drums, vocals: 0, melody: 0, full: 0 };
     updateBrainFrame(brain, t, brainSig, tiltX, tiltY);
-    updateNodeNetwork(net, sig, keyEnergies, t);
-    updateWireframeBlob(blob, t, dt, sig, rotSpeed, tiltX, tiltY);
+    updateBrainOtherRegions(otherRegions, keyEnergies);
+    // waves fire on onsets of the RAW bass react (percussive edge), not the
+    // smoothed readSignals mix — smoothing would blur the rising edge away.
+    updateBrainBassWaves(bassWaves, t, (signals && signals.bass && signals.bass.react) || 0);
+    updateWireframeBlob(blob, t, dt, sig, rotSpeed, tiltX, tiltY, undefined, doHeavy);
 
     // VOCALS: pitch-steered dot trail + waveform streamers, from the vocals stem analyser.
-    const vin = readVocalInput(vocalAnalyser, vPitchState);
+    // The pitch detector is O(n²) autocorrelation — the heaviest per-frame CPU cost. Throttle it
+    // ADAPTIVELY (full rate ≥55fps, ÷2 at 45–55, ÷3 below): pitch moves slowly and the trail
+    // envelope smooths the gaps, so a struggling/overheating device backs off invisibly.
+    const pitchEvery = fps < 45 ? 3 : fps < 55 ? 2 : 1;
+    vPitchState.frame++;
+    if (!vPitchState.last || (vPitchState.frame % pitchEvery) === 0) {
+      vPitchState.last = readVocalInput(vocalAnalyser, vPitchState);
+    }
+    const vin = vPitchState.last;
     updateBrainTrail(vocalDots, vDotPos, vBbox, vin, t, VOCAL_TUNE, vTrail);
-    updateBrainStreamers(vStream, vocalDots, vDotPos, vin.level, VOCAL_TUNE, t, vocalAnalyser, vWaveState);
+    if (doHeavy) {
+      updateBrainStreamers(vStream, vocalDots, vDotPos, vin.level, VOCAL_TUNE, t, vocalAnalyser, vWaveState);
+    }
 
     camera.position.x = tiltY * 0.6;
     camera.lookAt(0, -0.05, 0);
@@ -203,88 +236,229 @@ function buildBlobHalo(count) {
   return { points, geo, seeds, count };
 }
 
-// ── Node network (base layer) ────────────────────────────────────────────────
-// A ring around the brain split into 88 triangular wedge-sections (one per
-// piano key), each with its own fill so it can light independently. The outer
-// border (line + nodes) is a child group that BASS extrudes radially; the 88
-// wedge fills are lit by the melodic stem's per-key spectrum (keyEnergies).
-function buildNodeNetwork() {
-  const KEYS = 88;
-  const rxOut = 2.46, ryOut = 1.78;   // outer border ellipse (surrounds the brain)
-  const rxIn = 1.80, ryIn = 1.30;     // inner apex ellipse (just outside the brain)
-  const a = (k) => (k / KEYS) * Math.PI * 2 - Math.PI / 2;
-
-  const group = new THREE.Group();
-  group.position.set(0, 0.02, -0.02);
-  group.renderOrder = 5;
-
-  // --- outer border (bass-extruded): ring line + node points ---
-  const borderGroup = new THREE.Group();
-  const outerPts = [];
-  for (let k = 0; k <= KEYS; k++) {
-    outerPts.push(new THREE.Vector3(Math.cos(a(k)) * rxOut, Math.sin(a(k)) * ryOut, 0));
+// ── "Other"/melodic stem: brain-perimeter network regions ────────────────────
+// Irregular triangles filling the "yellow" band around the brain (outside the
+// brain no-zone), generated by tools/av_debug/bandtri.py → js/brain-other-data.js
+// (window.BRAIN_OTHER_REGIONS = {nodes:[[x,y]..], tris:[[i,j,k,key]..]}, image space).
+// Each triangle is assigned a piano key; the melodic stem's per-key spectrum
+// (keyEnergies) lights it. Replaces the old synthetic 88-wedge ring. Parented to
+// the brain MESH so it locks to the brain image (same mapping as the vocal dots).
+function buildBrainOtherRegions(opts) {
+  opts = opts || {};
+  const planeW = opts.planeW ?? 3.35, planeH = opts.planeH ?? 2.23, z = opts.z ?? 0.015;
+  const data = (typeof window !== 'undefined' ? window.BRAIN_OTHER_REGIONS : null) || { nodes: [], tris: [] };
+  const nodes = data.nodes || [], tris = data.tris || [], T = tris.length;
+  const positions = new Float32Array(T * 9);
+  const colors = new Float32Array(T * 9);
+  const keys = new Int16Array(T);
+  // ONE dedicated region per key: the data has more triangles than keys (105 vs
+  // 88), so some keys own two — sometimes disjoint patches. Keep only the
+  // largest triangle per key; the rest get key -1 and never light.
+  const bestByKey = new Map();
+  for (let i = 0; i < T; i++) {
+    const tr = tris[i];
+    const a = nodes[tr[0]] || [0, 0], b = nodes[tr[1]] || [0, 0], c = nodes[tr[2]] || [0, 0];
+    const area = Math.abs((b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1]));
+    const best = bestByKey.get(tr[3]);
+    if (!best || area > best.area) bestByKey.set(tr[3], { i, area });
   }
-  const borderLine = new THREE.Line(
-    new THREE.BufferGeometry().setFromPoints(outerPts),
-    new THREE.LineBasicMaterial({ color: 0x8fbfe6, transparent: true, opacity: 0.34, blending: THREE.AdditiveBlending })
-  );
-  borderGroup.add(borderLine);
-  const nodePts = new THREE.Points(
-    new THREE.BufferGeometry().setFromPoints(outerPts.slice(0, KEYS)),
-    new THREE.PointsMaterial({ size: 0.055, color: 0xbfe6ff, transparent: true, opacity: 0.7, depthWrite: false, sizeAttenuation: true, blending: THREE.AdditiveBlending })
-  );
-  borderGroup.add(nodePts);
-  group.add(borderGroup);
-
-  // --- 88 triangular wedge fills + inward spokes (the network structure) ---
-  const fills = [];
-  const spokePts = [];
-  for (let k = 0; k < KEYS; k++) {
-    const a0 = a(k), a1 = a(k + 1), am = (a0 + a1) / 2;
-    const verts = new Float32Array([
-      Math.cos(a0) * rxOut, Math.sin(a0) * ryOut, 0,
-      Math.cos(a1) * rxOut, Math.sin(a1) * ryOut, 0,
-      Math.cos(am) * rxIn,  Math.sin(am) * ryIn,  0,
-    ]);
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(verts, 3));
-    const mat = new THREE.MeshBasicMaterial({
-      color: new THREE.Color(0x14212e), transparent: true, opacity: 0.0,
-      side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending,
-    });
-    const mesh = new THREE.Mesh(g, mat);
-    mesh.renderOrder = 6;
-    group.add(mesh);
-    fills.push(mesh);
-    spokePts.push(
-      new THREE.Vector3(Math.cos(am) * rxIn, Math.sin(am) * ryIn, 0),
-      new THREE.Vector3(Math.cos(am) * rxOut, Math.sin(am) * ryOut, 0)
-    );
+  for (let i = 0; i < T; i++) {
+    const tr = tris[i];
+    keys[i] = bestByKey.get(tr[3]).i === i ? tr[3] : -1;
+    for (let j = 0; j < 3; j++) {
+      const nd = nodes[tr[j]] || [0.5, 0.5];
+      const vi = (i * 3 + j) * 3;
+      positions[vi]     = (nd[0] - 0.5) * planeW;   // image x  → plane-local x
+      positions[vi + 1] = (0.5 - nd[1]) * planeH;   // image y↓ → plane-local y↑
+      positions[vi + 2] = z;
+    }
   }
-  const spokes = new THREE.LineSegments(
-    new THREE.BufferGeometry().setFromPoints(spokePts),
-    new THREE.LineBasicMaterial({ color: 0x4a6a86, transparent: true, opacity: 0.14, blending: THREE.AdditiveBlending })
-  );
-  group.add(spokes);
-
-  return { group, borderGroup, fills };
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  const mat = new THREE.MeshBasicMaterial({
+    vertexColors: true, transparent: true, side: THREE.DoubleSide,
+    depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.frustumCulled = false;
+  mesh.renderOrder = 22; // above the brain plane (20), below the vocal dots (25)
+  return { mesh, geo, colors, keys, count: T };
 }
 
-function updateNodeNetwork(net, sig, keyEnergies, t) {
-  // BASS extrudes the exterior border radially (a breathing perimeter).
-  const push = 1 + sig.bass * 0.22;
-  net.borderGroup.scale.set(push, push, 1);
-  net.borderGroup.rotation.z = Math.sin(t * 0.05) * 0.008;
-
-  // MELODIC pitch lights the 88 wedge sections; gamma makes the dominant key pop.
-  const fills = net.fills;
-  for (let k = 0; k < fills.length; k++) {
-    const e = keyEnergies ? keyEnergies[k] : 0;
-    const lit = Math.pow(e < 0 ? 0 : e > 1 ? 1 : e, 1.6);
-    const mat = fills[k].material;
-    mat.opacity = lit * 0.85;
-    mat.color.setRGB(0.10 + lit * 0.32, 0.42 + lit * 0.48, 0.66 + lit * 0.34);
+// MELODIC stem lights each region by its key's energy; gamma makes the dominant pop.
+// Optional `tune` overrides (same pattern as updateWireframeBlob) let the isolation lab
+// (tools/av_debug/brain-other.html) dial the look live; defaults = the app's baked values.
+function updateBrainOtherRegions(reg, keyEnergies, tune) {
+  if (!reg || !reg.count) return;
+  const T = tune || {};
+  const gamma  = T.gamma  ?? 0.88;
+  const bright = T.bright ?? 1.25;
+  const cold   = T.cold || [0.12, 0.42, 0.78];   // color at the lit floor …
+  const hot    = T.hot  || [0.53, 0.74, 1.00];   // … blending to this at full energy
+  // (baked from the user's brain-other.html readout 2026-07-12: hue/sat 213/0.85)
+  const colors = reg.colors, keys = reg.keys;
+  for (let i = 0; i < reg.count; i++) {
+    const e = keyEnergies && keys[i] >= 0 ? keyEnergies[keys[i]] : 0;
+    const lit = Math.pow(e < 0 ? 0 : e > 1 ? 1 : e, gamma);
+    const b = lit * bright;                                // additive → color IS the emitted light (0 = invisible)
+    const r = (cold[0] + lit * (hot[0] - cold[0])) * b;
+    const g = (cold[1] + lit * (hot[1] - cold[1])) * b;
+    const bl = (cold[2] + lit * (hot[2] - cold[2])) * b;
+    for (let j = 0; j < 3; j++) {
+      const vi = (i * 3 + j) * 3;
+      colors[vi] = r; colors[vi + 1] = g; colors[vi + 2] = bl;
+    }
   }
+  reg.geo.attributes.color.needsUpdate = true;
+}
+
+// ── BASS stem: ripple droplets in the open space around the brain ────────────
+// Each bass onset spawns one DROPLET — a solid center dot plus R concentric
+// rings that expand outward and fade off ring by ring (a water-drop ripple) —
+// at a spot OUTSIDE the brain/network "no zone" ellipse. A pool of D droplets
+// shares ONE vertex shader; spawning stamps a center + time and the GPU does
+// the rest, so per-frame CPU cost stays ≈ one uniform. Prototyped in
+// tools/av_debug/brain-bass-waves.html, which drives these same functions.
+function buildBrainBassWaves(opts) {
+  opts = opts || {};
+  const D = opts.droplets ?? 10; // concurrent droplets in the pool
+  const R = opts.rings ?? 4;     // expanding rings per droplet
+  const P = opts.segments ?? 48; // segments per circle (droplets are small)
+  const z = opts.z ?? 0.02;
+
+  // Per droplet: a filled dot disc (ribbon from r=0 to the rim) followed by R
+  // ring ribbons (aEdge ∓0.5 across the stroke). All circles share aUnit (the
+  // unit-circle direction); the shader scales it by each part's live radius.
+  const VPD = P * 2 * (1 + R); // vertices per droplet
+  const N = D * VPD;
+  const aCenter = new Float32Array(N * 3), aUnit = new Float32Array(N * 2);
+  const aEdge = new Float32Array(N), aRing = new Float32Array(N), aSpawn = new Float32Array(N);
+  const index = [];
+  for (let d = 0; d < D; d++) {
+    for (let k = 0; k <= R; k++) { // k=0 → dot, k≥1 → ring k
+      const off = d * VPD + k * P * 2;
+      for (let i = 0; i < P; i++) {
+        const ang = (i / P) * Math.PI * 2, ca = Math.cos(ang), sa = Math.sin(ang);
+        for (let e = 0; e < 2; e++) {
+          const idx = off + i * 2 + e;
+          aUnit[idx * 2] = ca; aUnit[idx * 2 + 1] = sa;
+          aEdge[idx] = k === 0 ? e : (e === 0 ? -0.5 : 0.5);
+          aRing[idx] = k;
+          aSpawn[idx] = -999;
+          aCenter[idx * 3 + 2] = z;
+        }
+        const a = off + i * 2, b = off + ((i + 1) % P) * 2;
+        index.push(a, b, a + 1, a + 1, b, b + 1);
+      }
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(N * 3), 3)); // unused; shader builds from aCenter/aUnit
+  geo.setAttribute('aCenter', new THREE.BufferAttribute(aCenter, 3).setUsage(THREE.DynamicDrawUsage));
+  geo.setAttribute('aUnit', new THREE.BufferAttribute(aUnit, 2));
+  geo.setAttribute('aEdge', new THREE.BufferAttribute(aEdge, 1));
+  geo.setAttribute('aRing', new THREE.BufferAttribute(aRing, 1));
+  geo.setAttribute('aSpawn', new THREE.BufferAttribute(aSpawn, 1).setUsage(THREE.DynamicDrawUsage));
+  geo.setIndex(index);
+  const mat = new THREE.ShaderMaterial({
+    // NORMAL blending: flat solid color, alpha-faded — no additive bloom
+    transparent: true, depthWrite: false, depthTest: false, side: THREE.DoubleSide,
+    // baked from the user's 2026-07-12 lab session (brain-bass-waves.html)
+    uniforms: { uTime: { value: 0 }, uSpeed: { value: 0.79 }, uLife: { value: 1.6 },
+      uDotR: { value: 0.055 }, uStroke: { value: 0.02 }, uRingGap: { value: 0.18 },
+      uReach: { value: 0.5 }, uTail: { value: 1.6 }, uFade: { value: 2.5 },
+      uColor: { value: new THREE.Color().setHSL(217 / 360, 0.85, 0.6) }, uBright: { value: 0.8 } },
+    vertexShader: `
+      attribute vec3 aCenter; attribute vec2 aUnit;
+      attribute float aEdge, aRing, aSpawn;
+      uniform float uTime, uSpeed, uLife, uDotR, uStroke, uRingGap, uReach, uTail, uFade;
+      varying float vAlpha;
+      void main() {
+        float age = uTime - aSpawn;
+        // 'alive', not 'active' — 'active' is a RESERVED word in GLSL ES 3.00,
+        // which three.js auto-targets on WebGL2 (#version 300 es conversion)
+        float alive = (aSpawn > 0.0 && age >= 0.0 && age <= uLife) ? 1.0 : 0.0;
+        float lifeT = clamp(age / uLife, 0.0, 1.0);
+        float r, ringA;
+        if (aRing < 0.5) {
+          // solid center dot: aEdge 0 = center, 1 = rim
+          r = aEdge * uDotR;
+          ringA = 1.0;
+        } else {
+          // ring k leaves the dot rim after its stagger delay, expands at
+          // uSpeed, and fades to none by the time it has traveled uReach
+          float ringAge = age - (aRing - 1.0) * uRingGap;
+          float travel = max(ringAge, 0.0) * uSpeed;
+          r = uDotR + travel + aEdge * uStroke;
+          float x = clamp(travel / uReach, 0.0, 1.0);
+          ringA = (ringAge > 0.0 ? 1.0 : 0.0) * pow(1.0 - x, uTail);
+        }
+        // dead droplets collapse to zero-area triangles at their center
+        vec3 pos = vec3(aCenter.xy + aUnit * r * alive, aCenter.z);
+        // whole droplet also fades out over its life (uFade pow curve)
+        vAlpha = alive * ringA * pow(1.0 - lifeT, uFade);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+      }`,
+    fragmentShader: `
+      precision mediump float; varying float vAlpha;
+      uniform vec3 uColor; uniform float uBright;
+      void main() { gl_FragColor = vec4(uColor * uBright, vAlpha); }`,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.frustumCulled = false;
+  mesh.renderOrder = 24;
+  return { mesh, geo, mat, aSpawn, aCenter, D, VPD, cursor: 0, lastSpawn: -999, prevReact: 0 };
+}
+
+// Fire one droplet (respects minGap so machine-gun onsets don't strobe).
+// Placement: rejection-sample inside the spread box but OUTSIDE the no-zone
+// ellipse (brain + network); after 24 tries keep the most-outside candidate.
+function spawnBrainBassWave(wv, t, intensity, tune) {
+  const T = tune || {};
+  if (t - wv.lastSpawn < (T.minGap ?? 0.33)) return;
+  wv.lastSpawn = t;
+  const inX = T.zoneW ?? 1.26, inY = T.zoneH ?? 0.96;
+  const outX = T.spreadW ?? 2.0, outY = T.spreadH ?? 1.32;
+  let x = outX, y = 0, best = -1;
+  for (let tries = 0; tries < 24; tries++) {
+    const cx = (Math.random() * 2 - 1) * outX, cy = (Math.random() * 2 - 1) * outY;
+    const m = (cx / inX) * (cx / inX) + (cy / inY) * (cy / inY);
+    if (m > best) { best = m; x = cx; y = cy; }
+    if (m > 1) break;
+  }
+  const d = wv.cursor; wv.cursor = (wv.cursor + 1) % wv.D;
+  for (let i = 0; i < wv.VPD; i++) {
+    const idx = d * wv.VPD + i;
+    wv.aSpawn[idx] = t;
+    wv.aCenter[idx * 3] = x; wv.aCenter[idx * 3 + 1] = y;
+  }
+  wv.geo.attributes.aSpawn.needsUpdate = true;
+  wv.geo.attributes.aCenter.needsUpdate = true;
+  wv.mat.uniforms.uBright.value = (T.bright ?? 0.8) * (0.5 + 0.5 * intensity);
+}
+
+// BASS drives the droplets: a rising edge of the bass stem's react crossing
+// onsetThr fires one ripple. `tune` overrides (lab pattern) — defaults are the
+// app's baked values.
+function updateBrainBassWaves(wv, t, bassReact, tune) {
+  if (!wv) return;
+  const T = tune || {};
+  const u = wv.mat.uniforms;
+  u.uTime.value = t;
+  u.uSpeed.value = T.speed ?? 0.79;
+  u.uLife.value = T.life ?? 1.6;
+  u.uDotR.value = T.dotR ?? 0.055;
+  u.uStroke.value = T.stroke ?? 0.02;
+  u.uRingGap.value = T.ringGap ?? 0.18;
+  u.uReach.value = T.reach ?? 0.5;
+  u.uTail.value = T.tail ?? 1.6;
+  u.uFade.value = T.fade ?? 2.5;
+  if (T.color) u.uColor.value.setRGB(T.color[0], T.color[1], T.color[2]);
+  const thr = T.onsetThr ?? 0.30;
+  const r = bassReact || 0;
+  if (r > thr && wv.prevReact <= thr) spawnBrainBassWave(wv, t, Math.min(1, r), T);
+  wv.prevReact = r;
 }
 
 // A "ball of scribbles": each stroke is a CONTINUOUS polyline (THREE.Line) that
@@ -376,20 +550,19 @@ function buildWireframeBlob(opts) {
   return { group, inner, lines, basePositions, radius, size, aspectX, aspectY };
 }
 
-function updateWireframeBlob(blob, t, dt, sig, rotSpeed, tiltX, tiltY, tune) {
-  // Drum/bass response coefficients. Defaults = the app's tuned values; the
-  // isolation harness (tools/av_debug/blob-drums.html) passes live overrides so
-  // the drum movement can be dialed in without editing this file each pass.
+function updateWireframeBlob(blob, t, dt, sig, rotSpeed, tiltX, tiltY, tune, doVerts) {
+  // Drum response coefficients. Defaults = the app's tuned values; the isolation
+  // harness (tools/av_debug/blob-drums.html) passes live overrides so the drum
+  // movement can be dialed in without editing this file each pass. The ball reacts
+  // to DRUMS only — bass reactivity was removed (bass is becoming its own asset).
   const T = tune || {};
   const kDrumScale   = T.drumScale   ?? 0.28;
-  const kBassScale   = T.bassScale   ?? 0.08;
   const kDrumAmp     = T.drumAmp     ?? 0.26;
-  const kBassAmp     = T.bassAmp     ?? 0.03;
   const kDrumJitter  = T.drumJitter  ?? 0.12;
   const kJitterFreq  = T.jitterFreq  ?? 9.0;
   const kDrumOpacity = T.drumOpacity ?? 0.34;
 
-  const bass = sig.bass, drums = sig.drums, full = sig.full;
+  const drums = sig.drums, full = sig.full;
   // Spin + reactive scale live on the INNER ball; the OUTER shell only carries
   // the fixed screen-space oval so "wider than tall" stays put as the ball spins.
   const spin = blob.inner || blob.group;
@@ -397,7 +570,7 @@ function updateWireframeBlob(blob, t, dt, sig, rotSpeed, tiltX, tiltY, tune) {
   spin.rotation.x += dt * (0.05 + rotSpeed * 0.15);
   spin.rotation.z = tiltY * 0.08;
   // DRUMS punch the overall scale so a hit is unmistakable, not just subtle.
-  spin.scale.setScalar((blob.layoutScale || 1) * blob.size * (1 + bass * kBassScale + drums * kDrumScale));
+  spin.scale.setScalar((blob.layoutScale || 1) * blob.size * (1 + drums * kDrumScale));
   // Fixed oval: reach farther horizontally than vertically to fill the oblong void.
   blob.group.scale.set(blob.aspectX ?? 1.0, blob.aspectY ?? 1.0, 1.0);
 
@@ -407,7 +580,11 @@ function updateWireframeBlob(blob, t, dt, sig, rotSpeed, tiltX, tiltY, tune) {
   // (squared so only real transients trigger it) feeding a fast high-frequency
   // shimmer — this reads as an electric "snap" on a hit, distinct from the slow
   // baseline sway, and is the first step toward drums live-warping the noise.
-  const amp = 0.008 + drums * kDrumAmp + bass * kBassAmp;
+  // Vertex-dance loop (~3k points, the ball's main CPU cost) — skippable via doVerts
+  // so createScene can gate it when idle or when FPS sags. Rotation/scale above still
+  // ran, so the ball keeps spinning smoothly; the dance just holds its last pose a frame.
+  if (doVerts === false) return;
+  const amp = 0.008 + drums * kDrumAmp;
   const jitter = drums * drums * kDrumJitter;
   const w1 = t * 2.1, w2 = t * 1.7, w3 = t * 2.4;
   const jw = t * kJitterFreq;
