@@ -284,6 +284,7 @@
       c.classList.toggle('unavail', !engine.isSourceAvailable(c.dataset.key));
     });
     syncPlayIcon();
+    syncCropUi(); // crop slider range follows the loaded duration
   }
 
   // ---------- transport ----------
@@ -317,7 +318,105 @@
     scrub.value = '0';
     $('cur').textContent = '0:00';
     syncPlayIcon();
+    // playlist auto-advance (no-op when nothing from the playlist is active)
+    const XP = /** @type {any} */ (window).XenePlaylist;
+    if (XP && XP.advance) XP.advance();
   };
+
+  // ---------- save track: crop window + export (producer flow) ----------
+  // Crop a 30s window out of the loaded track, loop-preview it, then export
+  // every loaded slot cropped to that window + the tuned settings as one zip.
+  // Bundle contract lives in track-export.js; the playlist loader reads it back.
+  const CROP_LEN = 30;
+  const crop = { start: 0, loop: false };
+  const cropStartEl = $('cropStart');
+  const cropLoopBtn = $('cropLoop');
+  const exportBtn = $('exportTrack');
+
+  const cropLen = () => Math.min(CROP_LEN, Math.max(0, capDuration() - crop.start));
+  const cropEnd = () => crop.start + cropLen();
+
+  function syncCropUi() {
+    const dur = capDuration();
+    const maxStart = Math.max(0, dur - CROP_LEN);
+    if (crop.start > maxStart) crop.start = maxStart; // track got shorter
+    cropStartEl.max = maxStart.toFixed(1);
+    if (+cropStartEl.value !== crop.start) cropStartEl.value = String(crop.start);
+    cropStartEl.disabled = !engine.hasStems;
+    exportBtn.disabled = !engine.hasStems;
+    $('vCrop').textContent = engine.hasStems
+      ? fmtTime(crop.start) + ' – ' + fmtTime(cropEnd()) + ' · ' + cropLen().toFixed(0) + 's'
+      : '—';
+    cropLoopBtn.classList.toggle('active', crop.loop);
+    $('cropLoopLabel').textContent = crop.loop ? 'Preview loop: ON' : 'Preview loop: OFF';
+  }
+
+  cropStartEl.addEventListener('input', () => {
+    crop.start = +cropStartEl.value;
+    syncCropUi();
+  });
+  cropStartEl.addEventListener('change', () => {
+    // while loop-previewing, moving the window jumps playback into it
+    if (crop.loop) { engine.seek(crop.start); syncPlayIcon(); }
+  });
+  cropLoopBtn.addEventListener('click', () => {
+    if (!engine.hasStems) return;
+    crop.loop = !crop.loop;
+    if (crop.loop) {
+      engine.seek(crop.start);
+      if (!engine.isPlaying) engine.play();
+      syncPlayIcon();
+    }
+    syncCropUi();
+  });
+
+  // One snapshot shape shared by export (track.json) and, later, the playlist
+  // loader — keep in sync with restore()/persist().
+  function settingsSnapshot() {
+    return {
+      engine: {
+        sensitivity: engine.sensitivity,
+        attack: engine.attack,
+        decay: engine.decay,
+        source: state.source,
+      },
+      look: {
+        mode: state.mode,
+        color: state.color,
+        warp: state.warp,
+        density: state.density,
+        size: state.size,
+        rot: state.rot,
+      },
+    };
+  }
+
+  exportBtn.addEventListener('click', () => {
+    if (!engine.hasStems) return;
+    const status = $('exportStatus');
+    status.textContent = 'building…';
+    try {
+      const res = /** @type {any} */ (window).TrackExport.exportTrack({
+        buffers: engine.buffers,
+        title: $('trackTitle').value.trim(),
+        crop: { start: crop.start, duration: cropLen() },
+        settings: settingsSnapshot(),
+        engineParams: {
+          sensitivity: engine.sensitivity,
+          attack: engine.attack,
+          decay: engine.decay,
+          noiseGate: engine.noiseGate,
+          noteOnThresh: engine.noteOnThresh,
+          noteOffThresh: engine.noteOffThresh,
+          maxPolyphony: engine.maxPolyphony,
+        },
+      });
+      status.textContent = res.zipName + ' · ' + (res.fileCount - 1) + ' stems + manifest';
+    } catch (err) {
+      console.error('[dancing-points] export failed', err);
+      status.textContent = 'export failed: ' + (err && /** @type {any} */ (err).message);
+    }
+  });
 
   // ---------- haptics toggle (xene) ----------
   const hapticBtn = $('haptics');
@@ -359,20 +458,9 @@
     };
     localStorage.setItem(LS, JSON.stringify(save));
   }
-  function restore() {
-    let s; try { s = JSON.parse(localStorage.getItem(LS) || 'null'); } catch (e) { s = null; }
-    if (!s) { selectSource(state.source); return; }
-    state.source = SOURCES[s.source] ? s.source : 'vocals';
-    state.mode = s.mode || 0;
-    state.color = s.color || 0;
-    state.warp = s.warp ?? 0.8;
-    state.density = s.density || 6000;
-    state.size = s.size ?? 0.7;
-    state.rot = s.rot ?? 0.18;
-    engine.sensitivity = s.sens ?? 1.6;
-    engine.attack = s.atk ?? 0.6;
-    engine.decay = s.dec ?? 0.90;
-
+  // Push current state + engine tunables into engine, scene, and every control.
+  // Shared by localStorage restore and playlist track settings.
+  function applyState() {
     engine.setSource(state.source);
     scene.setMode(state.mode);
     scene.setColors(COLORS[state.color].base, COLORS[state.color].hot);
@@ -393,8 +481,62 @@
     $('size').value = state.size * 100; $('vSize').textContent = state.size.toFixed(2);
     $('rot').value = (state.rot / 0.5) * 100; $('vRot').textContent = state.rot.toFixed(2);
   }
+
+  function restore() {
+    let s; try { s = JSON.parse(localStorage.getItem(LS) || 'null'); } catch (e) { s = null; }
+    if (!s) { selectSource(state.source); return; }
+    state.source = SOURCES[s.source] ? s.source : 'vocals';
+    state.mode = s.mode || 0;
+    state.color = s.color || 0;
+    state.warp = s.warp ?? 0.8;
+    state.density = s.density || 6000;
+    state.size = s.size ?? 0.7;
+    state.rot = s.rot ?? 0.18;
+    engine.sensitivity = s.sens ?? 1.6;
+    engine.attack = s.atk ?? 0.6;
+    engine.decay = s.dec ?? 0.90;
+    applyState();
+  }
   restore();
   onStemsChanged(); // initial: nothing loaded → sources dimmed, play disabled
+
+  // ---------- playlist (saved AV tracks from Supabase) ----------
+  // playlist.js renders the floating panel; we hand it the hooks it needs.
+  // Track settings arrive in the nested track.json shape (settingsSnapshot).
+  /** @param {any} settings */
+  function applyTrackSettings(settings) {
+    if (!settings) return;
+    const eng = settings.engine || {};
+    const look = settings.look || {};
+    if (typeof eng.sensitivity === 'number') engine.sensitivity = eng.sensitivity;
+    if (typeof eng.attack === 'number') engine.attack = eng.attack;
+    if (typeof eng.decay === 'number') engine.decay = eng.decay;
+    if (typeof eng.source === 'string' && SOURCES[eng.source]) state.source = eng.source;
+    if (typeof look.mode === 'number' && MODES[look.mode]) state.mode = look.mode;
+    if (typeof look.color === 'number' && COLORS[look.color]) state.color = look.color;
+    if (typeof look.warp === 'number') state.warp = look.warp;
+    if (typeof look.density === 'number') state.density = look.density;
+    if (typeof look.size === 'number') state.size = look.size;
+    if (typeof look.rot === 'number') state.rot = look.rot;
+    applyState();
+  }
+
+  const playlistApi = /** @type {any} */ (window).XenePlaylist;
+  if (playlistApi) {
+    playlistApi.init({
+      engine,
+      applySettings: applyTrackSettings,
+      onTrackLoaded: (/** @type {any} */ track, /** @type {string[]} */ loadedSlots) => {
+        SLOTS.forEach((s) => {
+          const el = $('slf-' + s.key);
+          const has = loadedSlots.includes(s.key);
+          if (el) el.textContent = has ? (track.title || 'playlist') : '— empty —';
+          if (slotEls[s.key]) slotEls[s.key].classList.toggle('filled', has);
+        });
+        onStemsChanged();
+      },
+    });
+  }
 
   // ---------- render loop ----------
   const mLevel = $('mLevel'), mReact = $('mReact');
@@ -442,6 +584,11 @@
       const denom = capDuration() || 1;
       scrub.value = String(Math.min(1000, (cur / denom) * 1000));
       $('cur').textContent = fmtTime(cur);
+    }
+
+    // crop preview loop: hold playback inside the save window
+    if (crop.loop && playing && engine.currentTime >= cropEnd() - 0.03) {
+      engine.seek(crop.start);
     }
 
     // fire a haptic pulse on each RISING beat in the isolated source
