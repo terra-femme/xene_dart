@@ -1,6 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { AvTracksClient } from '@/components/av-tracks/av-tracks-client'
-import type { AvTrackRow } from './actions'
+import type { AvTrackRow } from '@/lib/av-tracks'
 
 export const dynamic = 'force-dynamic'
 

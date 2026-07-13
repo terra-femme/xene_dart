@@ -2,7 +2,8 @@
 
 import { useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { createAvTrack, deleteAvTrack, moveAvTrack, type AvTrackRow } from '@/app/dashboard/av-tracks/actions'
+import { deleteAvTrack, moveAvTrack } from '@/app/dashboard/av-tracks/actions'
+import type { AvTrackRow } from '@/lib/av-tracks'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -99,8 +100,12 @@ export function AvTracksClient({ tracks }: { tracks: AvTrackRow[] }) {
     if (bundle.chart) fd.set('chart', bundle.chart)
     startTransition(async () => {
       try {
-        const id = await createAvTrack(fd)
-        console.log('[av-tracks] created', id)
+        // Route handler, not a server action: multi-file multipart bodies
+        // break the server-action parser ("Unexpected end of form").
+        const res = await fetch('/api/av-tracks/upload', { method: 'POST', body: fd })
+        const payload = await res.json().catch(() => ({}))
+        if (!res.ok) throw new Error(payload.error || `Upload failed (HTTP ${res.status})`)
+        console.log('[av-tracks] created', payload.id)
         setStatus(`Uploaded "${bundle.title}".`)
         setBundle(null)
         setArtist('')
