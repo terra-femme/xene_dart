@@ -364,7 +364,8 @@ function buildBrainBassWaves(opts) {
   const mat = new THREE.ShaderMaterial({
     // NORMAL blending: flat solid color, alpha-faded — no additive bloom
     transparent: true, depthWrite: false, depthTest: false, side: THREE.DoubleSide,
-    uniforms: { uTime: { value: 0 }, uSpeed: { value: 0.5 }, uLife: { value: 1.6 },
+    // baked from the user's 2026-07-12 lab session (brain-bass-waves.html)
+    uniforms: { uTime: { value: 0 }, uSpeed: { value: 0.79 }, uLife: { value: 1.6 },
       uDotR: { value: 0.055 }, uStroke: { value: 0.02 }, uRingGap: { value: 0.18 },
       uReach: { value: 0.5 }, uTail: { value: 1.6 }, uFade: { value: 2.5 },
       uColor: { value: new THREE.Color().setHSL(217 / 360, 0.85, 0.6) }, uBright: { value: 0.8 } },
@@ -415,10 +416,10 @@ function buildBrainBassWaves(opts) {
 // ellipse (brain + network); after 24 tries keep the most-outside candidate.
 function spawnBrainBassWave(wv, t, intensity, tune) {
   const T = tune || {};
-  if (t - wv.lastSpawn < (T.minGap ?? 0.16)) return;
+  if (t - wv.lastSpawn < (T.minGap ?? 0.33)) return;
   wv.lastSpawn = t;
-  const inX = T.zoneW ?? 2.05, inY = T.zoneH ?? 1.5;
-  const outX = T.spreadW ?? 2.45, outY = T.spreadH ?? 1.32;
+  const inX = T.zoneW ?? 1.26, inY = T.zoneH ?? 0.96;
+  const outX = T.spreadW ?? 2.0, outY = T.spreadH ?? 1.32;
   let x = outX, y = 0, best = -1;
   for (let tries = 0; tries < 24; tries++) {
     const cx = (Math.random() * 2 - 1) * outX, cy = (Math.random() * 2 - 1) * outY;
@@ -445,7 +446,7 @@ function updateBrainBassWaves(wv, t, bassReact, tune) {
   const T = tune || {};
   const u = wv.mat.uniforms;
   u.uTime.value = t;
-  u.uSpeed.value = T.speed ?? 0.5;
+  u.uSpeed.value = T.speed ?? 0.79;
   u.uLife.value = T.life ?? 1.6;
   u.uDotR.value = T.dotR ?? 0.055;
   u.uStroke.value = T.stroke ?? 0.02;
