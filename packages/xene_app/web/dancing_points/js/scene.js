@@ -385,13 +385,13 @@ function buildBrainBassWaves(opts) {
     // NORMAL blending (not additive): the reference strokes are flat solid
     // color — born opaque, alpha-faded out. Additive would bloom to white.
     transparent: true, depthWrite: false, depthTest: false, side: THREE.DoubleSide,
-    uniforms: { uTime: { value: 0 }, uSpeed: { value: 1.2 }, uLife: { value: 1.2 }, uThick: { value: 0.03 },
-      uFade: { value: 1.8 },
+    uniforms: { uTime: { value: 0 }, uSpeed: { value: 1.2 }, uLife: { value: 1.2 }, uThick: { value: 0.28 },
+      uFade: { value: 1.8 }, uTail: { value: 2.2 },
       uColor: { value: new THREE.Color().setHSL(330 / 360, 0.85, 0.6) }, uBright: { value: 1.5 } },
     vertexShader: `
       attribute vec3 aBase; attribute vec3 aDir; attribute float aEdge; attribute float aSpawn;
       uniform float uTime, uSpeed, uLife, uThick, uFade;
-      varying float vAlpha;
+      varying float vAlpha; varying float vEdge;
       void main() {
         float age = uTime - aSpawn;
         // 'alive', not 'active' — 'active' is a RESERVED word in GLSL ES 3.00,
@@ -403,11 +403,19 @@ function buildBrainBassWaves(opts) {
         // born at FULL opacity, then a pow-curve fade-out: uFade > 1 holds
         // near-solid early and drops late; < 1 dims fast then lingers
         vAlpha = alive * pow(1.0 - lifeT, uFade);
+        // 1.0 at the leading (outer) edge, 0.0 at the trailing (inner) edge —
+        // the fragment shader turns this into the comet-tail gradient
+        vEdge = aEdge + 0.5;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
       }`,
     fragmentShader: `
-      precision mediump float; varying float vAlpha; uniform vec3 uColor; uniform float uBright;
-      void main() { gl_FragColor = vec4(uColor * uBright, vAlpha); }`,
+      precision mediump float; varying float vAlpha; varying float vEdge;
+      uniform vec3 uColor; uniform float uBright, uTail;
+      void main() {
+        // comet band: opaque at the wavefront, gradient tail dissolving to
+        // none behind it. uTail > 1 hugs the alpha to the front edge.
+        gl_FragColor = vec4(uColor * uBright, vAlpha * pow(vEdge, uTail));
+      }`,
   });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.frustumCulled = false;
@@ -437,8 +445,9 @@ function updateBrainBassWaves(wv, t, bassReact, tune) {
   u.uTime.value = t;
   u.uSpeed.value = T.speed ?? 1.2;
   u.uLife.value = T.life ?? 1.2;
-  u.uThick.value = T.thick ?? 0.03;
+  u.uThick.value = T.thick ?? 0.28;
   u.uFade.value = T.fade ?? 1.8;
+  u.uTail.value = T.tail ?? 2.2;
   if (T.color) u.uColor.value.setRGB(T.color[0], T.color[1], T.color[2]);
   const thr = T.onsetThr ?? 0.30;
   const r = bassReact || 0;
