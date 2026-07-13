@@ -326,8 +326,8 @@ function buildBrainBassWaves(opts) {
   const planeW = opts.planeW ?? 3.35, planeH = opts.planeH ?? 2.23, z = opts.z ?? 0.02;
   // P = segments around the loop. Each ring is a solid RIBBON (see below),
   // so P only controls curve smoothness — 512 is plenty for a convex hull.
-  // W = 12 concurrent rings: life 1.2s / minGap 0.12s ≈ 10 alive at once.
-  const W = opts.rings ?? 12, P = opts.segments ?? 512;
+  // W = 20 concurrent rings: life 1.76s / minGap 0.09s ≈ 20 alive worst-case.
+  const W = opts.rings ?? 20, P = opts.segments ?? 512;
   const data = (typeof window !== 'undefined' ? window.BRAIN_OTHER_REGIONS : null) || { nodes: [] };
   const planeNodes = (data.nodes || []).map((nd) => [(nd[0] - 0.5) * planeW, (0.5 - nd[1]) * planeH]);
 
@@ -385,9 +385,10 @@ function buildBrainBassWaves(opts) {
     // NORMAL blending (not additive): the reference strokes are flat solid
     // color — born opaque, alpha-faded out. Additive would bloom to white.
     transparent: true, depthWrite: false, depthTest: false, side: THREE.DoubleSide,
-    uniforms: { uTime: { value: 0 }, uSpeed: { value: 1.2 }, uLife: { value: 1.2 }, uThick: { value: 0.28 },
-      uFade: { value: 1.8 }, uTail: { value: 2.2 },
-      uColor: { value: new THREE.Color().setHSL(330 / 360, 0.85, 0.6) }, uBright: { value: 1.5 } },
+    // baked from the user's 2026-07-12 lab session (brain-bass-waves.html)
+    uniforms: { uTime: { value: 0 }, uSpeed: { value: 1.2 }, uLife: { value: 1.76 }, uThick: { value: 0.301 },
+      uFade: { value: 4.0 }, uTail: { value: 2.1 },
+      uColor: { value: new THREE.Color().setHSL(217 / 360, 0.85, 0.6) }, uBright: { value: 0.6 } },
     vertexShader: `
       attribute vec3 aBase; attribute vec3 aDir; attribute float aEdge; attribute float aSpawn;
       uniform float uTime, uSpeed, uLife, uThick, uFade;
@@ -426,13 +427,13 @@ function buildBrainBassWaves(opts) {
 // Fire one wave (respects minGap so machine-gun onsets don't strobe).
 function spawnBrainBassWave(wv, t, intensity, tune) {
   const T = tune || {};
-  if (t - wv.lastSpawn < (T.minGap ?? 0.12)) return;
+  if (t - wv.lastSpawn < (T.minGap ?? 0.09)) return;
   wv.lastSpawn = t;
   const w = wv.cursor; wv.cursor = (wv.cursor + 1) % wv.W;
   const vpr = wv.VPR || wv.P;
   for (let i = 0; i < vpr; i++) wv.aSpawn[w * vpr + i] = t;
   wv.geo.attributes.aSpawn.needsUpdate = true;
-  wv.mat.uniforms.uBright.value = (T.bright ?? 1.5) * (0.5 + 0.5 * intensity);
+  wv.mat.uniforms.uBright.value = (T.bright ?? 0.6) * (0.5 + 0.5 * intensity);
 }
 
 // BASS drives the waves: a rising edge of the bass stem's react crossing
@@ -444,10 +445,10 @@ function updateBrainBassWaves(wv, t, bassReact, tune) {
   const u = wv.mat.uniforms;
   u.uTime.value = t;
   u.uSpeed.value = T.speed ?? 1.2;
-  u.uLife.value = T.life ?? 1.2;
-  u.uThick.value = T.thick ?? 0.28;
-  u.uFade.value = T.fade ?? 1.8;
-  u.uTail.value = T.tail ?? 2.2;
+  u.uLife.value = T.life ?? 1.76;
+  u.uThick.value = T.thick ?? 0.301;
+  u.uFade.value = T.fade ?? 4.0;
+  u.uTail.value = T.tail ?? 2.1;
   if (T.color) u.uColor.value.setRGB(T.color[0], T.color[1], T.color[2]);
   const thr = T.onsetThr ?? 0.30;
   const r = bassReact || 0;
