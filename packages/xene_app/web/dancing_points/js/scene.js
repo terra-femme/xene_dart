@@ -351,7 +351,7 @@ function buildBrainBassWaves(opts) {
   const cx = loop.reduce((s, p) => s + p[0], 0) / P, cy = loop.reduce((s, p) => s + p[1], 0) / P;
 
   const N = W * P;
-  const aBase = new Float32Array(N * 3), aDir = new Float32Array(N * 3), aSpawn = new Float32Array(N), aJit = new Float32Array(N);
+  const aBase = new Float32Array(N * 3), aDir = new Float32Array(N * 3), aSpawn = new Float32Array(N), aJit = new Float32Array(N), aLife = new Float32Array(N);
   for (let w = 0; w < W; w++) {
     for (let i = 0; i < P; i++) {
       const idx = w * P + i, p = loop[i];
@@ -359,6 +359,9 @@ function buildBrainBassWaves(opts) {
       aBase[idx * 3] = p[0]; aBase[idx * 3 + 1] = p[1]; aBase[idx * 3 + 2] = z;
       aDir[idx * 3] = dx / m; aDir[idx * 3 + 1] = dy / m; aDir[idx * 3 + 2] = 0;
       aSpawn[idx] = -999; aJit[idx] = Math.random() * 2 - 1;
+      // per-point lifetime multiplier: points die at DIFFERENT times, so the
+      // ring dissolves particle-by-particle (fades in NUMBER, not just alpha)
+      aLife[idx] = 0.45 + 0.55 * Math.random();
     }
   }
   const geo = new THREE.BufferGeometry();
@@ -367,31 +370,38 @@ function buildBrainBassWaves(opts) {
   geo.setAttribute('aDir', new THREE.BufferAttribute(aDir, 3));
   geo.setAttribute('aSpawn', new THREE.BufferAttribute(aSpawn, 1).setUsage(THREE.DynamicDrawUsage));
   geo.setAttribute('aJit', new THREE.BufferAttribute(aJit, 1));
+  geo.setAttribute('aLife', new THREE.BufferAttribute(aLife, 1));
   const mat = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending,
     uniforms: { uTime: { value: 0 }, uSpeed: { value: 1.2 }, uLife: { value: 1.2 }, uThick: { value: 0.05 },
-      uSize: { value: 0.022 }, uScale: { value: 620 }, uFade: { value: 1.8 },
+      uSize: { value: 0.028 }, uScale: { value: 620 }, uFade: { value: 1.8 },
       uColor: { value: new THREE.Color().setHSL(330 / 360, 0.85, 0.6) }, uBright: { value: 1.5 } },
     vertexShader: `
-      attribute vec3 aBase; attribute vec3 aDir; attribute float aSpawn; attribute float aJit;
+      attribute vec3 aBase; attribute vec3 aDir; attribute float aSpawn; attribute float aJit; attribute float aLife;
       uniform float uTime, uSpeed, uLife, uThick, uSize, uScale, uFade;
       varying float vAlpha;
       void main() {
         float age = uTime - aSpawn;
+        // each point owns its lifetime (uLife × aLife ∈ [0.45,1.0]) so the ring
+        // dissolves particle-by-particle instead of blinking out all at once
+        float pLife = uLife * aLife;
         // 'alive', not 'active' — 'active' is a RESERVED word in GLSL ES 3.00,
         // which three.js auto-targets on WebGL2 (#version 300 es conversion)
-        float alive = (aSpawn > 0.0 && age >= 0.0 && age <= uLife) ? 1.0 : 0.0;
+        float alive = (aSpawn > 0.0 && age >= 0.0 && age <= pLife) ? 1.0 : 0.0;
         float r = age * uSpeed + aJit * uThick;
         vec3 pos = aBase + aDir * r;
         vec4 mv = modelViewMatrix * vec4(pos, 1.0);
-        float lifeT = clamp(age / uLife, 0.0, 1.0);
+        float lifeT = clamp(age / pLife, 0.0, 1.0);
         // gaussian shell: full brightness at the band center, soft falloff at
         // the jittered edges — concentrates the ring instead of scattering it
         float shell = exp(-aJit * aJit * 3.0);
         // born at FULL opacity (no fade-in), then a pow-curve fade-out:
         // uFade > 1 holds near-solid early and drops late; < 1 dims fast
         vAlpha = alive * shell * pow(1.0 - lifeT, uFade);
-        gl_PointSize = uSize * uScale / max(-mv.z, 0.001) * alive;
+        // circumference grows as the ring expands — grow the sprites with it
+        // so coverage stays continuous instead of opening into dots
+        float grow = 1.0 + age * uSpeed * 0.55;
+        gl_PointSize = uSize * uScale * grow / max(-mv.z, 0.001) * alive;
         gl_Position = projectionMatrix * mv;
       }`,
     fragmentShader: `
@@ -432,7 +442,7 @@ function updateBrainBassWaves(wv, t, bassReact, tune) {
   u.uSpeed.value = T.speed ?? 1.2;
   u.uLife.value = T.life ?? 1.2;
   u.uThick.value = T.thick ?? 0.05;
-  u.uSize.value = T.size ?? 0.022;
+  u.uSize.value = T.size ?? 0.028;
   u.uFade.value = T.fade ?? 1.8;
   if (T.color) u.uColor.value.setRGB(T.color[0], T.color[1], T.color[2]);
   const thr = T.onsetThr ?? 0.30;
