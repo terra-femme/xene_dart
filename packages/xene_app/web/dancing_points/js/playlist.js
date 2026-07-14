@@ -67,6 +67,13 @@
     try {
       // chart mode: only the audible master + the vocal stem (raw waveform for
       // the brain trail) need to travel; the chart drives everything else.
+      //
+      // DEV A/B knob: localStorage.setItem('dancingPoints.abMode','1') + reload
+      // → downloads ALL stems AND the chart, installs NO chart (pure live DSP),
+      // and stashes the chart at window.__avChart. Flip live in the console:
+      //   xeneEngine.setChart(window.__avChart)  // chart drive
+      //   xeneEngine.setChart(null)              // live DSP
+      const abMode = localStorage.getItem('dancingPoints.abMode') === '1';
       let chart = null;
       let fileEntries = Object.entries(track.files || {});
       if (track.chartUrl) {
@@ -74,12 +81,18 @@
           const res = await fetch(track.chartUrl);
           if (!res.ok) throw new Error('HTTP ' + res.status);
           chart = await res.json();
-          fileEntries = fileEntries.filter(([slot]) => slot === 'original' || slot === 'vocals');
+          if (!abMode) {
+            fileEntries = fileEntries.filter(([slot]) => slot === 'original' || slot === 'vocals');
+          }
         } catch (err) {
           console.warn('[playlist] chart fetch failed — falling back to full stems', err);
           chart = null;
           fileEntries = Object.entries(track.files || {});
         }
+      }
+      /** @type {any} */ (window).__avChart = chart;
+      if (abMode) {
+        console.log('[playlist] A/B mode: full stems + live DSP; chart stashed at window.__avChart');
       }
 
       console.log('[playlist] fetching', track.title, fileEntries.map(([s]) => s).join('+'));
@@ -94,7 +107,7 @@
       for (const [slot, buf] of parts) await engine.setSlot(slot, buf);
       if (seq !== loadSeq) return;
 
-      if (engine.setChart) engine.setChart(chart);
+      if (engine.setChart) engine.setChart(abMode ? null : chart);
       if (applySettings) applySettings(track.settings);
       engine.seek(0);
       engine.play();

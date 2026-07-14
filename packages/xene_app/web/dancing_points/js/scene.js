@@ -969,7 +969,7 @@ function buildBrainReferenceBrain() {
           cos(vertical * 4.4 - uTime * 0.31) * 0.35 +
           sin((horizontal + vertical) * 5.2 + uTime * 0.22) * 0.15;
         float centerEase = smoothstep(1.45, 0.12, length(vec2(horizontal, vertical)));
-        float breath = 1.0 + uBass * 0.030 + tide * 0.010 * (0.35 + uVocals);
+        float breath = 1.0 + uBass * 0.048 + tide * 0.010 * (0.35 + uVocals);
         p.xy *= breath;
         p.x += tide * 0.018 * centerEase * (0.35 + uMelody);
         p.y += sin(horizontal * 2.7 - uTime * 0.34) * 0.012 * centerEase * (0.25 + uVocals);
@@ -1867,7 +1867,9 @@ function buildBrainFrame() {
 
 function updateBrainFrame(brain, t, sig, tiltX, tiltY) {
   if (brain.kind === 'reference-brain') {
-    const breath = 1 + sig.bass * 0.025 + sig.full * 0.010 + Math.sin(t * 0.35) * 0.004;
+    // bass breath re-raised 0.025 → 0.040 (user request 2026-07-13): the brain
+    // visibly swells on bass hits alongside the droplets.
+    const breath = 1 + sig.bass * 0.040 + sig.full * 0.010 + Math.sin(t * 0.35) * 0.004;
     brain.group.scale.setScalar((brain.layoutScale || 1) * 1.0 * breath);
     brain.group.rotation.x = -0.025 + tiltX * 0.10 + Math.sin(t * 0.17) * 0.006;
     brain.group.rotation.y = tiltY * 0.08 + Math.sin(t * 0.13) * 0.014;
