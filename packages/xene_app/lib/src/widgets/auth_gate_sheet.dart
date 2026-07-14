@@ -1,3 +1,5 @@
+import 'dart:developer' as dev;
+
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -14,13 +16,25 @@ const _kMobileRedirectUrl = 'io.supabase.xene://login-callback';
 /// [featureHint] is appended after "Sign in or create an account " — keep it
 /// short and lowercase, e.g. "to access editorial picks".
 void showAuthGate(BuildContext context, {required String featureHint}) {
+  // useRootNavigator: true hosts the sheet in the top-most (root) Overlay,
+  // ABOVE the RootShell chrome (XeneDraggableSheet, LogoPipPlayer,
+  // LoadingOverlay). Without it, entry points inside a shell branch (feed cards,
+  // profile) resolve to the branch Navigator whose overlay paints BELOW that
+  // chrome, so the sheet can open invisibly behind it.
+  dev.log(
+    '[authGate] showAuthGate(featureHint="$featureHint") — presenting modal',
+    name: 'xene.auth',
+  );
   showModalBottomSheet<void>(
     context: context,
+    useRootNavigator: true,
     isScrollControlled: true,
     isDismissible: true,
     enableDrag: true,
     backgroundColor: Colors.transparent,
     builder: (_) => _AuthGateSheet(featureHint: featureHint),
+  ).whenComplete(
+    () => dev.log('[authGate] modal dismissed', name: 'xene.auth'),
   );
 }
 

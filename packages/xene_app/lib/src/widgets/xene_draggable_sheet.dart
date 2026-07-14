@@ -384,7 +384,10 @@ class _XeneDraggableSheetState extends ConsumerState<XeneDraggableSheet>
 
     final isLandscape =
         MediaQuery.of(context).orientation == Orientation.landscape;
-    final logoBottom = isLandscape ? topOffset : topOffset + 290;
+    // Portrait: the expanded sheet's top edge lands at logoBottom. The +7 drops
+    // that resting edge 7px below the sidebar XENE logo so the snapped-open sheet
+    // no longer touches it. Landscape is unaffected (sidebar logo crawls there).
+    final logoBottom = isLandscape ? topOffset : topOffset + 297;
 
     final maxRatio = ((screenHeight - logoBottom) / screenHeight).clamp(
       0.1,
