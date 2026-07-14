@@ -9,6 +9,7 @@ import 'package:go_router/go_router.dart';
 import 'package:xene_app/src/platform/auth_url_cleanup_stub.dart'
     if (dart.library.html) 'package:xene_app/src/platform/auth_url_cleanup_web.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:lottie/lottie.dart';
 import 'package:device_preview_plus/device_preview_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -354,6 +355,35 @@ class _InnerPageLayout extends StatelessWidget {
   }
 }
 
+/// Full-screen gate shown ONLY while no Supabase session exists yet (see
+/// [_router]'s redirect). Kept outside the shell so RootShell's authenticated
+/// providers never build against a null session.
+///
+/// Renders the SAME black + LoadingLottie visual as [LoadingOverlay] so the
+/// no-session wait is seamless — the user just sees the normal branded loader a
+/// beat longer, then the app, not a separate spinner. LoadingOverlay itself
+/// can't cover this window: it lives inside RootShell and watches feedProvider,
+/// which reads currentUserIdProvider — the very assert we're gating around.
+class _SessionGateScreen extends StatelessWidget {
+  const _SessionGateScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Center(
+        child: Lottie.asset(
+          'assets/animations/LoadingLottie.json',
+          width: 140,
+          height: 140,
+          repeat: true,
+          fit: BoxFit.contain,
+        ),
+      ),
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
@@ -362,10 +392,23 @@ final _router = GoRouter(
   initialLocation: '/',
   redirect: (context, state) {
     final session = Supabase.instance.client.auth.currentSession;
-    final isOnAuth = state.matchedLocation == '/auth';
+    final loc = state.matchedLocation;
+
+    // Startup transient: the anonymous fallback sign-in in main() may not have
+    // landed yet (slow network, or a fresh install with no persisted session).
+    // Until ANY session exists, hold on /loading — otherwise the home feed and
+    // header build immediately and read currentUserIdProvider with a null
+    // session, hitting its fail-closed assert (red screen). The anon sign-in
+    // keeps running after its timeout; onAuthStateChange calls _router.refresh()
+    // the moment a session — anon or real — arrives, and the gate lifts.
+    if (session == null) {
+      return loc == '/loading' ? null : '/loading';
+    }
+    // A session exists now — never strand anyone on the loading gate.
+    if (loc == '/loading') return '/';
     // Only redirect away from /auth for real (non-anonymous) accounts.
     // Anonymous users reach /auth via feature gates and should not be bounced.
-    if (session != null && !(session.user.isAnonymous) && isOnAuth) return '/';
+    if (!session.user.isAnonymous && loc == '/auth') return '/';
     return null;
   },
   routes: [
@@ -373,6 +416,14 @@ final _router = GoRouter(
     // contains XeneSidebar/XeneHeader which watch authenticated providers;
     // nesting /auth would trigger them before any session exists.
     GoRoute(path: '/auth', builder: (context, state) => const AuthScreen()),
+
+    // Session gate — shown only while no session exists yet (see redirect).
+    // Top-level like /auth so RootShell's authenticated providers never build
+    // against a null session.
+    GoRoute(
+      path: '/loading',
+      builder: (context, state) => const _SessionGateScreen(),
+    ),
 
     // Persistent shell for the 7 primary swipe routes. RootShell stays mounted
     // across branch switches, so navigating between these pages never tears
