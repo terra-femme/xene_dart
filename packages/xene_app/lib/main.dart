@@ -354,6 +354,21 @@ class _InnerPageLayout extends StatelessWidget {
   }
 }
 
+/// Minimal full-screen gate shown ONLY while no Supabase session exists yet
+/// (see [_router]'s redirect). Kept outside the shell so RootShell's
+/// authenticated providers never build against a null session.
+class _SessionGateScreen extends StatelessWidget {
+  const _SessionGateScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      backgroundColor: Colors.white,
+      body: Center(child: CircularProgressIndicator(color: XeneTheme.orange)),
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
@@ -362,10 +377,23 @@ final _router = GoRouter(
   initialLocation: '/',
   redirect: (context, state) {
     final session = Supabase.instance.client.auth.currentSession;
-    final isOnAuth = state.matchedLocation == '/auth';
+    final loc = state.matchedLocation;
+
+    // Startup transient: the anonymous fallback sign-in in main() may not have
+    // landed yet (slow network, or a fresh install with no persisted session).
+    // Until ANY session exists, hold on /loading — otherwise the home feed and
+    // header build immediately and read currentUserIdProvider with a null
+    // session, hitting its fail-closed assert (red screen). The anon sign-in
+    // keeps running after its timeout; onAuthStateChange calls _router.refresh()
+    // the moment a session — anon or real — arrives, and the gate lifts.
+    if (session == null) {
+      return loc == '/loading' ? null : '/loading';
+    }
+    // A session exists now — never strand anyone on the loading gate.
+    if (loc == '/loading') return '/';
     // Only redirect away from /auth for real (non-anonymous) accounts.
     // Anonymous users reach /auth via feature gates and should not be bounced.
-    if (session != null && !(session.user.isAnonymous) && isOnAuth) return '/';
+    if (!session.user.isAnonymous && loc == '/auth') return '/';
     return null;
   },
   routes: [
@@ -373,6 +401,14 @@ final _router = GoRouter(
     // contains XeneSidebar/XeneHeader which watch authenticated providers;
     // nesting /auth would trigger them before any session exists.
     GoRoute(path: '/auth', builder: (context, state) => const AuthScreen()),
+
+    // Session gate — shown only while no session exists yet (see redirect).
+    // Top-level like /auth so RootShell's authenticated providers never build
+    // against a null session.
+    GoRoute(
+      path: '/loading',
+      builder: (context, state) => const _SessionGateScreen(),
+    ),
 
     // Persistent shell for the 7 primary swipe routes. RootShell stays mounted
     // across branch switches, so navigating between these pages never tears
