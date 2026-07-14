@@ -355,6 +355,7 @@ class _XeneDraggableSheetState extends ConsumerState<XeneDraggableSheet>
 
     final screenHeight = MediaQuery.of(context).size.height;
     final topPadding = MediaQuery.of(context).padding.top;
+    final bottomPadding = MediaQuery.of(context).padding.bottom;
     final topOffset = topPadding + 56;
 
     final sheetController = ref.watch(sheetProvider);
@@ -394,7 +395,15 @@ class _XeneDraggableSheetState extends ConsumerState<XeneDraggableSheet>
       1.0,
     );
 
-    const double minHeight = 23.0;
+    // Collapsed height. The 20px drag handle sits at the TOP of the collapsed
+    // sheet, so its grab zone lands at ~minHeight above the screen bottom. On a
+    // home-indicator iPhone the old flat 23px put that handle INSIDE the system
+    // edge-gesture zone (≈ the bottom safe-area inset), so iOS claimed every
+    // upward swipe as home/app-switcher and the sheet never got the drag. Fold
+    // the bottom inset + a tap-sized margin in so the handle clears that zone;
+    // the sheet still fills to the physical bottom edge. (Swipes from the very
+    // bottom edge remain iOS's home gesture by design — grab the handle instead.)
+    final minHeight = bottomPadding + 44.0;
     final minRatio = (minHeight / screenHeight).clamp(0.01, maxRatio);
 
     // Capture collapse state now so archiveAsync.when(data:) can decide
