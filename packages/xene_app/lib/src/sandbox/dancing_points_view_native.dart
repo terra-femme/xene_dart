@@ -1,3 +1,5 @@
+import 'dart:developer' as dev;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -56,6 +58,37 @@ class _DancingPointsViewState extends State<DancingPointsView> {
     final controller = WebViewController.fromPlatformCreationParams(params)
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(const Color(0xFF07070A))
+      // Surface everything the WKWebView normally swallows: JS console output
+      // (three.js failures, playlist fetch logs), failed subresource loads (the
+      // CDN three.min.js, remote playlist.json / stems, the un-bundled assets/
+      // texture), and HTTP errors. Without this, a broken visualizer is silent
+      // on device. dev-only diagnostics.
+      ..setOnConsoleMessage((JavaScriptConsoleMessage m) {
+        dev.log(
+          '[dpWeb][console.${m.level.name}] ${m.message}',
+          name: 'xene.avviz',
+        );
+      })
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onPageFinished: (url) =>
+              dev.log('[dpWeb] page finished: $url', name: 'xene.avviz'),
+          onWebResourceError: (WebResourceError e) {
+            dev.log(
+              '[dpWeb][resourceError] code=${e.errorCode} '
+              'mainFrame=${e.isForMainFrame} url=${e.url} — ${e.description}',
+              name: 'xene.avviz',
+            );
+          },
+          onHttpError: (HttpResponseError e) {
+            dev.log(
+              '[dpWeb][httpError] status=${e.response?.statusCode} '
+              'url=${e.request?.uri}',
+              name: 'xene.avviz',
+            );
+          },
+        ),
+      )
       ..addJavaScriptChannel(
         'XeneHaptics',
         onMessageReceived: (JavaScriptMessage message) {

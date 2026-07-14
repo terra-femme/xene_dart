@@ -56,5 +56,9 @@ flutter:
     - assets/animations/
     # Dancing Points WebGL page — bundled so the native WebView
     # (dancing_points_view_native.dart) can load it via loadFlutterAsset.
+    # Flutter asset directory entries are NON-recursive, so every subfolder must
+    # be listed explicitly — assets/ holds the brain texture (scene.js loads
+    # assets/brain_wire_reference.png); without it the brain renders untextured.
     - web/dancing_points/
     - web/dancing_points/js/
+    - web/dancing_points/assets/
