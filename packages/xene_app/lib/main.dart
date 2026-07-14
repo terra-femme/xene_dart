@@ -44,6 +44,16 @@ import 'package:xene_app/src/providers/accessibility_provider.dart';
 // NEVER pass --dart-define=XENE_FORCE_DEV_MENU=true to distribution builds.
 const _forceDevMenu = bool.fromEnvironment('XENE_FORCE_DEV_MENU');
 
+// Compile-time flag for the device_preview_plus simulated-device frame.
+// Defaults OFF so normal builds (including debug on a real phone) run the app
+// full-screen — the preview frame otherwise reparents the whole app and can
+// swallow modal bottom sheets (e.g. the sign-in sheet). Re-enable on demand to
+// preview how the UI generalizes across devices:
+//   flutter run --dart-define=XENE_DEVICE_PREVIEW=true
+// The DevicePreview.appBuilder / DevicePreview.locale calls below are null-safe
+// when disabled, so no other wiring changes are needed to turn it back on.
+const _devicePreview = bool.fromEnvironment('XENE_DEVICE_PREVIEW');
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   _forwardFlutterErrorsToConsole();
@@ -183,7 +193,7 @@ Future<void> main() async {
 
   runApp(
     DevicePreview(
-      enabled: !kReleaseMode,
+      enabled: _devicePreview,
       builder: (context) => const ProviderScope(child: XeneApp()),
     ),
   );

@@ -372,7 +372,10 @@
     </div>
   </aside>
 
-  <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+  <!-- Vendored Three.js r128 (was https://unpkg.com/three@0.128.0/build/three.min.js).
+       Served from the bundled asset so the renderer never depends on a runtime
+       CDN fetch inside the WebView. -->
+  <script src="js/three.min.js"></script>
   <script src="js/av-config.js?v=playlist-4"></script>
   <script src="js/shaders.js?v=playlist-4"></script>
   <script src="js/audio-engine.js?v=playlist-4"></script>
