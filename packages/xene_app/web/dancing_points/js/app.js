@@ -87,11 +87,11 @@
   let hapticsOn = ('vibrate' in navigator) || hapticBridge;
   // Drums-only haptic test: mirror the center wire/noise ball's drum drive.
   // Bass resonance is a separate later pass once the drum feel is judged.
-  const HAPTIC_ON_THRESHOLD = 0.34;
-  const HAPTIC_OFF_THRESHOLD = 0.14;
-  const HAPTIC_ATTACK_DELTA = 0.08;
-  const HAPTIC_MIN_GAP_MS = 115;
-  const hapticGate = { prev: 0, armed: true, lastMs: -10000 };
+  const HAPTIC_ON_THRESHOLD = 0.16;
+  const HAPTIC_OFF_THRESHOLD = 0.07;
+  const HAPTIC_ATTACK_DELTA = 0.018;
+  const HAPTIC_MIN_GAP_MS = 90;
+  const hapticGate = { prev: 0, armed: true, lastMs: -10000, count: 0 };
 
   const state = {
     source: 'vocals',
@@ -295,20 +295,29 @@
   // ---------- transport ----------
   const playBtn = $('play');
   const playIco = $('playIco');
+  const quickPlayBtn = $('quickPlay');
+  const quickPlayIco = $('quickPlayIco');
   const scrub = $('scrub');
   let scrubbing = false;
 
+  const playPath = '<path d="M8 5v14l11-7z"/>';
+  const pausePath = '<path d="M6 5h4v14H6zM14 5h4v14h-4z"/>';
+
   function syncPlayIcon() {
-    playIco.innerHTML = engine.isPlaying
-      ? '<path d="M6 5h4v14H6zM14 5h4v14h-4z"/>'
-      : '<path d="M8 5v14l11-7z"/>';
+    const path = engine.isPlaying ? pausePath : playPath;
+    playIco.innerHTML = path;
+    if (quickPlayIco) quickPlayIco.innerHTML = path;
+    if (quickPlayBtn) quickPlayBtn.disabled = !engine.hasStems;
   }
 
-  playBtn.addEventListener('click', () => {
+  function togglePlayback() {
     if (!engine.hasStems) return;
     if (engine.isPlaying) engine.pause(); else engine.play();
     syncPlayIcon();
-  });
+  }
+
+  playBtn.addEventListener('click', togglePlayback);
+  if (quickPlayBtn) quickPlayBtn.addEventListener('click', togglePlayback);
   scrub.addEventListener('input', () => {
     scrubbing = true;
     $('cur').textContent = fmtTime((+scrub.value / 1000) * capDuration());
@@ -605,7 +614,13 @@
         drive > HAPTIC_ON_THRESHOLD && rising > HAPTIC_ATTACK_DELTA) {
       hapticGate.lastMs = now;
       hapticGate.armed = false;
-      if (hapticsOn) fireHaptic(Math.min(1, Math.max(0.35, drive)));
+      if (hapticsOn) {
+        fireHaptic(Math.min(1, Math.max(0.35, drive)));
+        hapticGate.count++;
+        if (hapticGate.count <= 12) {
+          console.log('[haptics] drum hit', 'drive=' + drive.toFixed(3), 'rise=' + rising.toFixed(3));
+        }
+      }
     } else if (drive < HAPTIC_OFF_THRESHOLD || !playing) {
       hapticGate.armed = true;
     }
