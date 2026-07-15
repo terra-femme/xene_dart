@@ -85,13 +85,15 @@
     hapticDot.style.transform = 'translateX(-50%) scale(0.7)';
   }
   let hapticsOn = ('vibrate' in navigator) || hapticBridge;
-  const HAPTIC_THRESHOLD = 0.45;
+  const HAPTIC_ON_THRESHOLD = 0.62;
+  const HAPTIC_OFF_THRESHOLD = 0.24;
+  const HAPTIC_ATTACK_DELTA = 0.12;
+  const HAPTIC_MIN_GAP_MS = 135;
   // Haptics listen to BASS + DRUMS together (each with its own rising-edge
   // state), independent of the selected Reactive Source. 'full' is the
   // fallback when neither stem is loaded (e.g. master-only playback).
   const HAPTIC_SOURCES = ['drums', 'bass'];
-  /** @type {Record<string, number>} */
-  const prevReactForHaptic = { drums: 0, bass: 0, full: 0 };
+  const hapticGate = { prev: 0, armed: true, lastMs: -10000 };
 
   const state = {
     source: 'vocals',
@@ -604,15 +606,23 @@
       chart ? !!chart.signals[k] : !!engine.buffers[k])
       ? HAPTIC_SOURCES
       : ['full'];
-    let hapticHit = 0;
-    for (const k of hapticKeys) {
-      const r = (engine.signals[k] && engine.signals[k].react) || 0;
-      if (playing && r > HAPTIC_THRESHOLD && prevReactForHaptic[k] <= HAPTIC_THRESHOLD) {
-        hapticHit = Math.max(hapticHit, r);
-      }
-      prevReactForHaptic[k] = r;
+    const drums = hapticKeys.includes('drums') ? ((engine.signals.drums && engine.signals.drums.react) || 0) : 0;
+    const bass = hapticKeys.includes('bass') ? ((engine.signals.bass && engine.signals.bass.react) || 0) : 0;
+    const full = hapticKeys.includes('full') ? ((engine.signals.full && engine.signals.full.react) || 0) : 0;
+    const drive = hapticKeys.includes('full')
+      ? full
+      : Math.max(drums, bass * 0.88, (drums * 0.62 + bass * 0.54));
+    const rising = drive - hapticGate.prev;
+    const enoughGap = now - hapticGate.lastMs >= HAPTIC_MIN_GAP_MS;
+    if (playing && hapticGate.armed && enoughGap &&
+        drive > HAPTIC_ON_THRESHOLD && rising > HAPTIC_ATTACK_DELTA) {
+      hapticGate.lastMs = now;
+      hapticGate.armed = false;
+      if (hapticsOn) fireHaptic(Math.min(1, Math.max(0.35, drive)));
+    } else if (drive < HAPTIC_OFF_THRESHOLD || !playing) {
+      hapticGate.armed = true;
     }
-    if (hapticsOn && hapticHit > 0) fireHaptic(Math.min(1, hapticHit));
+    hapticGate.prev = drive;
 
     // meters
     mLevel.style.width = Math.min(100, (engine.level / (engine.peak + 1e-5)) * 100) + '%';

@@ -150,6 +150,9 @@ class StemEngine {
   get duration() { return this._duration; }
   get isPlaying() { return this._playing; }
   get currentTime() {
+    if (this._useMediaElementOutput && this._mediaEl && !this._mediaEl.paused) {
+      return Math.max(0, Math.min(this._duration || Infinity, this._mediaEl.currentTime || 0));
+    }
     if (!this.ctx) return this._offset;
     const t = this._playing
       ? this._offset + (this.ctx.currentTime - this._startTime)
