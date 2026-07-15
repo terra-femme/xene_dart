@@ -664,12 +664,14 @@
         drive > HAPTIC_ON_THRESHOLD && rising > HAPTIC_ATTACK_DELTA) {
       hapticGate.lastMs = now;
       hapticGate.armed = false;
+      const hapticLevel = Math.min(1, Math.max(0.35, drive));
+      pulseHapticIndicator(hapticLevel);
+      hapticGate.count++;
+      if (hapticGate.count <= 12) {
+        console.log('[haptics] drum hit', 'drive=' + drive.toFixed(3), 'rise=' + rising.toFixed(3));
+      }
       if (hapticsOn) {
-        fireHaptic(Math.min(1, Math.max(0.35, drive)));
-        hapticGate.count++;
-        if (hapticGate.count <= 12) {
-          console.log('[haptics] drum hit', 'drive=' + drive.toFixed(3), 'rise=' + rising.toFixed(3));
-        }
+        fireHaptic(hapticLevel);
       }
     } else if (drive < HAPTIC_OFF_THRESHOLD || !playing) {
       hapticGate.armed = true;
