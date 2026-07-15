@@ -477,7 +477,7 @@
     p.classList.toggle('hidden');
     $('toggle').textContent = p.classList.contains('hidden') ? 'Show' : 'Hide';
   });
-  if (window.matchMedia('(max-width: 720px)').matches) {
+  if (window.matchMedia('(max-width: 720px), (orientation: landscape) and (max-height: 560px)').matches) {
     $('panel').classList.add('hidden');
     $('toggle').textContent = 'Show';
   }

@@ -88,8 +88,9 @@ function createScene(canvas) {
   let tiltY = 0;
 
   window.addEventListener('pointermove', (e) => {
-    const nx = (e.clientX / window.innerWidth) * 2 - 1;
-    const ny = (e.clientY / window.innerHeight) * 2 - 1;
+    const rect = canvas.getBoundingClientRect();
+    const nx = ((e.clientX - rect.left) / Math.max(1, rect.width)) * 2 - 1;
+    const ny = ((e.clientY - rect.top) / Math.max(1, rect.height)) * 2 - 1;
     targetTiltY = nx * 0.18;
     targetTiltX = ny * 0.12;
   });
