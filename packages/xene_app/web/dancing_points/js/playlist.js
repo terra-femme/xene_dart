@@ -231,8 +231,11 @@
     });
     handle.addEventListener('pointermove', (/** @type {any} */ e) => {
       if (!dragging) return;
-      const l = Math.max(4, Math.min(window.innerWidth - 80, baseL + e.clientX - startX));
-      const t = Math.max(4, Math.min(window.innerHeight - 48, baseT + e.clientY - startY));
+      const r = panel.getBoundingClientRect();
+      const maxL = Math.max(4, window.innerWidth - r.width - 4);
+      const maxT = Math.max(4, window.innerHeight - Math.min(r.height, window.innerHeight - 8) - 4);
+      const l = Math.max(4, Math.min(maxL, baseL + e.clientX - startX));
+      const t = Math.max(4, Math.min(maxT, baseT + e.clientY - startY));
       panel.style.left = l + 'px';
       panel.style.top = t + 'px';
     });
@@ -253,7 +256,30 @@
       const p = JSON.parse(localStorage.getItem(LS_POS) || 'null');
       if (p && p.left && p.top) { panel.style.left = p.left; panel.style.top = p.top; }
     } catch (_e) { /* corrupt state → default position */ }
+    clampToViewport();
   }
 
-  /** @type {any} */ (window).XenePlaylist = { init, refresh, advance, render };
+  function clampToViewport() {
+    if (!panel) return;
+    const r = panel.getBoundingClientRect();
+    const maxL = Math.max(4, window.innerWidth - r.width - 4);
+    const maxT = Math.max(4, window.innerHeight - Math.min(r.height, window.innerHeight - 8) - 4);
+    const currentL = Number.parseFloat(panel.style.left || String(r.left));
+    const currentT = Number.parseFloat(panel.style.top || String(r.top));
+    const l = Math.max(4, Math.min(maxL, Number.isFinite(currentL) ? currentL : r.left));
+    const t = Math.max(4, Math.min(maxT, Number.isFinite(currentT) ? currentT : r.top));
+    panel.style.left = l + 'px';
+    panel.style.top = t + 'px';
+    try {
+      localStorage.setItem(LS_POS, JSON.stringify({ left: panel.style.left, top: panel.style.top }));
+    } catch (_e) { /* storage unavailable */ }
+  }
+
+  window.addEventListener('resize', clampToViewport);
+  window.addEventListener('orientationchange', () => setTimeout(clampToViewport, 300));
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', () => setTimeout(clampToViewport, 80));
+  }
+
+  /** @type {any} */ (window).XenePlaylist = { init, refresh, advance, render, clampToViewport };
 })();

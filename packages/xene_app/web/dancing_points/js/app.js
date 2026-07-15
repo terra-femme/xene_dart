@@ -482,6 +482,30 @@
     $('toggle').textContent = 'Show';
   }
 
+  const shortLandscapeQuery = window.matchMedia('(orientation: landscape) and (max-height: 560px)');
+  function settleResponsiveLayout() {
+    if (!shortLandscapeQuery.matches) {
+      window.scrollTo(0, 0);
+    }
+    scene.resize();
+    const XP = /** @type {any} */ (window).XenePlaylist;
+    if (XP && XP.clampToViewport) XP.clampToViewport();
+  }
+  function scheduleResponsiveSettle() {
+    settleResponsiveLayout();
+    [80, 240, 520].forEach((ms) => setTimeout(settleResponsiveLayout, ms));
+  }
+  window.addEventListener('orientationchange', scheduleResponsiveSettle);
+  window.addEventListener('resize', scheduleResponsiveSettle);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', scheduleResponsiveSettle);
+  }
+  if (shortLandscapeQuery.addEventListener) {
+    shortLandscapeQuery.addEventListener('change', scheduleResponsiveSettle);
+  } else if (shortLandscapeQuery.addListener) {
+    shortLandscapeQuery.addListener(scheduleResponsiveSettle);
+  }
+
   // ---------- persistence ----------
   function persist() {
     const save = {
