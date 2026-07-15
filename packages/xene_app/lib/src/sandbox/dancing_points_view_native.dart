@@ -162,7 +162,8 @@ class _DancingPointsViewState extends State<DancingPointsView> {
     final brainDataUrl = 'data:image/png;base64,${base64Encode(brainPng)}';
     html = html.replaceFirst(
       '</head>',
-      '<script>window.XENE_ASSETS={'
+      '<script>window.XENE_NATIVE_HOST={platform:"ios"};'
+          'window.XENE_ASSETS={'
           'brainWire:${jsonEncode(brainDataUrl)}'
           '};</script></head>',
     );

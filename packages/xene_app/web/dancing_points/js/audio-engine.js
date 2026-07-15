@@ -76,6 +76,10 @@ class StemEngine {
     this._playing = false;
     this._offset = 0;
     this._startTime = 0;
+    this._useMediaElementOutput =
+      !!(window.XENE_NATIVE_HOST && /** @type {any} */ (window.XENE_NATIVE_HOST).platform === 'ios');
+    /** @type {HTMLAudioElement|null} */ this._mediaEl = null;
+    /** @type {string|null} */ this._mediaUrl = null;
 
     // ---- analysis ----
     /** @type {AnalyserNode|null} */ this._active = null;
@@ -182,6 +186,51 @@ class StemEngine {
     this.setSource(this.sourceKey);
   }
 
+  /** @param {string|null|undefined} url */
+  setAudibleUrl(url) {
+    if (!this._useMediaElementOutput || !url) return;
+    if (!this._mediaEl) {
+      const el = document.createElement('audio');
+      el.preload = 'auto';
+      el.playsInline = true;
+      el.style.display = 'none';
+      document.body.appendChild(el);
+      this._mediaEl = el;
+    }
+    if (this._mediaUrl !== url && this._mediaEl) {
+      this._mediaUrl = url;
+      this._mediaEl.src = url;
+      this._mediaEl.load();
+      console.log('[stem-engine] media output prepared');
+    }
+  }
+
+  _startMediaElement() {
+    const el = this._mediaEl;
+    if (!this._useMediaElementOutput || !el || !this._mediaUrl) return;
+    try {
+      el.currentTime = Math.max(0, Math.min(this._duration || 0, this._offset));
+    } catch (err) {
+      console.warn('[stem-engine] media seek failed', err);
+    }
+    el.volume = 1;
+    el.muted = false;
+    const p = el.play();
+    if (p && p.then) {
+      p.then(() => {
+        console.log('[stem-engine] media output playing', 't=' + el.currentTime.toFixed(2));
+      }).catch((err) => {
+        console.warn('[stem-engine] media output play failed', err);
+      });
+    } else {
+      console.log('[stem-engine] media output play requested');
+    }
+  }
+
+  _pauseMediaElement() {
+    if (this._mediaEl) this._mediaEl.pause();
+  }
+
   /**
    * iOS/Safari only unlocks Web Audio from a real user gesture. Playlist
    * playback fetches and decodes before it starts, so the tap handler must call
@@ -273,7 +322,11 @@ class StemEngine {
       src.buffer = buffer;
 
       if (key === 'original') {
-        src.connect(this.master);                 // audible
+        if (this._useMediaElementOutput && hasOriginal) {
+          src.connect(this.masterAnalyser);       // analysis only; <audio> is audible on iOS
+        } else {
+          src.connect(this.master);               // audible
+        }
       } else {
         const a = this.stemAnalyser[key];
         if (a) src.connect(a);                     // silent analysis
@@ -301,6 +354,7 @@ class StemEngine {
     this._sources = sources;
     this._startTime = when;
     this._playing = true;
+    this._startMediaElement();
     setTimeout(() => this._probeMasterOutput('250ms'), 250);
   }
 
@@ -342,6 +396,7 @@ class StemEngine {
     if (!this._playing) return;
     const pos = this.currentTime;
     this._stopSources();
+    this._pauseMediaElement();
     this._offset = pos;
     this._playing = false;
   }
@@ -350,11 +405,18 @@ class StemEngine {
   seek(seconds) {
     const t = Math.max(0, Math.min(this._duration || 0, seconds));
     this._offset = t;
+    if (this._mediaEl) {
+      try { this._mediaEl.currentTime = t; } catch (_e) { /* media may not be ready */ }
+    }
     if (this._playing) this._startPlayback();
   }
 
   stop() {
     this._stopSources();
+    this._pauseMediaElement();
+    if (this._mediaEl) {
+      try { this._mediaEl.currentTime = 0; } catch (_e) { /* media may not be ready */ }
+    }
     this._offset = 0;
     this._playing = false;
   }

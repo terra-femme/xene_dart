@@ -97,6 +97,7 @@
       if (abMode) {
         console.log('[playlist] A/B mode: full stems + live DSP; chart stashed at window.__avChart');
       }
+      if (engine.setAudibleUrl) engine.setAudibleUrl(track.files && track.files.original);
 
       console.log('[playlist] fetching', track.title, fileEntries.map(([s]) => s).join('+'));
       const parts = await Promise.all(fileEntries.map(async ([slot, url]) => {
