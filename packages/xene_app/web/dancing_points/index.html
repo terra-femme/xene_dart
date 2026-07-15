@@ -293,9 +293,15 @@
   .pl-track.active { border-color: var(--accent); background: rgba(160,210,235,0.07); }
   .pl-track.loading { opacity: 0.55; }
   .pl-track .pl-n { font-size: 9px; color: var(--dim-2); min-width: 14px; }
-  .pl-track .pl-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .pl-track .pl-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
   .pl-track .pl-name { font-size: 10.5px; letter-spacing: 0.04em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .pl-track .pl-sub { font-size: 8.5px; color: var(--dim-2); letter-spacing: 0.06em; }
+  .pl-play {
+    width: 27px; height: 27px; flex: 0 0 27px; display: grid; place-items: center;
+    border: 1px solid rgba(255,255,255,0.14); border-radius: 50%;
+    background: rgba(255,255,255,0.04); color: var(--fg); cursor: pointer;
+  }
+  .pl-play svg { width: 11px; height: 11px; fill: currentColor; }
 
   /* panel toggle */
   .toggle {
@@ -306,19 +312,6 @@
     transition: color 0.2s, border-color 0.2s;
   }
   .toggle:hover { color: var(--fg); border-color: var(--accent); }
-
-  .quick-play {
-    position: fixed; left: 50%; bottom: 22px; z-index: 31;
-    width: 48px; height: 48px; border-radius: 50%;
-    transform: translateX(-50%);
-    border: 1px solid rgba(255,255,255,0.16);
-    background: rgba(6,8,12,0.72); color: var(--fg);
-    display: grid; place-items: center; cursor: pointer;
-    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-    box-shadow: 0 10px 30px rgba(0,0,0,0.28);
-  }
-  .quick-play:disabled { opacity: 0.34; cursor: not-allowed; }
-  .quick-play svg { width: 17px; height: 17px; fill: currentColor; }
 
   .foot { padding: 14px 22px 20px; font-size: 8.5px; letter-spacing: 0.1em; color: var(--dim-2); line-height: 1.7; }
 </style>
@@ -337,9 +330,6 @@
   </div>
 
   <button class="toggle" id="toggle">Hide</button>
-  <button class="quick-play" id="quickPlay" disabled aria-label="play or pause">
-    <svg id="quickPlayIco" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-  </button>
 
   <aside id="panel">
     <div class="panel-scroll">

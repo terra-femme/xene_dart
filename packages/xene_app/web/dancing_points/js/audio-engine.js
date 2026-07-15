@@ -548,8 +548,16 @@ class StemEngine {
 
     for (const key of Object.keys(SOURCES)) {
       const sig = this.signals[key];
+      const def = SOURCES[key];
       const ch = playing ? chart.signals[key] : null;
       if (!ch) {
+        const analyser = def.stem === 'master'
+          ? this.masterAnalyser
+          : this.stemAnalyser[/** @type {StemKey} */ (def.stem)] || null;
+        if (playing && analyser && this.isSourceAvailable(key)) {
+          this._updateSignal(analyser, sig, def.type);
+          continue;
+        }
         // not charted (or paused) → decay exactly like a missing analyser
         sig.react *= this.decay;
         sig.reactSlow *= Math.min(0.995, this.decay + 0.04);

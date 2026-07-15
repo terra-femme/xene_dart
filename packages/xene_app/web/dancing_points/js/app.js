@@ -295,8 +295,6 @@
   // ---------- transport ----------
   const playBtn = $('play');
   const playIco = $('playIco');
-  const quickPlayBtn = $('quickPlay');
-  const quickPlayIco = $('quickPlayIco');
   const scrub = $('scrub');
   let scrubbing = false;
 
@@ -306,8 +304,8 @@
   function syncPlayIcon() {
     const path = engine.isPlaying ? pausePath : playPath;
     playIco.innerHTML = path;
-    if (quickPlayIco) quickPlayIco.innerHTML = path;
-    if (quickPlayBtn) quickPlayBtn.disabled = !engine.hasStems;
+    const XP = /** @type {any} */ (window).XenePlaylist;
+    if (XP && XP.render) XP.render();
   }
 
   function togglePlayback() {
@@ -317,7 +315,7 @@
   }
 
   playBtn.addEventListener('click', togglePlayback);
-  if (quickPlayBtn) quickPlayBtn.addEventListener('click', togglePlayback);
+  /** @type {any} */ (window).XeneTransport = { toggle: togglePlayback, sync: syncPlayIcon };
   scrub.addEventListener('input', () => {
     scrubbing = true;
     $('cur').textContent = fmtTime((+scrub.value / 1000) * capDuration());

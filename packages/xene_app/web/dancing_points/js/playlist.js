@@ -85,7 +85,9 @@
           if (!res.ok) throw new Error('HTTP ' + res.status);
           chart = await res.json();
           if (!abMode) {
-            fileEntries = fileEntries.filter(([slot]) => slot === 'original' || slot === 'vocals');
+            fileEntries = fileEntries.filter(([slot]) =>
+              slot === 'original' || slot === 'vocals' || slot === 'drums'
+            );
           }
         } catch (err) {
           console.warn('[playlist] chart fetch failed — falling back to full stems', err);
@@ -172,18 +174,45 @@
     if (!listEl) return;
     listEl.innerHTML = '';
     tracks.forEach((t, i) => {
-      const el = document.createElement('button');
-      el.type = 'button';
+      const active = t.id === activeId;
+      const loading = t.id === loadingId;
+      const el = document.createElement('div');
+      el.setAttribute('role', 'button');
+      el.tabIndex = 0;
       el.className = 'pl-track'
-        + (t.id === activeId ? ' active' : '')
-        + (t.id === loadingId ? ' loading' : '');
+        + (active ? ' active' : '')
+        + (loading ? ' loading' : '');
       const sub = t.id === loadingId ? 'loading…' : (t.artist || '');
+      const transportIcon = engine && engine.isPlaying
+        ? '<path d="M6 5h4v14H6zM14 5h4v14h-4z"/>'
+        : '<path d="M8 5v14l11-7z"/>';
       el.innerHTML =
         '<span class="pl-n">' + (i + 1) + '</span>' +
-        '<span class="pl-meta"><span class="pl-name"></span><span class="pl-sub"></span></span>';
+        '<span class="pl-meta"><span class="pl-name"></span><span class="pl-sub"></span></span>' +
+        (active
+          ? '<button type="button" class="pl-play" aria-label="play or pause current track"><svg viewBox="0 0 24 24">' + transportIcon + '</svg></button>'
+          : '');
       el.querySelector('.pl-name').textContent = t.title || 'Untitled';
       el.querySelector('.pl-sub').textContent = sub;
+      const plPlay = el.querySelector('.pl-play');
+      if (plPlay) {
+        plPlay.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          const XT = /** @type {any} */ (window).XeneTransport;
+          if (XT && XT.toggle) XT.toggle();
+          else if (engine) {
+            if (engine.isPlaying) engine.pause(); else engine.play();
+            render();
+          }
+        });
+      }
       el.addEventListener('click', () => loadTrack(t));
+      el.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter' || ev.key === ' ') {
+          ev.preventDefault();
+          loadTrack(t);
+        }
+      });
       listEl.appendChild(el);
     });
   }
@@ -226,5 +255,5 @@
     } catch (_e) { /* corrupt state → default position */ }
   }
 
-  /** @type {any} */ (window).XenePlaylist = { init, refresh, advance };
+  /** @type {any} */ (window).XenePlaylist = { init, refresh, advance, render };
 })();
