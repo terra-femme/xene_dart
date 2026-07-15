@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -42,6 +43,7 @@ class _DancingPointsViewState extends State<DancingPointsView> {
     }
     final controller = _buildController();
     _controller = controller;
+    unawaited(_configureAudioSession());
     unawaited(_loadVisualizer(controller));
   }
 
@@ -119,6 +121,18 @@ class _DancingPointsViewState extends State<DancingPointsView> {
     }
 
     return controller;
+  }
+
+  Future<void> _configureAudioSession() async {
+    try {
+      final session = await AudioSession.instance;
+      await session.configure(AudioSessionConfiguration.music());
+      await session.setActive(true);
+      debugPrint('[dpWeb] audio session configured for playback');
+    } catch (error, stackTrace) {
+      debugPrint('[dpWeb] audio session configure failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
+    }
   }
 
   Future<void> _loadVisualizer(WebViewController controller) async {
