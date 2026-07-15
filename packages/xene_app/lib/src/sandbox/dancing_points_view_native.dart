@@ -29,6 +29,9 @@ class DancingPointsView extends StatefulWidget {
 }
 
 class _DancingPointsViewState extends State<DancingPointsView> {
+  static const MethodChannel _nativeHaptics =
+      MethodChannel('xene/native_haptics');
+
   WebViewController? _controller;
   bool _supported = true;
   int _hapticMessageCount = 0;
@@ -105,18 +108,7 @@ class _DancingPointsViewState extends State<DancingPointsView> {
             debugPrint('[dpWeb][haptic] received $kind #$_hapticMessageCount');
           }
           // Beat intensity → native impact. iOS drives the Taptic Engine here.
-          switch (kind) {
-            case 'heavy':
-              unawaited(HapticFeedback.heavyImpact());
-              break;
-            case 'medium':
-              unawaited(HapticFeedback.mediumImpact());
-              break;
-            case 'light':
-            default:
-              unawaited(HapticFeedback.lightImpact());
-              break;
-          }
+          unawaited(_fireNativeHaptic(kind));
         },
       );
 
@@ -127,6 +119,36 @@ class _DancingPointsViewState extends State<DancingPointsView> {
     }
 
     return controller;
+  }
+
+  Future<void> _fireNativeHaptic(String kind) async {
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      try {
+        final ok = await _nativeHaptics.invokeMethod<bool>(
+          'impact',
+          <String, Object?>{'kind': kind},
+        );
+        if (_hapticMessageCount <= 16) {
+          debugPrint('[dpWeb][haptic] native impact ok=$ok kind=$kind');
+        }
+        return;
+      } catch (error) {
+        debugPrint('[dpWeb][haptic] native impact failed: $error');
+      }
+    }
+
+    switch (kind) {
+      case 'heavy':
+        await HapticFeedback.heavyImpact();
+        break;
+      case 'medium':
+        await HapticFeedback.mediumImpact();
+        break;
+      case 'light':
+      default:
+        await HapticFeedback.lightImpact();
+        break;
+    }
   }
 
   Future<void> _configureAudioSession() async {
