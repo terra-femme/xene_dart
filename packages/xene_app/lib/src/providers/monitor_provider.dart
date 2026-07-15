@@ -12,7 +12,7 @@ final monitorProvider = StreamProvider.autoDispose<Map<String, dynamic>>((
   // Extract config values with fallbacks.
   final baseUrl =
       configAsync.whenData((config) => config.backendUrl).asData?.value ??
-      'http://localhost:8080';
+      kProductionBackendUrl;
   final connectTimeoutSeconds =
       configAsync
           .whenData((config) => config.monitorTimeoutConnectSeconds)

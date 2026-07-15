@@ -2,7 +2,7 @@
   "version": "1.0",
   "backend": {
     "url": "https://xene-backend.yellowwater-2ccd556b.eastus.azurecontainerapps.io",
-    "auth_redirect_url": "http://localhost:4000"
+    "auth_redirect_url": "https://xene-backend.yellowwater-2ccd556b.eastus.azurecontainerapps.io"
   },
   "config": {
     "repo_url": "https://raw.githubusercontent.com/terra-femme/xene_dart/main/packages/xene_app/lib/config.json"

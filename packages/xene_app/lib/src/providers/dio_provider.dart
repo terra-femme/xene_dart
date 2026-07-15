@@ -10,7 +10,7 @@ import 'config_provider.dart';
 // The main Dio instance uses appConfigProvider for dynamic configuration.
 const kBackendUrl = String.fromEnvironment(
   'BACKEND_URL',
-  defaultValue: 'http://localhost:8080',
+  defaultValue: kProductionBackendUrl,
 );
 
 // Refresh proactively when the access token is within this window of expiry, so
@@ -64,7 +64,7 @@ final authenticatedDioProvider = Provider<Dio>((ref) {
       30;
   final baseUrl =
       configAsync.whenData((config) => config.backendUrl).asData?.value ??
-      'http://localhost:8080';
+      kProductionBackendUrl;
 
   final dio = Dio(
     BaseOptions(

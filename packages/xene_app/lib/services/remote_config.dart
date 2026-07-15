@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:xene_app/src/providers/config_provider.dart';
 
 class RemoteConfig {
   static const String _configUrl =
@@ -8,6 +9,13 @@ class RemoteConfig {
   static const String _cacheKey = 'xene_remote_config';
 
   static final _dio = Dio();
+  static bool _isLocalUrl(String url) =>
+      url.contains('localhost') ||
+      url.contains('127.0.0.1') ||
+      url.contains('10.0.2.2');
+
+  static String _productionUrl(String url) =>
+      _isLocalUrl(url) ? kProductionBackendUrl : url;
 
   static Future<String> getBackendUrl() async {
     // DEVELOPMENT: If running with --define=LOCAL_BACKEND=true,
@@ -28,7 +36,12 @@ class RemoteConfig {
       // Try to fetch latest config from GitHub
       final config = await _fetchRemoteConfig();
       if (config != null) {
-        return config['backend_url'] as String;
+        final backend = config['backend'] as Map<String, dynamic>?;
+        return _productionUrl(
+          backend?['url'] as String? ??
+              config['backend_url'] as String? ??
+              kProductionBackendUrl,
+        );
       }
     } catch (e) {
       print('[RemoteConfig] Failed to fetch from GitHub: $e');
@@ -37,11 +50,16 @@ class RemoteConfig {
     // Fall back to cached config
     final cached = await _getCachedConfig();
     if (cached != null) {
-      return cached['backend_url'] as String;
+      final backend = cached['backend'] as Map<String, dynamic>?;
+      return _productionUrl(
+        backend?['url'] as String? ??
+            cached['backend_url'] as String? ??
+            kProductionBackendUrl,
+      );
     }
 
     // Last resort: use hardcoded fallback (Azure production)
-    return 'https://xene-backend.yellowwater-2ccd556b.eastus.azurecontainerapps.io';
+    return kProductionBackendUrl;
   }
 
   static Future<Map<String, dynamic>?> _fetchRemoteConfig() async {

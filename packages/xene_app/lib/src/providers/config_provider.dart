@@ -3,6 +3,14 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+const kProductionBackendUrl =
+    'https://xene-backend.yellowwater-2ccd556b.eastus.azurecontainerapps.io';
+
+bool _isLocalUrl(String url) =>
+    url.contains('localhost') ||
+    url.contains('127.0.0.1') ||
+    url.contains('10.0.2.2');
+
 class AppConfig {
   const AppConfig({
     required this.backendUrl,
@@ -65,9 +73,9 @@ class AppConfig {
     final configSection = json['config'] as Map<String, dynamic>? ?? {};
 
     return AppConfig(
-      backendUrl: backend['url'] as String? ?? 'http://localhost:8080',
+      backendUrl: backend['url'] as String? ?? kProductionBackendUrl,
       authRedirectUrl:
-          backend['auth_redirect_url'] as String? ?? 'http://localhost:4000',
+          backend['auth_redirect_url'] as String? ?? kProductionBackendUrl,
       configRepoUrl:
           configSection['repo_url'] as String? ??
           'https://raw.githubusercontent.com/terra-femme/xene_dart/main/packages/xene_app/lib/config.json',
@@ -164,6 +172,8 @@ class ConfigNotifier extends AsyncNotifier<AppConfig> {
                 config.trackAnalysisPollIntervalSeconds,
             feedFetchDelayMilliseconds: config.feedFetchDelayMilliseconds,
           );
+        } else {
+          config = _sanitizeProductionConfig(config);
         }
         return config;
       }
@@ -207,6 +217,8 @@ class ConfigNotifier extends AsyncNotifier<AppConfig> {
               config.trackAnalysisPollIntervalSeconds,
           feedFetchDelayMilliseconds: config.feedFetchDelayMilliseconds,
         );
+      } else {
+        config = _sanitizeProductionConfig(config);
       }
       return config;
     }
@@ -263,6 +275,49 @@ class ConfigNotifier extends AsyncNotifier<AppConfig> {
     } catch (e) {
       print('[ConfigNotifier] Error caching config: $e');
     }
+  }
+
+  AppConfig _sanitizeProductionConfig(AppConfig config) {
+    final backendUrl = _isLocalUrl(config.backendUrl)
+        ? kProductionBackendUrl
+        : config.backendUrl;
+    final authRedirectUrl = _isLocalUrl(config.authRedirectUrl)
+        ? kProductionBackendUrl
+        : config.authRedirectUrl;
+    if (backendUrl == config.backendUrl &&
+        authRedirectUrl == config.authRedirectUrl) {
+      return config;
+    }
+    return AppConfig(
+      backendUrl: backendUrl,
+      authRedirectUrl: authRedirectUrl,
+      configRepoUrl: config.configRepoUrl,
+      dioTimeoutConnectSeconds: config.dioTimeoutConnectSeconds,
+      dioTimeoutReceiveSeconds: config.dioTimeoutReceiveSeconds,
+      capacityCheckTimeoutConnectSeconds:
+          config.capacityCheckTimeoutConnectSeconds,
+      capacityCheckTimeoutReceiveSeconds:
+          config.capacityCheckTimeoutReceiveSeconds,
+      monitorTimeoutConnectSeconds: config.monitorTimeoutConnectSeconds,
+      monitorTimeoutReceiveSeconds: config.monitorTimeoutReceiveSeconds,
+      monitorPollIntervalSeconds: config.monitorPollIntervalSeconds,
+      presetSourcesTimeoutMinutes: config.presetSourcesTimeoutMinutes,
+      feedWindowLimit: config.feedWindowLimit,
+      feedArchivePageLimit: config.feedArchivePageLimit,
+      feedFullArchivePageLimit: config.feedFullArchivePageLimit,
+      cacheRecentFastMinutes: config.cacheRecentFastMinutes,
+      cacheRecentBcMinutes: config.cacheRecentBcMinutes,
+      cacheArchiveMinutes: config.cacheArchiveMinutes,
+      userCap: config.userCap,
+      trackAnalysisMaxAttempts: config.trackAnalysisMaxAttempts,
+      soundcloudConnectionPollIntervalSeconds:
+          config.soundcloudConnectionPollIntervalSeconds,
+      soundcloudConnectionPollTimeoutMinutes:
+          config.soundcloudConnectionPollTimeoutMinutes,
+      searchDebounceMilliseconds: config.searchDebounceMilliseconds,
+      trackAnalysisPollIntervalSeconds: config.trackAnalysisPollIntervalSeconds,
+      feedFetchDelayMilliseconds: config.feedFetchDelayMilliseconds,
+    );
   }
 }
 
