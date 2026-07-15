@@ -85,12 +85,12 @@
     hapticDot.style.transform = 'translateX(-50%) scale(0.7)';
   }
   let hapticsOn = ('vibrate' in navigator) || hapticBridge;
-  // Bass-only haptic test: mirror the visible bass droplets first, then add
-  // drums later once the tactile bass feels anchored to the screen.
-  const HAPTIC_ON_THRESHOLD = 0.30;
-  const HAPTIC_OFF_THRESHOLD = 0.18;
-  const HAPTIC_ATTACK_DELTA = 0.035;
-  const HAPTIC_MIN_GAP_MS = 330;
+  // Drums-only haptic test: mirror the center wire/noise ball's drum drive.
+  // Bass resonance is a separate later pass once the drum feel is judged.
+  const HAPTIC_ON_THRESHOLD = 0.34;
+  const HAPTIC_OFF_THRESHOLD = 0.14;
+  const HAPTIC_ATTACK_DELTA = 0.08;
+  const HAPTIC_MIN_GAP_MS = 115;
   const hapticGate = { prev: 0, armed: true, lastMs: -10000 };
 
   const state = {
@@ -596,9 +596,9 @@
       engine.seek(crop.start);
     }
 
-    // Bass-only haptic onset. This intentionally tracks the same raw bass.react
-    // crossing that spawns the visible bass ripple droplets in scene.js.
-    const drive = (engine.signals.bass && engine.signals.bass.react) || 0;
+    // Drums-only haptic onset. This tracks the same raw drums.react that drives
+    // the center wire/noise ball in scene.js.
+    const drive = (engine.signals.drums && engine.signals.drums.react) || 0;
     const rising = drive - hapticGate.prev;
     const enoughGap = now - hapticGate.lastMs >= HAPTIC_MIN_GAP_MS;
     if (playing && hapticGate.armed && enoughGap &&
