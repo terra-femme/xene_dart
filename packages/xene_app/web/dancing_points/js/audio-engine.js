@@ -229,6 +229,13 @@ class StemEngine {
     const buffer = await ctx.decodeAudioData(data.slice(0)); // slice: decode detaches
     this.buffers[key] = buffer;
     this._recomputeDuration();
+    console.log(
+      '[stem-engine] decoded',
+      key,
+      'duration=' + buffer.duration.toFixed(2),
+      'channels=' + buffer.numberOfChannels,
+      'ctx=' + ctx.state
+    );
     if (this._playing) { this._offset = this.currentTime; this._startPlayback(); }
   }
 
@@ -276,6 +283,14 @@ class StemEngine {
       src.start(when, this._offset);
       sources.push(src);
     }
+    console.log(
+      '[stem-engine] playback start',
+      'slots=' + this.loadedKeys.join('+'),
+      'offset=' + this._offset.toFixed(2),
+      'duration=' + this._duration.toFixed(2),
+      'ctx=' + ctx.state,
+      'hasOriginal=' + hasOriginal
+    );
     if (sources[0]) {
       sources[0].onended = () => {
         this._playing = false;
@@ -286,6 +301,21 @@ class StemEngine {
     this._sources = sources;
     this._startTime = when;
     this._playing = true;
+    setTimeout(() => this._probeMasterOutput('250ms'), 250);
+  }
+
+  /** @param {string} label */
+  _probeMasterOutput(label) {
+    const analyser = this.masterAnalyser;
+    if (!analyser) return;
+    analyser.getFloatTimeDomainData(this.buf);
+    let sum = 0;
+    for (let i = 0; i < this.buf.length; i++) {
+      const v = this.buf[i];
+      sum += v * v;
+    }
+    const rms = Math.sqrt(sum / this.buf.length);
+    console.log('[stem-engine] master rms', label, rms.toFixed(5), 'playing=' + this._playing);
   }
 
   _stopSources() {
