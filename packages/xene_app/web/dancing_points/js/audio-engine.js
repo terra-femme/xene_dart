@@ -550,12 +550,16 @@ class StemEngine {
       const sig = this.signals[key];
       const def = SOURCES[key];
       const ch = playing ? chart.signals[key] : null;
+      const liveAnalyser = def.stem === 'master'
+        ? this.masterAnalyser
+        : this.stemAnalyser[/** @type {StemKey} */ (def.stem)] || null;
+      if (key === 'drums' && playing && liveAnalyser && this.isSourceAvailable(key)) {
+        this._updateSignal(liveAnalyser, sig, def.type);
+        continue;
+      }
       if (!ch) {
-        const analyser = def.stem === 'master'
-          ? this.masterAnalyser
-          : this.stemAnalyser[/** @type {StemKey} */ (def.stem)] || null;
-        if (playing && analyser && this.isSourceAvailable(key)) {
-          this._updateSignal(analyser, sig, def.type);
+        if (playing && liveAnalyser && this.isSourceAvailable(key)) {
+          this._updateSignal(liveAnalyser, sig, def.type);
           continue;
         }
         // not charted (or paused) → decay exactly like a missing analyser

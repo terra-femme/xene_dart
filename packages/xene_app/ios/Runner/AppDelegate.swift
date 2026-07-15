@@ -1,9 +1,11 @@
 import Flutter
+import AudioToolbox
 import UIKit
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private var xeneNativeHapticsChannel: FlutterMethodChannel?
+  private var lastXeneSystemVibrationAt: CFAbsoluteTime = 0
 
   override func application(
     _ application: UIApplication,
@@ -77,6 +79,14 @@ import UIKit
         generator.impactOccurred(intensity: kind == "heavy" ? 1.0 : 0.9)
       } else {
         generator.impactOccurred()
+      }
+
+      if kind != "light" {
+        let now = CFAbsoluteTimeGetCurrent()
+        if now - self.lastXeneSystemVibrationAt >= 0.18 {
+          self.lastXeneSystemVibrationAt = now
+          AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
+        }
       }
     }
   }
