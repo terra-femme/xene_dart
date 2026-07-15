@@ -61,6 +61,9 @@
   /** @param {any} track */
   async function loadTrack(track) {
     if (loadingId === track.id) return;
+    if (engine && engine.unlockAudio) {
+      engine.unlockAudio().catch((err) => console.warn('[playlist] audio unlock failed', err));
+    }
     const seq = ++loadSeq;
     loadingId = track.id;
     render();

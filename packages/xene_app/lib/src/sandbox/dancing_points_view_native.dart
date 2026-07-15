@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -37,7 +40,9 @@ class _DancingPointsViewState extends State<DancingPointsView> {
       _supported = false;
       return;
     }
-    _controller = _buildController();
+    final controller = _buildController();
+    _controller = controller;
+    unawaited(_loadVisualizer(controller));
   }
 
   WebViewController _buildController() {
@@ -83,6 +88,12 @@ class _DancingPointsViewState extends State<DancingPointsView> {
         ),
       )
       ..addJavaScriptChannel(
+        'XeneDiagnostics',
+        onMessageReceived: (JavaScriptMessage message) {
+          debugPrint('[dpWeb][js] ${message.message}');
+        },
+      )
+      ..addJavaScriptChannel(
         'XeneHaptics',
         onMessageReceived: (JavaScriptMessage message) {
           // Beat intensity → native impact. iOS drives the Taptic Engine here.
@@ -99,8 +110,7 @@ class _DancingPointsViewState extends State<DancingPointsView> {
               break;
           }
         },
-      )
-      ..loadFlutterAsset('web/dancing_points/index.html');
+      );
 
     // Android: let the page's audio autoplay without a user gesture.
     if (controller.platform is AndroidWebViewController) {
@@ -109,6 +119,62 @@ class _DancingPointsViewState extends State<DancingPointsView> {
     }
 
     return controller;
+  }
+
+  Future<void> _loadVisualizer(WebViewController controller) async {
+    try {
+      if (defaultTargetPlatform == TargetPlatform.iOS) {
+        final html = await _buildInlineVisualizerHtml();
+        await controller.loadHtmlString(html, baseUrl: 'https://xene.local');
+        debugPrint('[dpWeb] loaded inline iOS visualizer HTML');
+      } else {
+        await controller.loadFlutterAsset('web/dancing_points/index.html');
+      }
+    } catch (error, stackTrace) {
+      debugPrint('[dpWeb] failed to load visualizer: $error');
+      debugPrintStack(stackTrace: stackTrace);
+    }
+  }
+
+  Future<String> _buildInlineVisualizerHtml() async {
+    var html = await rootBundle.loadString('web/dancing_points/index.html');
+    final brainBytes = await rootBundle.load(
+      'web/dancing_points/assets/brain_wire_reference.png',
+    );
+    final brainPng = brainBytes.buffer.asUint8List(
+      brainBytes.offsetInBytes,
+      brainBytes.lengthInBytes,
+    );
+    final brainDataUrl = 'data:image/png;base64,${base64Encode(brainPng)}';
+    html = html.replaceFirst(
+      '</head>',
+      '<script>window.XENE_ASSETS={'
+          'brainWire:${jsonEncode(brainDataUrl)}'
+          '};</script></head>',
+    );
+
+    const scripts = <String>[
+      'three.min.js',
+      'av-config.js',
+      'shaders.js',
+      'audio-engine.js',
+      'brain-dots-data.js',
+      'brain-other-data.js',
+      'scene.js',
+      'chart-gen.js',
+      'track-export.js',
+      'playlist.js',
+      'app.js',
+    ];
+    for (final script in scripts) {
+      final source = await rootBundle.loadString('web/dancing_points/js/$script');
+      final escapedSource = source.replaceAll('</script>', '<\\/script>');
+      html = html.replaceFirst(
+        RegExp('<script src="js/$script(?:\\?[^"]*)?"></script>'),
+        '<script>\n$escapedSource\n</script>',
+      );
+    }
+    return html;
   }
 
   @override

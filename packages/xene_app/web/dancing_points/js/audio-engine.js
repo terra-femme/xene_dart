@@ -183,6 +183,23 @@ class StemEngine {
   }
 
   /**
+   * iOS/Safari only unlocks Web Audio from a real user gesture. Playlist
+   * playback fetches and decodes before it starts, so the tap handler must call
+   * this immediately, before any await loses the gesture activation.
+   * @returns {Promise<string>}
+   */
+  async unlockAudio() {
+    this._ensureGraph();
+    const ctx = this.ctx;
+    if (!ctx) return 'unavailable';
+    if (ctx.state === 'suspended') {
+      await ctx.resume();
+    }
+    console.log('[stem-engine] audio context state:', ctx.state);
+    return ctx.state;
+  }
+
+  /**
    * FFT bin ranges for the 88 equal-tempered piano keys (A0=27.5Hz … C8).
    * @param {number} sampleRate @param {number} fftSize
    */
@@ -280,7 +297,13 @@ class StemEngine {
 
   play() {
     this._ensureGraph();
-    if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
+    if (this.ctx && this.ctx.state === 'suspended') {
+      this.ctx.resume().then(() => {
+        console.log('[stem-engine] audio context state:', this.ctx && this.ctx.state);
+      }).catch((err) => {
+        console.warn('[stem-engine] audio resume failed', err);
+      });
+    }
     if (this._playing) return;
     this._startPlayback();
   }

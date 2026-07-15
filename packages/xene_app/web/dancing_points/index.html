@@ -9,6 +9,40 @@
      errors to console.error, which the native host mirrors to the Xcode console
      via setOnConsoleMessage (dancing_points_view_native.dart). Diagnostic only. -->
 <script>
+  (function () {
+    var queue = [];
+    function fmt(v) {
+      if (v && v.stack) return v.stack;
+      if (typeof v === 'string') return v;
+      try { return JSON.stringify(v); } catch (_e) { return String(v); }
+    }
+    function post(msg) {
+      var line = String(msg).slice(0, 900);
+      queue.push(line);
+      if (queue.length > 8) queue.shift();
+      try {
+        var el = document.getElementById('diagLast');
+        if (el) el.textContent = line;
+      } catch (_e) { /* document may not be ready yet */ }
+      try {
+        if (window.XeneDiagnostics && window.XeneDiagnostics.postMessage) {
+          window.XeneDiagnostics.postMessage(line);
+        }
+      } catch (_e) { /* native bridge unavailable on web */ }
+    }
+    window.xeneDiag = post;
+    ['log', 'warn', 'error'].forEach(function (level) {
+      var raw = console[level] && console[level].bind(console);
+      if (!raw) return;
+      console[level] = function () {
+        raw.apply(console, arguments);
+        post('[console.' + level + '] ' + Array.prototype.map.call(arguments, fmt).join(' '));
+      };
+    });
+    document.addEventListener('DOMContentLoaded', function () {
+      if (queue.length) post(queue[queue.length - 1]);
+    });
+  })();
   window.addEventListener('error', function (e) {
     console.error('[jserror] ' + (e.message || e) +
       ' @ ' + (e.filename || '') + ':' + (e.lineno || ''));
@@ -54,6 +88,13 @@
   }
   #stage { position: fixed; inset: 0; }
   #gl { width: 100%; height: 100%; display: block; }
+  #diagLast {
+    position: fixed; left: 14px; top: 14px; right: 96px; z-index: 30;
+    min-height: 22px; padding: 6px 8px; border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 6px; background: rgba(6,8,12,0.68); color: #a9e2ff;
+    font: 9.5px/1.35 var(--mono); letter-spacing: 0.04em;
+    pointer-events: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
 
   /* faint vignette + grain so the void isn't flat */
   #stage::after {
@@ -271,6 +312,7 @@
 </head>
 <body>
   <div id="stage"><canvas id="gl"></canvas></div>
+  <div id="diagLast">diag booting...</div>
 
   <!-- DEV: live per-stem react readout. Confirms signal is flowing per stem
        without touching the Reactive Source selector. Remove before ship. -->

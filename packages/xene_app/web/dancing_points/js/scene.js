@@ -2,9 +2,15 @@
 // neural brain frame and low-poly instrument cage.
 
 function createScene(canvas) {
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+  const nativeHost = !!(window.XeneDiagnostics || window.XeneHaptics);
+  const renderer = new THREE.WebGLRenderer({
+    canvas,
+    antialias: true,
+    alpha: false,
+    powerPreference: nativeHost ? 'low-power' : 'default',
+  });
   renderer.setClearColor(0x050509, 1);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+  renderer.setPixelRatio(nativeHost ? 1 : Math.min(window.devicePixelRatio || 1, 1.5));
 
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
@@ -932,7 +938,10 @@ function buildBrainReferenceBrain() {
   group.position.set(0, 0.02, -0.06);
   group.renderOrder = 10;
 
-  const texture = new THREE.TextureLoader().load('assets/brain_wire_reference.png');
+  const assetMap = window.XENE_ASSETS || {};
+  const texture = new THREE.TextureLoader().load(
+    assetMap.brainWire || 'assets/brain_wire_reference.png'
+  );
   texture.minFilter = THREE.LinearFilter;
   texture.magFilter = THREE.LinearFilter;
   texture.generateMipmaps = false;
