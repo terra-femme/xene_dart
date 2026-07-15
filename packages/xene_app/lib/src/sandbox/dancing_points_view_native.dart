@@ -1,5 +1,3 @@
-import 'dart:developer' as dev;
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -59,32 +57,27 @@ class _DancingPointsViewState extends State<DancingPointsView> {
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(const Color(0xFF07070A))
       // Surface everything the WKWebView normally swallows: JS console output
-      // (three.js failures, playlist fetch logs), failed subresource loads (the
-      // CDN three.min.js, remote playlist.json / stems, the un-bundled assets/
-      // texture), and HTTP errors. Without this, a broken visualizer is silent
-      // on device. dev-only diagnostics.
+      // (three.js failures, WebGL context errors, playlist fetch logs), failed
+      // subresource loads (three.min.js, remote playlist.json / stems, the
+      // assets/ texture), and HTTP errors. Uses debugPrint (not dev.log) so the
+      // lines actually print as `flutter:` in the Xcode Runner console —
+      // dev.log goes to a channel Xcode's console does not show. dev-only.
       ..setOnConsoleMessage((JavaScriptConsoleMessage m) {
-        dev.log(
-          '[dpWeb][console.${m.level.name}] ${m.message}',
-          name: 'xene.avviz',
-        );
+        debugPrint('[dpWeb][console.${m.level.name}] ${m.message}');
       })
       ..setNavigationDelegate(
         NavigationDelegate(
-          onPageFinished: (url) =>
-              dev.log('[dpWeb] page finished: $url', name: 'xene.avviz'),
+          onPageFinished: (url) => debugPrint('[dpWeb] page finished: $url'),
           onWebResourceError: (WebResourceError e) {
-            dev.log(
+            debugPrint(
               '[dpWeb][resourceError] code=${e.errorCode} '
               'mainFrame=${e.isForMainFrame} url=${e.url} — ${e.description}',
-              name: 'xene.avviz',
             );
           },
           onHttpError: (HttpResponseError e) {
-            dev.log(
+            debugPrint(
               '[dpWeb][httpError] status=${e.response?.statusCode} '
               'url=${e.request?.uri}',
-              name: 'xene.avviz',
             );
           },
         ),

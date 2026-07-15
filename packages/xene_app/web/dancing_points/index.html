@@ -4,6 +4,29 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Xene Resonance Body</title>
+<!-- Installed FIRST so it catches load-time failures in three.js/scene.js/app.js
+     (e.g. THREE undefined, WebGL context creation failure). Funnels uncaught
+     errors to console.error, which the native host mirrors to the Xcode console
+     via setOnConsoleMessage (dancing_points_view_native.dart). Diagnostic only. -->
+<script>
+  window.addEventListener('error', function (e) {
+    console.error('[jserror] ' + (e.message || e) +
+      ' @ ' + (e.filename || '') + ':' + (e.lineno || ''));
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    var r = e && e.reason;
+    console.error('[jsreject] ' + (r && r.message ? r.message : r));
+  });
+  // Probe WebGL availability directly — the CARenderServer errors in the native
+  // log hint the WKWebView GPU context may be failing.
+  try {
+    var c = document.createElement('canvas');
+    var gl = c.getContext('webgl') || c.getContext('experimental-webgl');
+    console.log('[webglprobe] context=' + (gl ? 'OK' : 'NULL'));
+  } catch (err) {
+    console.error('[webglprobe] threw ' + err);
+  }
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&display=swap" rel="stylesheet" />
