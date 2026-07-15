@@ -31,6 +31,7 @@ class DancingPointsView extends StatefulWidget {
 class _DancingPointsViewState extends State<DancingPointsView> {
   WebViewController? _controller;
   bool _supported = true;
+  int _hapticMessageCount = 0;
 
   @override
   void initState() {
@@ -98,17 +99,22 @@ class _DancingPointsViewState extends State<DancingPointsView> {
       ..addJavaScriptChannel(
         'XeneHaptics',
         onMessageReceived: (JavaScriptMessage message) {
+          final kind = message.message;
+          _hapticMessageCount += 1;
+          if (_hapticMessageCount <= 16) {
+            debugPrint('[dpWeb][haptic] received $kind #$_hapticMessageCount');
+          }
           // Beat intensity → native impact. iOS drives the Taptic Engine here.
-          switch (message.message) {
+          switch (kind) {
             case 'heavy':
-              HapticFeedback.heavyImpact();
+              unawaited(HapticFeedback.heavyImpact());
               break;
             case 'medium':
-              HapticFeedback.mediumImpact();
+              unawaited(HapticFeedback.mediumImpact());
               break;
             case 'light':
             default:
-              HapticFeedback.lightImpact();
+              unawaited(HapticFeedback.lightImpact());
               break;
           }
         },

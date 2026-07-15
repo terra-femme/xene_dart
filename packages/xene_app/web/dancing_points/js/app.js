@@ -41,13 +41,27 @@
 
   // Native bridge: inside the Flutter WebView, XeneHaptics routes beats to
   // Flutter's HapticFeedback (works on iOS, where navigator.vibrate is ignored).
-  const XH = /** @type {any} */ (window).XeneHaptics;
-  const hapticBridge = !!(XH && XH.postMessage);
+  const isNativeIosHost = !!(
+    /** @type {any} */ (window).XENE_NATIVE_HOST &&
+    /** @type {any} */ (window).XENE_NATIVE_HOST.platform === 'ios'
+  );
+  function getHapticBridge() {
+    const bridge = /** @type {any} */ (window).XeneHaptics;
+    return bridge && typeof bridge.postMessage === 'function' ? bridge : null;
+  }
+  const hapticBridge = !!getHapticBridge();
+  const navigatorVibrate = 'vibrate' in navigator;
+  console.log(
+    '[haptics] output',
+    hapticBridge ? 'native-bridge' : (navigatorVibrate ? 'navigator.vibrate' : 'none'),
+    'nativeIos=' + isNativeIosHost
+  );
   /** @param {number} level */
   function fireHaptic(level) {
-    if (hapticBridge) {
-      XH.postMessage(level > 0.75 ? 'heavy' : level > 0.5 ? 'medium' : 'light');
-    } else if (navigator.vibrate) {
+    const bridge = getHapticBridge();
+    if (bridge) {
+      bridge.postMessage(level > 0.75 ? 'heavy' : level > 0.5 ? 'medium' : 'light');
+    } else if (!isNativeIosHost && navigator.vibrate) {
       navigator.vibrate(Math.round(8 + Math.min(1, level) * 32)); // 8-40ms
     }
     pulseHapticIndicator(level); // visual mirror — SEE the tap timing where you can't feel it (desktop/iOS web)
@@ -57,15 +71,16 @@
   // fires, sized + coloured by intensity (green light / amber medium / pink heavy).
   const hapticDot = document.createElement('div');
   Object.assign(hapticDot.style, {
-    position: 'fixed', left: '50%', top: '20px', transform: 'translateX(-50%) scale(0.7)',
-    width: '20px', height: '20px', borderRadius: '50%', background: '#8fe6c2',
-    opacity: '0.14', pointerEvents: 'none', zIndex: '30',
+    position: 'fixed', right: '18px', top: 'calc(env(safe-area-inset-top, 0px) + 72px)',
+    transform: 'scale(0.7)', width: '28px', height: '28px', borderRadius: '50%',
+    background: '#8fe6c2', opacity: '0.22', pointerEvents: 'none', zIndex: '100000',
+    border: '1px solid rgba(255,255,255,0.75)',
   });
   const hapticLbl = document.createElement('div');
   Object.assign(hapticLbl.style, {
-    position: 'fixed', left: '50%', top: '42px', transform: 'translateX(-50%)',
+    position: 'fixed', right: '15px', top: 'calc(env(safe-area-inset-top, 0px) + 106px)',
     font: '9px ui-monospace, Menlo, monospace', letterSpacing: '0.18em',
-    color: 'rgba(255,255,255,0.4)', pointerEvents: 'none', zIndex: '30',
+    color: 'rgba(255,255,255,0.72)', pointerEvents: 'none', zIndex: '100000',
   });
   hapticLbl.textContent = 'HAPTIC';
   document.body.appendChild(hapticDot);
@@ -78,13 +93,13 @@
     hapticDot.style.background = color;
     hapticDot.style.boxShadow = '0 0 18px ' + color;
     hapticDot.style.opacity = '1';
-    hapticDot.style.transform = 'translateX(-50%) scale(' + (0.9 + lvl * 1.2) + ')';
+    hapticDot.style.transform = 'scale(' + (0.9 + lvl * 1.2) + ')';
     void hapticDot.offsetWidth; // reflow so the fade re-triggers on every hit
     hapticDot.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
-    hapticDot.style.opacity = '0.14';
-    hapticDot.style.transform = 'translateX(-50%) scale(0.7)';
+    hapticDot.style.opacity = '0.22';
+    hapticDot.style.transform = 'scale(0.7)';
   }
-  let hapticsOn = ('vibrate' in navigator) || hapticBridge;
+  let hapticsOn = hapticBridge || (!isNativeIosHost && navigatorVibrate);
   // Drums-only haptic test: mirror the center wire/noise ball's drum drive.
   // Bass resonance is a separate later pass once the drum feel is judged.
   const HAPTIC_ON_THRESHOLD = 0.16;
@@ -436,15 +451,21 @@
     hapticBtn.classList.toggle('active', hapticsOn);
     $('hapticLabel').textContent = hapticsOn ? 'Haptics: ON' : 'Haptics: OFF';
   }
-  if (!('vibrate' in navigator) && !hapticBridge) {
+  if (isNativeIosHost && !hapticBridge) {
+    hapticsOn = false;
+    $('hapticMeta').textContent = 'native missing';
+  } else if (!navigatorVibrate && !hapticBridge) {
     hapticsOn = false;
     $('hapticMeta').textContent = 'unsupported here';
   } else if (hapticBridge) {
     $('hapticMeta').textContent = 'native';
+  } else {
+    $('hapticMeta').textContent = 'vibration';
   }
   syncHapticUi();
   hapticBtn.addEventListener('click', () => {
-    if (!('vibrate' in navigator) && !hapticBridge) return;
+    if (isNativeIosHost && !getHapticBridge()) return;
+    if (!navigatorVibrate && !getHapticBridge()) return;
     hapticsOn = !hapticsOn;
     syncHapticUi();
     if (hapticsOn) fireHaptic(0.3);
@@ -601,6 +622,13 @@
     // crop preview loop: hold playback inside the save window
     if (crop.loop && playing && engine.currentTime >= cropEnd() - 0.03) {
       engine.seek(crop.start);
+    }
+
+    if (!hapticsOn && isNativeIosHost && getHapticBridge()) {
+      hapticsOn = true;
+      $('hapticMeta').textContent = 'native';
+      syncHapticUi();
+      console.log('[haptics] native bridge attached late');
     }
 
     // Drums-only haptic onset. This tracks the same raw drums.react that drives
