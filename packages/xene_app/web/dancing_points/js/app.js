@@ -624,8 +624,22 @@
   // Drive with requestAnimationFrame, fall back to a timer if RAF stalls
   // (some embedded/backgrounded iframes throttle RAF to zero).
   let rafCount = 0;
+  const nativeHost = !!(window.XeneDiagnostics || window.XeneHaptics);
+  const frameMinMs = nativeHost && localStorage.getItem('dancingPoints.fullPower') !== '1'
+    ? 33
+    : 0;
+  let lastFrame = 0;
   /** @param {number} now */
-  function rafLoop(now) { rafCount++; tick(now); requestAnimationFrame(rafLoop); }
+  function rafLoop(now) {
+    if (frameMinMs && now - lastFrame < frameMinMs) {
+      requestAnimationFrame(rafLoop);
+      return;
+    }
+    lastFrame = now;
+    rafCount++;
+    tick(now);
+    requestAnimationFrame(rafLoop);
+  }
   requestAnimationFrame(rafLoop);
 
   tick(performance.now()); // immediate first paint
