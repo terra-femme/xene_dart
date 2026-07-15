@@ -85,14 +85,12 @@
     hapticDot.style.transform = 'translateX(-50%) scale(0.7)';
   }
   let hapticsOn = ('vibrate' in navigator) || hapticBridge;
-  const HAPTIC_ON_THRESHOLD = 0.62;
-  const HAPTIC_OFF_THRESHOLD = 0.24;
-  const HAPTIC_ATTACK_DELTA = 0.12;
-  const HAPTIC_MIN_GAP_MS = 135;
-  // Haptics listen to BASS + DRUMS together (each with its own rising-edge
-  // state), independent of the selected Reactive Source. 'full' is the
-  // fallback when neither stem is loaded (e.g. master-only playback).
-  const HAPTIC_SOURCES = ['drums', 'bass'];
+  // Bass-only haptic test: mirror the visible bass droplets first, then add
+  // drums later once the tactile bass feels anchored to the screen.
+  const HAPTIC_ON_THRESHOLD = 0.30;
+  const HAPTIC_OFF_THRESHOLD = 0.18;
+  const HAPTIC_ATTACK_DELTA = 0.035;
+  const HAPTIC_MIN_GAP_MS = 330;
   const hapticGate = { prev: 0, armed: true, lastMs: -10000 };
 
   const state = {
@@ -598,20 +596,9 @@
       engine.seek(crop.start);
     }
 
-    // fire a haptic pulse on each RISING beat in bass OR drums (fallback:
-    // the full-mix signal when neither stem is present). One pulse per frame
-    // max — simultaneous kick+bass fires once at the stronger intensity.
-    const chart = engine.chart;
-    const hapticKeys = HAPTIC_SOURCES.some((k) =>
-      chart ? !!chart.signals[k] : !!engine.buffers[k])
-      ? HAPTIC_SOURCES
-      : ['full'];
-    const drums = hapticKeys.includes('drums') ? ((engine.signals.drums && engine.signals.drums.react) || 0) : 0;
-    const bass = hapticKeys.includes('bass') ? ((engine.signals.bass && engine.signals.bass.react) || 0) : 0;
-    const full = hapticKeys.includes('full') ? ((engine.signals.full && engine.signals.full.react) || 0) : 0;
-    const drive = hapticKeys.includes('full')
-      ? full
-      : Math.max(drums, bass * 0.88, (drums * 0.62 + bass * 0.54));
+    // Bass-only haptic onset. This intentionally tracks the same raw bass.react
+    // crossing that spawns the visible bass ripple droplets in scene.js.
+    const drive = (engine.signals.bass && engine.signals.bass.react) || 0;
     const rising = drive - hapticGate.prev;
     const enoughGap = now - hapticGate.lastMs >= HAPTIC_MIN_GAP_MS;
     if (playing && hapticGate.armed && enoughGap &&
