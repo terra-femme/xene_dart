@@ -7,10 +7,9 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:xene_domain/xene_domain.dart';
 
-import '../models/user_media_item.dart';
 import '../providers/auth_provider.dart';
 import '../providers/daily_inbox_provider.dart';
-import '../providers/saved_provider.dart';
+import '../providers/queue_provider.dart';
 import '../theme/xene_theme.dart';
 import '../utils/artwork_proxy.dart';
 import 'auth_gate_sheet.dart';
@@ -224,7 +223,7 @@ class _InboxBodyState extends State<_InboxBody> {
                       ),
                       const TextSpan(
                         text:
-                            'This roundup is only available for 24 hours — browse, save, and show the tracks some love on the platform before it\'s gone.',
+                            'Hey! Don\'t forget to check these tracks out. Good to see you, catch up and i\'ll catch ya later, don\'t forget to check the Home Feed',
                       ),
                     ],
                   ),
@@ -349,37 +348,46 @@ class _TrackRow extends ConsumerStatefulWidget {
 class _TrackRowState extends ConsumerState<_TrackRow> {
   bool _saving = false;
 
-  Future<void> _toggleSave() async {
+  Future<void> _toggleQueue() async {
     final isAnon = ref.read(isAnonymousProvider);
     if (isAnon) {
       if (mounted) {
         showAuthGate(
           context,
-          featureHint: 'to save tracks from the daily digest',
+          featureHint: 'to add tracks from the daily digest to your queue',
         );
       }
       return;
     }
 
-    final savedNotifier = ref.read(savedProvider.notifier);
-    final match = savedNotifier.matchForUrl(widget.track.externalUrl);
+    final queue = ref.read(queueProvider);
+    var matchId = '';
+    for (final item in queue.items) {
+      if (item.externalUrl == widget.track.externalUrl) {
+        matchId = item.id;
+        break;
+      }
+    }
     setState(() => _saving = true);
     try {
-      if (match != null) {
-        await savedNotifier.unbookmark(match.id);
+      if (matchId.isNotEmpty) {
+        await ref.read(queueProvider.notifier).removeItem(matchId);
       } else {
-        await savedNotifier.bookmark(
-          QueueItem(
-            id: widget.track.externalUrl,
-            platform: widget.track.platform,
-            externalUrl: widget.track.externalUrl,
-            position: 0,
-            title: widget.track.title,
-            artistName: widget.track.artistName,
-            artworkUrl: widget.track.artworkUrl,
-            durationSeconds: widget.track.durationSeconds,
-          ),
-        );
+        await ref
+            .read(queueProvider.notifier)
+            .addItem(
+              FeedItem(
+                id: widget.track.externalUrl,
+                platform: widget.track.platform,
+                artistName: widget.track.artistName,
+                contentType: widget.track.contentType,
+                title: widget.track.title,
+                artworkUrl: widget.track.artworkUrl,
+                externalUrl: widget.track.externalUrl,
+                publishedAt: widget.track.publishedAt,
+                durationSeconds: widget.track.durationSeconds,
+              ),
+            );
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -395,9 +403,10 @@ class _TrackRowState extends ConsumerState<_TrackRow> {
   @override
   Widget build(BuildContext context) {
     final track = widget.track;
-    ref.watch(savedProvider);
-    final isSaved =
-        ref.read(savedProvider.notifier).matchForUrl(track.externalUrl) != null;
+    final queue = ref.watch(queueProvider);
+    final isQueued = queue.items.any(
+      (item) => item.externalUrl == track.externalUrl,
+    );
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
@@ -462,13 +471,15 @@ class _TrackRowState extends ConsumerState<_TrackRow> {
                       ),
                       const SizedBox(width: 8),
                     ],
-                    // Save button (SC + YT only)
+                    // Queue button (SC + YT only)
                     if (track.isSaveable)
                       _ActionChip(
-                        label: isSaved ? 'SAVED' : 'SAVE',
-                        icon: isSaved ? Icons.bookmark : Icons.bookmark_border,
-                        color: isSaved ? XeneTheme.teal : XeneTheme.muted,
-                        onTap: _saving ? null : _toggleSave,
+                        label: isQueued ? 'QUEUED' : 'QUEUE',
+                        icon: isQueued
+                            ? Icons.playlist_add_check
+                            : Icons.playlist_add,
+                        color: isQueued ? XeneTheme.teal : XeneTheme.muted,
+                        onTap: _saving ? null : _toggleQueue,
                       ),
                     const SizedBox(width: 6),
                     // Open on platform
