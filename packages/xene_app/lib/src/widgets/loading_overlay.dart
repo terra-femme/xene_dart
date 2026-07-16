@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:lottie/lottie.dart';
 import 'package:xene_app/src/providers/app_state_provider.dart';
 import 'package:xene_app/src/providers/feed_provider.dart';
+import 'package:xene_app/src/widgets/launch_splash.dart';
 
 class LoadingOverlay extends ConsumerStatefulWidget {
   const LoadingOverlay({super.key});
@@ -104,18 +104,7 @@ class _LoadingOverlayState extends ConsumerState<LoadingOverlay>
     return AbsorbPointer(
       child: FadeTransition(
         opacity: _fade,
-        child: Container(
-          color: Colors.black,
-          child: Center(
-            child: Lottie.asset(
-              'assets/animations/LoadingLottie.json',
-              width: 140,
-              height: 140,
-              repeat: true,
-              fit: BoxFit.contain,
-            ),
-          ),
-        ),
+        child: Container(color: Colors.black, child: const LaunchSplash()),
       ),
     );
   }
