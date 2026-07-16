@@ -10,6 +10,7 @@ import '../providers/auth_provider.dart';
 import '../providers/queue_provider.dart';
 import '../providers/saved_provider.dart';
 import 'auth_gate_sheet.dart';
+import 'soundcloud_embed.dart';
 import 'youtube_embed.dart';
 
 // Xene monochrome palette — platform colors appear only on tiny indicator dots.
@@ -271,7 +272,8 @@ class _WinampPlayerState extends ConsumerState<WinampPlayer> {
   }
 
   Widget _buildEmbed(QueueItem item) {
-    if (item.platform == 'youtube') {
+    final platform = item.platform.toLowerCase();
+    if (platform == 'youtube') {
       return YouTubeEmbed(
         key: ValueKey('youtube-${item.id}-${item.trackId ?? item.externalUrl}'),
         videoId: item.trackId ?? '',
@@ -279,7 +281,7 @@ class _WinampPlayerState extends ConsumerState<WinampPlayer> {
         artworkUrl: item.artworkUrl,
       );
     }
-    if (item.platform == 'soundcloud') {
+    if (platform == 'soundcloud') {
       return _SoundCloudArtworkPreview(item: item);
     }
     return _ArtworkPreview(item: item);
@@ -295,13 +297,29 @@ class _SoundCloudArtworkPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _ArtworkPreview(
-      item: item,
-      badge: const _ArtworkPreviewBadge(
-        label: 'SOUNDCLOUD',
-        color: _scOrange,
-        icon: Icons.graphic_eq,
-      ),
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        SoundCloudEmbed(
+          key: ValueKey('soundcloud-${item.id}-${item.externalUrl}'),
+          trackId: item.externalUrl,
+          isVisual: false,
+          artworkUrl: item.artworkUrl,
+          title: item.title,
+          artistName: item.artistName,
+          durationSeconds: item.durationSeconds,
+        ),
+        IgnorePointer(
+          child: _ArtworkPreview(
+            item: item,
+            badge: const _ArtworkPreviewBadge(
+              label: 'SOUNDCLOUD',
+              color: _scOrange,
+              icon: Icons.graphic_eq,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

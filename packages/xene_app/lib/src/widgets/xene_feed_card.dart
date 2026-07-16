@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:xene_domain/xene_domain.dart';
 
 import '../providers/auth_provider.dart';
+import '../providers/player_provider.dart';
 import '../providers/queue_provider.dart';
 import '../theme/xene_theme.dart';
 import 'auth_gate_sheet.dart';
@@ -111,6 +112,7 @@ class XeneFeedCard extends StatelessWidget {
               );
 
         final platform = item.platform.toLowerCase();
+        final directPlay = platform == 'soundcloud' || platform == 'youtube';
         final contentDesc =
             '${item.title ?? 'Untitled'} by ${item.artistName}, '
             '${item.contentType} on $platform';
@@ -186,37 +188,51 @@ class XeneFeedCard extends StatelessWidget {
                           ExcludeSemantics(
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(5),
-                              child: thumbnailProvider == null
-                                  ? Container(
-                                      width: thumbnailSize,
-                                      height: thumbnailSize,
-                                      color: placeholderColor,
-                                      alignment: Alignment.center,
-                                      child: Icon(
-                                        Icons.music_note,
-                                        size: compact ? 18 : 20,
-                                        color: errorIconColor,
-                                      ),
-                                    )
-                                  : Image(
-                                      image: thumbnailProvider,
-                                      width: thumbnailSize,
-                                      height: thumbnailSize,
-                                      fit: BoxFit.cover,
-                                      gaplessPlayback: true,
-                                      errorBuilder: (context, error, stack) =>
-                                          Container(
-                                            width: thumbnailSize,
-                                            height: thumbnailSize,
-                                            color: placeholderColor,
-                                            alignment: Alignment.center,
-                                            child: Icon(
-                                              Icons.music_note,
-                                              size: compact ? 18 : 20,
-                                              color: errorIconColor,
-                                            ),
+                              child: Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  thumbnailProvider == null
+                                      ? Container(
+                                          width: thumbnailSize,
+                                          height: thumbnailSize,
+                                          color: placeholderColor,
+                                          alignment: Alignment.center,
+                                          child: Icon(
+                                            Icons.music_note,
+                                            size: compact ? 18 : 20,
+                                            color: errorIconColor,
                                           ),
+                                        )
+                                      : Image(
+                                          image: thumbnailProvider,
+                                          width: thumbnailSize,
+                                          height: thumbnailSize,
+                                          fit: BoxFit.cover,
+                                          gaplessPlayback: true,
+                                          errorBuilder:
+                                              (context, error, stack) =>
+                                                  Container(
+                                                    width: thumbnailSize,
+                                                    height: thumbnailSize,
+                                                    color: placeholderColor,
+                                                    alignment: Alignment.center,
+                                                    child: Icon(
+                                                      Icons.music_note,
+                                                      size: compact ? 18 : 20,
+                                                      color: errorIconColor,
+                                                    ),
+                                                  ),
+                                        ),
+                                  if (directPlay)
+                                    Center(
+                                      child: _ThumbnailPlayButton(
+                                        item: item,
+                                        visualSize: compact ? 22 : 24,
+                                        iconSize: compact ? 15 : 17,
+                                      ),
                                     ),
+                                ],
+                              ),
                             ),
                           ),
 
@@ -454,18 +470,11 @@ class _YoutubeVideoCard extends StatelessWidget {
                     ),
                     // YouTube-style play button
                     Center(
-                      child: Container(
-                        width: 52,
-                        height: 36,
-                        decoration: BoxDecoration(
-                          color: const Color(0xCC000000),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: const Icon(
-                          Icons.play_arrow,
-                          color: Colors.white,
-                          size: 30,
-                        ),
+                      child: _ThumbnailPlayButton(
+                        item: item,
+                        visualSize: 52,
+                        iconSize: 30,
+                        borderRadius: 10,
                       ),
                     ),
                   ],
@@ -488,8 +497,7 @@ class _YoutubeVideoCard extends StatelessWidget {
                           children: [
                             _TypePill(type: item.contentType),
                             _PlatformBadge(platform: item.platform),
-                            if (_isPreReleaseItem(item))
-                              const _PreOrderStar(),
+                            if (_isPreReleaseItem(item)) const _PreOrderStar(),
                           ],
                         ),
                       ),
@@ -560,7 +568,14 @@ class _SaveButton extends ConsumerWidget {
             showAuthGate(context, featureHint: 'to save tracks');
             return;
           }
-          if (!isQueued) {
+          if (isQueued) {
+            for (final queueItem in ref.read(queueProvider).items) {
+              if (queueItem.externalUrl == item.externalUrl) {
+                ref.read(queueProvider.notifier).removeItem(queueItem.id);
+                break;
+              }
+            }
+          } else {
             ref.read(queueProvider.notifier).addItem(item);
           }
         },
@@ -579,6 +594,51 @@ class _SaveButton extends ConsumerWidget {
                 color: iconColor,
                 shadows: iconShadows,
               ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ThumbnailPlayButton extends ConsumerWidget {
+  const _ThumbnailPlayButton({
+    required this.item,
+    required this.visualSize,
+    required this.iconSize,
+    this.borderRadius,
+  });
+
+  final FeedItem item;
+  final double visualSize;
+  final double iconSize;
+  final double? borderRadius;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => ref.read(playerProvider.notifier).playTrack(item),
+      child: SizedBox(
+        width: 44,
+        height: 44,
+        child: Center(
+          child: Container(
+            width: visualSize,
+            height: visualSize,
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.24),
+              borderRadius: BorderRadius.circular(borderRadius ?? visualSize),
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.26),
+                width: 0.8,
+              ),
+            ),
+            child: Icon(
+              Icons.play_arrow_rounded,
+              color: Colors.white.withValues(alpha: 0.88),
+              size: iconSize,
             ),
           ),
         ),

@@ -7,9 +7,10 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:xene_domain/xene_domain.dart';
 
+import '../models/user_media_item.dart';
 import '../providers/auth_provider.dart';
 import '../providers/daily_inbox_provider.dart';
-import '../providers/dio_provider.dart';
+import '../providers/saved_provider.dart';
 import '../theme/xene_theme.dart';
 import '../utils/artwork_proxy.dart';
 import 'auth_gate_sheet.dart';
@@ -347,9 +348,8 @@ class _TrackRow extends ConsumerStatefulWidget {
 
 class _TrackRowState extends ConsumerState<_TrackRow> {
   bool _saving = false;
-  bool _saved = false;
 
-  Future<void> _save() async {
+  Future<void> _toggleSave() async {
     final isAnon = ref.read(isAnonymousProvider);
     if (isAnon) {
       if (mounted) {
@@ -361,27 +361,26 @@ class _TrackRowState extends ConsumerState<_TrackRow> {
       return;
     }
 
-    setState(() {
-      _saving = true;
-      _saved = true;
-    });
+    final savedNotifier = ref.read(savedProvider.notifier);
+    final match = savedNotifier.matchForUrl(widget.track.externalUrl);
+    setState(() => _saving = true);
     try {
-      final dio = ref.read(authenticatedDioProvider);
-      await dio.post(
-        '/user/saved',
-        data: {
-          'platform': widget.track.platform,
-          'external_url': widget.track.externalUrl,
-          'title': widget.track.title,
-          'artist_name': widget.track.artistName,
-          'artwork_url': widget.track.artworkUrl,
-          'duration_seconds': widget.track.durationSeconds,
-        },
-      );
-      if (mounted) setState(() => _saved = true);
-    } catch (_) {
-      // Already saved or network error — treat as saved
-      if (mounted) setState(() => _saved = true);
+      if (match != null) {
+        await savedNotifier.unbookmark(match.id);
+      } else {
+        await savedNotifier.bookmark(
+          QueueItem(
+            id: widget.track.externalUrl,
+            platform: widget.track.platform,
+            externalUrl: widget.track.externalUrl,
+            position: 0,
+            title: widget.track.title,
+            artistName: widget.track.artistName,
+            artworkUrl: widget.track.artworkUrl,
+            durationSeconds: widget.track.durationSeconds,
+          ),
+        );
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -396,6 +395,9 @@ class _TrackRowState extends ConsumerState<_TrackRow> {
   @override
   Widget build(BuildContext context) {
     final track = widget.track;
+    ref.watch(savedProvider);
+    final isSaved =
+        ref.read(savedProvider.notifier).matchForUrl(track.externalUrl) != null;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
@@ -463,10 +465,10 @@ class _TrackRowState extends ConsumerState<_TrackRow> {
                     // Save button (SC + YT only)
                     if (track.isSaveable)
                       _ActionChip(
-                        label: _saved ? 'SAVED' : 'SAVE',
-                        icon: _saved ? Icons.bookmark : Icons.bookmark_border,
-                        color: _saved ? XeneTheme.teal : XeneTheme.muted,
-                        onTap: _saving || _saved ? null : _save,
+                        label: isSaved ? 'SAVED' : 'SAVE',
+                        icon: isSaved ? Icons.bookmark : Icons.bookmark_border,
+                        color: isSaved ? XeneTheme.teal : XeneTheme.muted,
+                        onTap: _saving ? null : _toggleSave,
                       ),
                     const SizedBox(width: 6),
                     // Open on platform

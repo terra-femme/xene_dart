@@ -315,7 +315,7 @@ class _LogoPipPlayerState extends ConsumerState<LogoPipPlayer>
                                     key: ValueKey(
                                       'pip-soundcloud-${currentTrack.id}-${currentTrack.externalUrl}',
                                     ),
-                                    trackId: currentTrack.id,
+                                    trackId: currentTrack.externalUrl,
                                     isVisual: true,
                                     artworkUrl: currentTrack.artworkUrl,
                                     title: currentTrack.title,

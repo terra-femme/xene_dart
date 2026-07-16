@@ -16,6 +16,7 @@ import 'package:xene_app/src/widgets/xene_content_modal.dart';
 import 'package:xene_app/src/widgets/xene_feed_card.dart';
 
 const _kToggleHeight = 30.0;
+const _kSheetGestureZoneHeight = 74.0;
 
 class XeneDraggableSheet extends ConsumerStatefulWidget {
   const XeneDraggableSheet({super.key, this.metrics});
@@ -52,6 +53,7 @@ class _XeneDraggableSheetState extends ConsumerState<XeneDraggableSheet>
   int _archiveLoadingLoggedGen = -1;
   bool _archiveLottieVisible = false;
   bool _sheetDragActive = false;
+  double _sheetDragTotalDy = 0.0;
 
   String _archiveElapsedLabel() {
     final elapsed = _archiveLoadWatch?.elapsedMilliseconds;
@@ -140,13 +142,7 @@ class _XeneDraggableSheetState extends ConsumerState<XeneDraggableSheet>
     AsyncValue<List<FeedItem>> feedAsync,
     FeedMode mode,
   ) {
-    final items = feedAsync.valueOrNull ?? const <FeedItem>[];
-    final previewItems = items.take(2).toList();
-    final label = mode == FeedMode.fullFeed ? 'FULL GREED' : 'CYCLED';
-    final previewLabel = previewItems
-        .map((item) => item.artistName)
-        .where((name) => name.trim().isNotEmpty)
-        .join('  /  ');
+    final label = mode == FeedMode.fullFeed ? 'GREEDY' : 'CYCLED';
 
     return Row(
       children: [
@@ -168,28 +164,15 @@ class _XeneDraggableSheetState extends ConsumerState<XeneDraggableSheet>
         ),
         const SizedBox(width: 10),
         Expanded(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '8 - 31 DAYS  /  $label',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.teko(
-                  fontSize: 14,
-                  color: Colors.white70,
-                  letterSpacing: 1.2,
-                ),
-              ),
-              const SizedBox(height: 1),
-              Text(
-                previewLabel.isEmpty ? 'Archive preview' : previewLabel,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.archivo(fontSize: 10, color: Colors.white38),
-              ),
-            ],
+          child: Text(
+            '8 - 31 DAYS  /  $label',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.teko(
+              fontSize: 16,
+              color: Colors.white70,
+              letterSpacing: 1.2,
+            ),
           ),
         ),
       ],
@@ -312,7 +295,7 @@ class _XeneDraggableSheetState extends ConsumerState<XeneDraggableSheet>
                       children: [
                         Flexible(
                           child: Text(
-                            'FULL GREED',
+                            'GREEDY',
                             style: GoogleFonts.teko(
                               fontSize: 12,
                               color: isFullFeed ? Colors.white : Colors.white38,
@@ -567,10 +550,14 @@ class _XeneDraggableSheetState extends ConsumerState<XeneDraggableSheet>
               },
               child: Listener(
                 behavior: HitTestBehavior.opaque,
-                onPointerDown: (_) {
-                  _sheetDragActive =
-                      sheetController.isAttached &&
+                onPointerDown: (event) {
+                  if (!sheetController.isAttached) return;
+                  final startedInHeader =
+                      event.localPosition.dy <= _kSheetGestureZoneHeight;
+                  final nearCollapsed =
                       (sheetController.size - minRatio).abs() < 0.04;
+                  _sheetDragActive = startedInHeader || nearCollapsed;
+                  _sheetDragTotalDy = 0.0;
                 },
                 onPointerMove: (event) {
                   if (!_sheetDragActive) return;
@@ -578,6 +565,7 @@ class _XeneDraggableSheetState extends ConsumerState<XeneDraggableSheet>
                   if (event.buttons == 0) return;
                   if (event.delta.dy.abs() < 0.5) return;
                   if (!sheetController.isAttached) return;
+                  _sheetDragTotalDy += event.delta.dy;
                   final delta = -event.delta.dy / screenHeight;
                   sheetController.jumpTo(
                     (sheetController.size + delta).clamp(minRatio, maxRatio),
@@ -588,7 +576,11 @@ class _XeneDraggableSheetState extends ConsumerState<XeneDraggableSheet>
                   _sheetDragActive = false;
                   if (!sheetController.isAttached) return;
                   final mid = (minRatio + maxRatio) / 2;
-                  final target = sheetController.size >= mid
+                  final target = _sheetDragTotalDy > 24
+                      ? minRatio
+                      : _sheetDragTotalDy < -24
+                      ? maxRatio
+                      : sheetController.size >= mid
                       ? maxRatio
                       : minRatio;
                   sheetController.animateTo(
@@ -602,7 +594,11 @@ class _XeneDraggableSheetState extends ConsumerState<XeneDraggableSheet>
                   _sheetDragActive = false;
                   if (!sheetController.isAttached) return;
                   final mid = (minRatio + maxRatio) / 2;
-                  final target = sheetController.size >= mid
+                  final target = _sheetDragTotalDy > 24
+                      ? minRatio
+                      : _sheetDragTotalDy < -24
+                      ? maxRatio
+                      : sheetController.size >= mid
                       ? maxRatio
                       : minRatio;
                   sheetController.animateTo(

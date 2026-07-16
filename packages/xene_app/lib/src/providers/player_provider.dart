@@ -106,9 +106,7 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
       activePlatform: platform,
       isVisible: shouldMountImmediately,
     );
-    unawaited(
-      NowPlayingMetadataBridge.update(item.toNowPlayingMetadata()),
-    );
+    unawaited(NowPlayingMetadataBridge.update(item.toNowPlayingMetadata()));
 
     if (!shouldMountImmediately) {
       // Cascade Delay: Wait for the modal to slide down ~90% (approx 350ms)
@@ -124,7 +122,9 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     // For now, we only use just_audio if we have a direct streamUrl.
     String? streamUrl = item.mediaUrl;
 
-    if (streamUrl != null && streamUrl.isNotEmpty) {
+    if (platform != ActivePlatform.soundcloud &&
+        streamUrl != null &&
+        streamUrl.isNotEmpty) {
       try {
         await _audioPlayer.setUrl(streamUrl);
         await _audioPlayer.play();

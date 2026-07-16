@@ -375,13 +375,13 @@ class _PinnedDismissPill extends StatelessWidget {
       behavior: HitTestBehavior.opaque,
       onTap: onDismiss,
       onVerticalDragUpdate: (details) {
-        if ((details.primaryDelta ?? 0) > 8) {
+        if ((details.primaryDelta ?? 0) > 3) {
           onDismiss();
         }
       },
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.fromLTRB(0, 12, 0, 10),
+        padding: const EdgeInsets.fromLTRB(0, 22, 0, 20),
         decoration: BoxDecoration(
           color: const Color(0xFF111111),
           borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
