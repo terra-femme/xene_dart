@@ -7,7 +7,7 @@ import 'package:lottie/lottie.dart';
 enum LaunchSplashVariant { loadingSplash, loadingLottie }
 
 // Swap this to LaunchSplashVariant.loadingLottie to revert the launch loader.
-const launchSplashVariant = LaunchSplashVariant.loadingSplash;
+const launchSplashVariant = LaunchSplashVariant.loadingLottie;
 
 const _loadingSplashAsset = 'assets/animations/LoadingSplash.svg';
 const _legacyLoadingLottieAsset = 'assets/animations/LoadingLottie.json';
