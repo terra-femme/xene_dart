@@ -17,6 +17,9 @@ import 'package:xene_app/src/widgets/xene_feed_card.dart';
 
 const _kToggleHeight = 30.0;
 const _kSheetGestureZoneHeight = 74.0;
+const _kCollapsedPreviewTop = 22.0;
+const _kCollapsedPreviewHeight = 34.0;
+const _kCollapsedPreviewBottomGap = 8.0;
 
 class XeneDraggableSheet extends ConsumerStatefulWidget {
   const XeneDraggableSheet({super.key, this.metrics});
@@ -447,7 +450,11 @@ class _XeneDraggableSheetState extends ConsumerState<XeneDraggableSheet>
     // the bottom inset + a tap-sized margin in so the handle clears that zone;
     // the sheet still fills to the physical bottom edge. (Swipes from the very
     // bottom edge remain iOS's home gesture by design — grab the handle instead.)
-    final minHeight = bottomPadding + 44.0;
+    final collapsedPreviewHeight =
+        _kCollapsedPreviewTop +
+        _kCollapsedPreviewHeight +
+        _kCollapsedPreviewBottomGap;
+    final minHeight = bottomPadding + collapsedPreviewHeight;
     final minRatio = (minHeight / screenHeight).clamp(0.01, maxRatio);
 
     // Capture collapse state now so archiveAsync.when(data:) can decide
@@ -643,7 +650,7 @@ class _XeneDraggableSheetState extends ConsumerState<XeneDraggableSheet>
                         Positioned(
                           left: 24,
                           right: 24,
-                          top: 22,
+                          top: _kCollapsedPreviewTop,
                           child: IgnorePointer(
                             child: _collapsedPreview(feedAsync, feedMode),
                           ),
