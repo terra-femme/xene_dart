@@ -1,3 +1,5 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 /// Ordered list of the primary routes that participate in horizontal swipe
 /// navigation. The index of each entry is the corresponding
 /// `StatefulShellBranch` index in the router (main.dart), so header taps and
@@ -19,3 +21,7 @@ const kSwipeNavRoutes = [
   '/profile',
   '/about',
 ];
+
+/// Temporarily blocks full-page horizontal swipe navigation while another
+/// surface, such as the pop-out player, owns a horizontal gesture.
+final navSwipeBlockedProvider = StateProvider<bool>((ref) => false);

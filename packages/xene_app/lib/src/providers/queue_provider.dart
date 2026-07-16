@@ -94,6 +94,25 @@ class QueueNotifier extends StateNotifier<QueueState> {
 
   Future<void> addItem(FeedItem feedItem) async {
     if (_isAnon) return;
+    if (state.items.any((i) => i.externalUrl == feedItem.externalUrl)) return;
+
+    final optimisticItem = QueueItem(
+      id: 'pending_${feedItem.platform}_${feedItem.externalUrl.hashCode}_${DateTime.now().microsecondsSinceEpoch}',
+      platform: feedItem.platform.toLowerCase(),
+      externalUrl: feedItem.externalUrl,
+      position: state.items.length,
+      trackId: feedItem.id.isNotEmpty ? feedItem.id : null,
+      title: feedItem.title,
+      artistName: feedItem.artistName.isNotEmpty ? feedItem.artistName : null,
+      artworkUrl: feedItem.artworkUrl,
+      durationSeconds: feedItem.durationSeconds,
+    );
+    final previousItems = state.items;
+    state = state.copyWith(
+      items: [...state.items, optimisticItem],
+      clearSoundCloudPlaylistUrl: optimisticItem.platform == 'soundcloud',
+    );
+
     try {
       final body = {
         'platform': feedItem.platform.toLowerCase(),
@@ -111,12 +130,22 @@ class QueueNotifier extends StateNotifier<QueueState> {
       );
       final newItem = QueueItem.fromJson(resp.data!);
       state = state.copyWith(
-        items: [...state.items, newItem],
+        items: state.items
+            .map((item) => item.id == optimisticItem.id ? newItem : item)
+            .toList(),
         clearSoundCloudPlaylistUrl: newItem.platform == 'soundcloud',
       );
     } on DioException catch (e) {
       // 409 = already in queue — silently ignore
-      if (e.response?.statusCode != 409) rethrow;
+      if (e.response?.statusCode == 409) {
+        await _load();
+        return;
+      }
+      state = state.copyWith(items: previousItems);
+      return;
+    } catch (_) {
+      state = state.copyWith(items: previousItems);
+      return;
     }
   }
 

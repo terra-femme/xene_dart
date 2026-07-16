@@ -361,7 +361,10 @@ class _TrackRowState extends ConsumerState<_TrackRow> {
       return;
     }
 
-    setState(() => _saving = true);
+    setState(() {
+      _saving = true;
+      _saved = true;
+    });
     try {
       final dio = ref.read(authenticatedDioProvider);
       await dio.post(

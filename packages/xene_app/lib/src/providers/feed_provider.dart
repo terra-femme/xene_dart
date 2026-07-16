@@ -52,14 +52,9 @@ final searchFeedProvider = FutureProvider.autoDispose<List<FeedItem>>((
   if (q == null || q.trim().length < 2) return const [];
 
   ref.watch(currentUserIdProvider);
-  final presetSlug = ref.watch(activePresetSlugProvider);
-  final queryParams = <String, dynamic>{
-    'q': q.trim(),
-    'limit': 50,
-    if (presetSlug.isNotEmpty) 'preset_id': presetSlug,
-  };
+  final queryParams = <String, dynamic>{'q': q.trim(), 'limit': 50};
 
-  debugPrint('[feedProvider] search GET /feed/merged q=$q');
+  debugPrint('[feedProvider] search GET /feed/merged q=$q all-presets');
   final dio = ref.watch(authenticatedDioProvider);
   final response = await dio.get<dynamic>(
     '/feed/merged',

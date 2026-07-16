@@ -10,7 +10,6 @@ import '../providers/auth_provider.dart';
 import '../providers/queue_provider.dart';
 import '../providers/saved_provider.dart';
 import 'auth_gate_sheet.dart';
-import 'soundcloud_embed.dart';
 import 'youtube_embed.dart';
 
 // Xene monochrome palette — platform colors appear only on tiny indicator dots.
@@ -244,7 +243,7 @@ class _WinampPlayerState extends ConsumerState<WinampPlayer> {
                     border: Border.all(color: _border),
                   ),
                   clipBehavior: Clip.hardEdge,
-                  child: _buildEmbed(current, queue),
+                  child: _buildEmbed(current),
                 ),
               ],
             ],
@@ -271,7 +270,7 @@ class _WinampPlayerState extends ConsumerState<WinampPlayer> {
     );
   }
 
-  Widget _buildEmbed(QueueItem item, QueueState queue) {
+  Widget _buildEmbed(QueueItem item) {
     if (item.platform == 'youtube') {
       return YouTubeEmbed(
         key: ValueKey('youtube-${item.id}-${item.trackId ?? item.externalUrl}'),
@@ -280,17 +279,149 @@ class _WinampPlayerState extends ConsumerState<WinampPlayer> {
         artworkUrl: item.artworkUrl,
       );
     }
-    final scSource =
-        queue.soundCloudPlaylistUrl ?? item.trackId ?? item.externalUrl;
-    return SoundCloudEmbed(
-      key: ValueKey('soundcloud-$scSource'),
-      trackId: scSource,
-      artworkUrl: item.artworkUrl,
-    );
+    if (item.platform == 'soundcloud') {
+      return _SoundCloudArtworkPreview(item: item);
+    }
+    return _ArtworkPreview(item: item);
   }
 }
 
 // ── Queue row ──────────────────────────────────────────────────────────────
+
+class _SoundCloudArtworkPreview extends StatelessWidget {
+  const _SoundCloudArtworkPreview({required this.item});
+
+  final QueueItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    return _ArtworkPreview(
+      item: item,
+      badge: const _ArtworkPreviewBadge(
+        label: 'SOUNDCLOUD',
+        color: _scOrange,
+        icon: Icons.graphic_eq,
+      ),
+    );
+  }
+}
+
+class _ArtworkPreview extends StatelessWidget {
+  const _ArtworkPreview({required this.item, this.badge});
+
+  final QueueItem item;
+  final Widget? badge;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        if (item.artworkUrl != null)
+          Image.network(
+            item.artworkUrl!,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => const _ArtworkPreviewFallback(),
+          )
+        else
+          const _ArtworkPreviewFallback(),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Colors.black.withValues(alpha: 0.04),
+                Colors.black.withValues(alpha: 0.58),
+              ],
+            ),
+          ),
+        ),
+        Positioned(
+          left: 12,
+          right: 12,
+          bottom: 10,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (badge != null) ...[badge!, const SizedBox(height: 6)],
+              Text(
+                item.title ?? 'Unknown Track',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.archivo(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+              if (item.artistName != null)
+                Text(
+                  item.artistName!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.dmMono(fontSize: 9, color: Colors.white70),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ArtworkPreviewBadge extends StatelessWidget {
+  const _ArtworkPreviewBadge({
+    required this.label,
+    required this.color,
+    required this.icon,
+  });
+
+  final String label;
+  final Color color;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.92),
+        borderRadius: BorderRadius.circular(3),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 10, color: Colors.white),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: GoogleFonts.dmMono(
+              fontSize: 8,
+              fontWeight: FontWeight.w700,
+              color: Colors.white,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ArtworkPreviewFallback extends StatelessWidget {
+  const _ArtworkPreviewFallback();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: _surface,
+      alignment: Alignment.center,
+      child: const Icon(Icons.music_note, color: _lightGray, size: 38),
+    );
+  }
+}
 
 class _QueueRow extends ConsumerWidget {
   const _QueueRow({

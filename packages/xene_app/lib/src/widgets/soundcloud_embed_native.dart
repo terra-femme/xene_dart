@@ -6,6 +6,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
 
+import '../platform/now_playing_metadata.dart';
 import 'embed_fallback.dart';
 
 /// Native (Android/iOS) SoundCloud embed for the pop-out player.
@@ -36,6 +37,9 @@ class SoundCloudEmbed extends StatefulWidget {
     required this.trackId,
     this.isVisual = false,
     this.artworkUrl,
+    this.title,
+    this.artistName,
+    this.durationSeconds,
   });
 
   final String trackId;
@@ -43,6 +47,9 @@ class SoundCloudEmbed extends StatefulWidget {
 
   /// Track artwork, used as the fallback backdrop when the player can't load.
   final String? artworkUrl;
+  final String? title;
+  final String? artistName;
+  final int? durationSeconds;
 
   @override
   State<SoundCloudEmbed> createState() => _SoundCloudEmbedState();
@@ -52,6 +59,7 @@ class _SoundCloudEmbedState extends State<SoundCloudEmbed> {
   WebViewController? _controller;
   bool _supported = true;
   bool _loadError = false;
+  DateTime? _lastMetadataSyncAt;
 
   @override
   void initState() {
@@ -91,6 +99,7 @@ class _SoundCloudEmbedState extends State<SoundCloudEmbed> {
           final pos = int.tryParse(message.message);
           if (pos != null && !_scPositionController.isClosed) {
             _scPositionController.add(pos);
+            _syncNowPlayingMetadata(pos);
           }
         },
       )
@@ -122,11 +131,64 @@ class _SoundCloudEmbedState extends State<SoundCloudEmbed> {
     return controller;
   }
 
+  @override
+  void dispose() {
+    final controller = _controller;
+    if (controller != null) {
+      unawaited(
+        controller.runJavaScript('''
+try {
+  var frame = document.getElementById('sc');
+  if (frame && window.SC && SC.Widget) {
+    SC.Widget(frame).pause();
+  }
+  if (frame) {
+    frame.src = 'about:blank';
+    frame.remove();
+  }
+  document.body.innerHTML = '';
+} catch (e) {}
+'''),
+      );
+    }
+    super.dispose();
+  }
+
   void _retry() {
     setState(() {
       _loadError = false;
       _controller = _buildController();
     });
+  }
+
+  void _syncNowPlayingMetadata(int positionMs) {
+    final title = widget.title?.trim();
+    final artist = widget.artistName?.trim();
+    if ((title == null || title.isEmpty) &&
+        (artist == null || artist.isEmpty) &&
+        widget.artworkUrl == null) {
+      return;
+    }
+
+    final now = DateTime.now();
+    final lastSync = _lastMetadataSyncAt;
+    if (lastSync != null && now.difference(lastSync).inSeconds < 15) {
+      return;
+    }
+    _lastMetadataSyncAt = now;
+
+    unawaited(
+      NowPlayingMetadataBridge.update(
+        NowPlayingMetadata(
+          title: title == null || title.isEmpty ? 'Unknown Track' : title,
+          artist: artist == null || artist.isEmpty ? 'Xene' : artist,
+          platform: 'soundcloud',
+          artworkUrl: widget.artworkUrl,
+          durationSeconds: widget.durationSeconds,
+          elapsedSeconds: positionMs ~/ 1000,
+        ),
+      ),
+    );
   }
 
   /// Mirrors soundcloud_embed_web.dart's URL builder exactly so native and web

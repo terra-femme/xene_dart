@@ -306,19 +306,26 @@ class _ShellSwipeWrapperState extends ConsumerState<_ShellSwipeWrapper>
 
   @override
   Widget build(BuildContext context) {
+    final swipeBlocked = ref.watch(navSwipeBlockedProvider);
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
       onHorizontalDragStart: (_) {
+        if (swipeBlocked) return;
         _ctrl.stop();
         _dragging = true;
         _rawDrag = 0;
       },
       onHorizontalDragUpdate: (details) {
-        if (!_dragging) return;
+        if (swipeBlocked || !_dragging) return;
         _rawDrag += details.delta.dx;
         setState(() => _offset += details.delta.dx * 0.35);
       },
       onHorizontalDragEnd: (details) {
+        if (swipeBlocked) {
+          _dragging = false;
+          _snapBack();
+          return;
+        }
         if (!_dragging) return;
         _dragging = false;
 
@@ -342,6 +349,10 @@ class _ShellSwipeWrapperState extends ConsumerState<_ShellSwipeWrapper>
           return;
         }
         _commitNavigate(targetIdx);
+      },
+      onHorizontalDragCancel: () {
+        _dragging = false;
+        _snapBack();
       },
       child: Transform.translate(
         offset: Offset(_offset, 0),

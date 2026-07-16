@@ -52,7 +52,8 @@ class _PresetDialState extends State<PresetDial>
   static final bool _useBackdropBlur =
       kIsWeb ||
       switch (defaultTargetPlatform) {
-        TargetPlatform.android || TargetPlatform.iOS => false,
+        TargetPlatform.iOS => true,
+        TargetPlatform.android => false,
         _ => true,
       };
 
@@ -205,10 +206,10 @@ class _PresetDialState extends State<PresetDial>
                       ? BackdropFilter(
                           filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
                           child: Container(
-                            color: Colors.black.withValues(alpha: 0.12),
+                            color: Colors.black.withValues(alpha: 0.30),
                           ),
                         )
-                      : Container(color: Colors.black.withValues(alpha: 0.20)),
+                      : Container(color: Colors.black.withValues(alpha: 0.34)),
                 ),
                 CompositedTransformFollower(
                   link: _layerLink,
@@ -524,6 +525,8 @@ class _PresetDialState extends State<PresetDial>
     if (widget.slots.isEmpty) return const SizedBox.shrink();
 
     final outerSize = _outerSize;
+    final overlayOwnsDial =
+        _isLongPressing || _isReleaseSettling || _overlayEntry != null;
     XeneResponsiveDebug.values('PresetDial.geometry', {
       'knobSize': widget.knobSize,
       'outerSize': outerSize,
@@ -545,14 +548,17 @@ class _PresetDialState extends State<PresetDial>
               top: 0,
               width: outerSize,
               height: outerSize,
-              child: _buildInteractiveDial(),
+              child: overlayOwnsDial
+                  ? const SizedBox.shrink()
+                  : _buildInteractiveDial(),
             ),
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: Center(child: _buildDialLabel(expanded: false)),
-            ),
+            if (!overlayOwnsDial)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: Center(child: _buildDialLabel(expanded: false)),
+              ),
           ],
         ),
       ),

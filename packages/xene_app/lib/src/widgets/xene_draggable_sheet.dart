@@ -51,6 +51,7 @@ class _XeneDraggableSheetState extends ConsumerState<XeneDraggableSheet>
   int _archiveLoadSeq = 0;
   int _archiveLoadingLoggedGen = -1;
   bool _archiveLottieVisible = false;
+  bool _sheetDragActive = false;
 
   String _archiveElapsedLabel() {
     final elapsed = _archiveLoadWatch?.elapsedMilliseconds;
@@ -132,6 +133,66 @@ class _XeneDraggableSheetState extends ConsumerState<XeneDraggableSheet>
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       ),
+    );
+  }
+
+  Widget _collapsedPreview(
+    AsyncValue<List<FeedItem>> feedAsync,
+    FeedMode mode,
+  ) {
+    final items = feedAsync.valueOrNull ?? const <FeedItem>[];
+    final previewItems = items.take(2).toList();
+    final label = mode == FeedMode.fullFeed ? 'FULL GREED' : 'CYCLED';
+    final previewLabel = previewItems
+        .map((item) => item.artistName)
+        .where((name) => name.trim().isNotEmpty)
+        .join('  /  ');
+
+    return Row(
+      children: [
+        Container(
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(
+            color: const Color(0xFFFF5500).withValues(alpha: 0.20),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(
+              color: const Color(0xFFFF5500).withValues(alpha: 0.34),
+            ),
+          ),
+          child: const Icon(
+            Icons.keyboard_double_arrow_up_rounded,
+            color: Color(0xFFFF5500),
+            size: 18,
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '8 - 31 DAYS  /  $label',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.teko(
+                  fontSize: 14,
+                  color: Colors.white70,
+                  letterSpacing: 1.2,
+                ),
+              ),
+              const SizedBox(height: 1),
+              Text(
+                previewLabel.isEmpty ? 'Archive preview' : previewLabel,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.archivo(fontSize: 10, color: Colors.white38),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
@@ -390,7 +451,7 @@ class _XeneDraggableSheetState extends ConsumerState<XeneDraggableSheet>
     // no longer touches it. Landscape is unaffected (sidebar logo crawls there).
     final logoBottom = isLandscape ? topOffset : topOffset + 297;
 
-    final maxRatio = ((screenHeight - logoBottom) / screenHeight).clamp(
+    final maxRatio = ((screenHeight - logoBottom + 4.0) / screenHeight).clamp(
       0.1,
       1.0,
     );
@@ -504,79 +565,95 @@ class _XeneDraggableSheetState extends ConsumerState<XeneDraggableSheet>
                   ),
                 );
               },
-              child: Container(
-                decoration: BoxDecoration(
-                  color: sheetColor,
-                  borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(12),
-                  ),
-                ),
-                child: Column(
-                  children: [
-                    // Listener bypasses the gesture arena so it always fires
-                    // regardless of what DraggableScrollableSheet's internal
-                    // recognizers are doing. GestureDetector (inside
-                    // _dragHandle) still handles the tap-to-collapse action.
-                    Listener(
-                      behavior: HitTestBehavior.opaque,
-                      onPointerMove: (event) {
-                        // buttons == 0 means hover (no button / finger held down).
-                        if (event.buttons == 0) return;
-                        if (event.delta.dy.abs() < 0.5) return;
-                        if (!sheetController.isAttached) return;
-                        final delta = -event.delta.dy / screenHeight;
-                        sheetController.jumpTo(
-                          (sheetController.size + delta).clamp(
-                            minRatio,
-                            maxRatio,
-                          ),
-                        );
-                      },
-                      onPointerUp: (_) {
-                        if (!sheetController.isAttached) return;
-                        final mid = (minRatio + maxRatio) / 2;
-                        final target = sheetController.size >= mid
-                            ? maxRatio
-                            : minRatio;
-                        sheetController.animateTo(
-                          target,
-                          duration: const Duration(milliseconds: 300),
-                          curve: Curves.easeOut,
-                        );
-                      },
-                      onPointerCancel: (_) {
-                        if (!sheetController.isAttached) return;
-                        final mid = (minRatio + maxRatio) / 2;
-                        final target = sheetController.size >= mid
-                            ? maxRatio
-                            : minRatio;
-                        sheetController.animateTo(
-                          target,
-                          duration: const Duration(milliseconds: 300),
-                          curve: Curves.easeOut,
-                        );
-                      },
-                      child: _dragHandle(sheetController, minRatio),
+              child: Listener(
+                behavior: HitTestBehavior.opaque,
+                onPointerDown: (_) {
+                  _sheetDragActive =
+                      sheetController.isAttached &&
+                      (sheetController.size - minRatio).abs() < 0.04;
+                },
+                onPointerMove: (event) {
+                  if (!_sheetDragActive) return;
+                  // buttons == 0 means hover (no button / finger held down).
+                  if (event.buttons == 0) return;
+                  if (event.delta.dy.abs() < 0.5) return;
+                  if (!sheetController.isAttached) return;
+                  final delta = -event.delta.dy / screenHeight;
+                  sheetController.jumpTo(
+                    (sheetController.size + delta).clamp(minRatio, maxRatio),
+                  );
+                },
+                onPointerUp: (_) {
+                  if (!_sheetDragActive) return;
+                  _sheetDragActive = false;
+                  if (!sheetController.isAttached) return;
+                  final mid = (minRatio + maxRatio) / 2;
+                  final target = sheetController.size >= mid
+                      ? maxRatio
+                      : minRatio;
+                  sheetController.animateTo(
+                    target,
+                    duration: const Duration(milliseconds: 300),
+                    curve: Curves.easeOut,
+                  );
+                },
+                onPointerCancel: (_) {
+                  if (!_sheetDragActive) return;
+                  _sheetDragActive = false;
+                  if (!sheetController.isAttached) return;
+                  final mid = (minRatio + maxRatio) / 2;
+                  final target = sheetController.size >= mid
+                      ? maxRatio
+                      : minRatio;
+                  sheetController.animateTo(
+                    target,
+                    duration: const Duration(milliseconds: 300),
+                    curve: Curves.easeOut,
+                  );
+                },
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: sheetColor,
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(12),
                     ),
-                    Expanded(
-                      child: ClipRect(
-                        // OverflowBox decouples the content layout from the
-                        // sheet's current height so no relayout happens during
-                        // drag.  The child is wrapped in a SizedBox(maxRatio *
-                        // screenHeight) so inner Expanded widgets have a real
-                        // bound rather than infinity (which would give them 0).
-                        // ClipRect hides any overflow when collapsed.
-                        child: Opacity(
-                          opacity: opacity,
-                          child: OverflowBox(
-                            maxHeight: double.infinity,
-                            alignment: Alignment.topCenter,
-                            child: child,
+                  ),
+                  child: Stack(
+                    children: [
+                      Column(
+                        children: [
+                          _dragHandle(sheetController, minRatio),
+                          Expanded(
+                            child: ClipRect(
+                              // OverflowBox decouples the content layout from the
+                              // sheet's current height so no relayout happens during
+                              // drag.  The child is wrapped in a SizedBox(maxRatio *
+                              // screenHeight) so inner Expanded widgets have a real
+                              // bound rather than infinity (which would give them 0).
+                              // ClipRect hides any overflow when collapsed.
+                              child: Opacity(
+                                opacity: opacity,
+                                child: OverflowBox(
+                                  maxHeight: double.infinity,
+                                  alignment: Alignment.topCenter,
+                                  child: child,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (isCollapsed)
+                        Positioned(
+                          left: 24,
+                          right: 24,
+                          top: 22,
+                          child: IgnorePointer(
+                            child: _collapsedPreview(feedAsync, feedMode),
                           ),
                         ),
-                      ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             );

@@ -4,6 +4,7 @@ import 'package:xene_app/src/layout/xene_layout_metrics.dart';
 import 'package:xene_app/src/providers/accessibility_provider.dart';
 import 'package:xene_app/src/layout/xene_responsive_debug.dart';
 import 'package:xene_app/src/providers/auth_provider.dart';
+import 'package:xene_app/src/providers/nav_swipe_provider.dart';
 import 'package:xene_app/src/providers/player_provider.dart';
 import 'package:xene_app/src/providers/saved_provider.dart';
 import 'package:xene_app/src/widgets/auth_gate_sheet.dart';
@@ -63,6 +64,7 @@ class _LogoPipPlayerState extends ConsumerState<LogoPipPlayer>
   }
 
   void _handleDragEnd(DragEndDetails details) {
+    ref.read(navSwipeBlockedProvider.notifier).state = false;
     final isLandscape =
         MediaQuery.of(context).orientation == Orientation.landscape;
 
@@ -78,9 +80,15 @@ class _LogoPipPlayerState extends ConsumerState<LogoPipPlayer>
     }
   }
 
-  void _close() async {
-    if (_entryController.isAnimating) return;
-    await _entryController.reverse();
+  void _handleDragCancel() {
+    ref.read(navSwipeBlockedProvider.notifier).state = false;
+    setState(() => _dragOffset = 0);
+  }
+
+  void _close() {
+    ref.read(navSwipeBlockedProvider.notifier).state = false;
+    _entryController.stop();
+    _entryController.value = 0.0;
     ref.read(playerProvider.notifier).stopAndHide();
   }
 
@@ -309,6 +317,11 @@ class _LogoPipPlayerState extends ConsumerState<LogoPipPlayer>
                                     ),
                                     trackId: currentTrack.id,
                                     isVisual: true,
+                                    artworkUrl: currentTrack.artworkUrl,
+                                    title: currentTrack.title,
+                                    artistName: currentTrack.artistName,
+                                    durationSeconds:
+                                        currentTrack.durationSeconds,
                                   ),
                                   ActivePlatform.youtube => YouTubeEmbed(
                                     key: ValueKey(
@@ -316,6 +329,7 @@ class _LogoPipPlayerState extends ConsumerState<LogoPipPlayer>
                                     ),
                                     videoId: currentTrack.id,
                                     externalUrl: currentTrack.externalUrl,
+                                    artworkUrl: currentTrack.artworkUrl,
                                   ),
                                   ActivePlatform.none =>
                                     const SizedBox.shrink(),
@@ -341,7 +355,12 @@ class _LogoPipPlayerState extends ConsumerState<LogoPipPlayer>
                       child: GestureDetector(
                         behavior: HitTestBehavior.opaque,
                         onHorizontalDragUpdate: _handleDragUpdate,
+                        onHorizontalDragStart: (_) {
+                          ref.read(navSwipeBlockedProvider.notifier).state =
+                              true;
+                        },
                         onHorizontalDragEnd: _handleDragEnd,
+                        onHorizontalDragCancel: _handleDragCancel,
                         child: Align(
                           alignment: isLandscape
                               ? Alignment.centerLeft
