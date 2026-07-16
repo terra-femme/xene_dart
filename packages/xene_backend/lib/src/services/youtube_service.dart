@@ -206,6 +206,20 @@ class YouTubeService {
         final entries = videosResp.data?['items'] as List? ?? [];
         pageToken = videosResp.data?['nextPageToken'] as String?;
         pagesFetched++;
+        final scheduleByVideoId = await _getScheduledStarts(
+          entries
+              .whereType<Map>()
+              .map((entry) {
+                final snippet = entry['snippet'] as Map?;
+                final contentDetails = entry['contentDetails'] as Map?;
+                final resourceId = snippet?['resourceId'] as Map?;
+                return contentDetails?['videoId']?.toString() ??
+                    resourceId?['videoId']?.toString();
+              })
+              .whereType<String>()
+              .toList(),
+          key,
+        );
 
         var hitCutoff = false;
         for (final raw in entries) {
@@ -223,8 +237,12 @@ class YouTubeService {
           if (videoId == null || title == null || published == null) continue;
 
           final parsedDate = DateTime.parse(published);
+          final scheduledStart = scheduleByVideoId[videoId];
+          final isUpcoming =
+              scheduledStart != null &&
+              scheduledStart.toUtc().isAfter(DateTime.now().toUtc());
           // Items come back newest-first; once one is too old, all remaining are too.
-          if (parsedDate.toUtc().isBefore(cutoff)) {
+          if (!isUpcoming && parsedDate.toUtc().isBefore(cutoff)) {
             hitCutoff = true;
             break;
           }
@@ -248,6 +266,12 @@ class YouTubeService {
               externalUrl: 'https://www.youtube.com/watch?v=$videoId',
               artworkUrl: artworkUrl,
               publishedAt: parsedDate,
+              releaseAt: scheduledStart,
+              dateSource: scheduledStart != null
+                  ? 'youtube.liveStreamingDetails.scheduledStartTime'
+                  : null,
+              dateConfidence: scheduledStart != null ? 'scheduled' : null,
+              isUpcoming: isUpcoming,
             ),
           );
           auditSink?.add({
@@ -260,6 +284,8 @@ class YouTubeService {
                 ? 'videoPublishedAt'
                 : 'snippet.publishedAt',
             'resolvedDate': parsedDate.toUtc().toIso8601String(),
+            'scheduledStartTime': scheduledStart?.toUtc().toIso8601String(),
+            'isUpcoming': isUpcoming,
           });
         }
 
@@ -329,6 +355,37 @@ class YouTubeService {
     }, expiresAt: DateTime.now().toUtc().add(_uploadsPlaylistCacheTtl));
     _logger.info('[youtube] Cached uploads playlist for $channelId');
     return uploadsPlaylist;
+  }
+
+  Future<Map<String, DateTime>> _getScheduledStarts(
+    List<String> videoIds,
+    String key,
+  ) async {
+    if (videoIds.isEmpty) return const {};
+    try {
+      final response = await _dio.get<Map<String, dynamic>>(
+        '$_youtubeApiBase/videos',
+        queryParameters: {
+          'part': 'liveStreamingDetails',
+          'id': videoIds.join(','),
+          'key': key,
+        },
+      );
+      final scheduled = <String, DateTime>{};
+      final items = response.data?['items'] as List? ?? [];
+      for (final item in items) {
+        if (item is! Map) continue;
+        final id = item['id']?.toString();
+        final details = item['liveStreamingDetails'] as Map?;
+        final scheduledStart = details?['scheduledStartTime']?.toString();
+        if (id == null || scheduledStart == null) continue;
+        scheduled[id] = DateTime.parse(scheduledStart);
+      }
+      return scheduled;
+    } catch (e) {
+      _logger.warning('[youtube] scheduled start lookup failed: $e');
+      return const {};
+    }
   }
 
   /// Fetch videos via the native YouTube RSS feed.
@@ -437,6 +494,10 @@ class YouTubeService {
             'artwork_url': i.artworkUrl,
             'external_url': i.externalUrl,
             'published_at': i.publishedAt.toIso8601String(),
+            'source_release_at': i.releaseAt?.toIso8601String(),
+            'date_source': i.dateSource,
+            'date_confidence': i.dateConfidence,
+            'is_upcoming': i.isUpcoming,
             'updated_at': DateTime.now().toUtc().toIso8601String(),
           },
         )

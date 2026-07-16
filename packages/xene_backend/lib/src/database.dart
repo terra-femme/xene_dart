@@ -52,10 +52,12 @@ class DatabaseService {
       ).subtract(Duration(days: days)).toUtc().toIso8601String();
 
       var query = client.from('feed_items').select().eq('platform', platform);
-      final useSoundCloudDateV2 =
-          platform == 'soundcloud' &&
-          Platform.environment['SC_DATE_RESOLVER_V2']?.toLowerCase() == 'true';
-      query = useSoundCloudDateV2
+      final includeUpcoming =
+          platform == 'youtube' ||
+          (platform == 'soundcloud' &&
+              Platform.environment['SC_DATE_RESOLVER_V2']?.toLowerCase() ==
+                  'true');
+      query = includeUpcoming
           ? query.or('published_at.gte.$cutoff,is_upcoming.eq.true')
           : query.gte('published_at', cutoff);
 
@@ -100,12 +102,15 @@ class DatabaseService {
         (i + chunkSize).clamp(0, artistNames.length),
       );
       try {
-        final response = await client
+        var query = client
             .from('feed_items')
             .select()
             .eq('platform', platform)
-            .inFilter('artist_name', chunk)
-            .gte('published_at', cutoff)
+            .inFilter('artist_name', chunk);
+        query = platform == 'youtube'
+            ? query.or('published_at.gte.$cutoff,is_upcoming.eq.true')
+            : query.gte('published_at', cutoff);
+        final response = await query
             .order('published_at', ascending: false)
             .limit(chunkRowCap);
         final rows = List<Map<String, dynamic>>.from(response);

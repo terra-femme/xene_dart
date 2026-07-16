@@ -113,6 +113,7 @@ class XeneFeedCard extends StatelessWidget {
 
         final platform = item.platform.toLowerCase();
         final directPlay = platform == 'soundcloud' || platform == 'youtube';
+        final premiereLabel = _premiereLabel(item);
         final contentDesc =
             '${item.title ?? 'Untitled'} by ${item.artistName}, '
             '${item.contentType} on $platform';
@@ -273,6 +274,13 @@ class XeneFeedCard extends StatelessWidget {
                                     ],
                                   ),
                                   const SizedBox(height: 4),
+                                  if (premiereLabel != null) ...[
+                                    _PremiereDateLabel(
+                                      label: premiereLabel,
+                                      dark: dark,
+                                    ),
+                                    const SizedBox(height: 3),
+                                  ],
 
                                   // Title
                                   Text(
@@ -420,6 +428,7 @@ class _YoutubeVideoCard extends StatelessWidget {
         : const Color(0xFFF5F5F5);
     final titleColor = dark ? Colors.white : Colors.black;
     final snippetColor = dark ? Colors.white54 : Colors.black87;
+    final premiereLabel = _premiereLabel(item);
 
     return GestureDetector(
       onTap: onTap,
@@ -511,6 +520,10 @@ class _YoutubeVideoCard extends StatelessWidget {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
+                  if (premiereLabel != null) ...[
+                    const SizedBox(height: 4),
+                    _PremiereDateLabel(label: premiereLabel, dark: dark),
+                  ],
                   Text(
                     item.artistName,
                     style: _archivo10w500.copyWith(color: snippetColor),
@@ -718,6 +731,31 @@ bool _isPreReleaseItem(FeedItem item) {
   return item.publishedAt.isAfter(now);
 }
 
+String? _premiereLabel(FeedItem item) {
+  if (item.platform.toLowerCase() != 'youtube') return null;
+  final date = _upcomingDate(item);
+  if (date == null) return null;
+  return 'PREMIERES ${_formatShortDateTime(date)}';
+}
+
+DateTime? _upcomingDate(FeedItem item) {
+  final now = DateTime.now();
+  final releaseAt = item.releaseAt?.toLocal();
+  if (item.isUpcoming && releaseAt != null) return releaseAt;
+  if (releaseAt != null && releaseAt.isAfter(now)) return releaseAt;
+  final publishedAt = item.publishedAt.toLocal();
+  if (publishedAt.isAfter(now)) return publishedAt;
+  return null;
+}
+
+String _formatShortDateTime(DateTime value) {
+  final local = value.toLocal();
+  final hour12 = local.hour % 12 == 0 ? 12 : local.hour % 12;
+  final minute = local.minute.toString().padLeft(2, '0');
+  final period = local.hour >= 12 ? 'PM' : 'AM';
+  return '${local.month}.${local.day}.${local.year % 100} $hour12:$minute $period';
+}
+
 class _TypePill extends StatelessWidget {
   const _TypePill({required this.type});
   final String type;
@@ -786,6 +824,36 @@ class _PreOrderStar extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _PremiereDateLabel extends StatelessWidget {
+  const _PremiereDateLabel({required this.label, required this.dark});
+
+  final String label;
+  final bool dark;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(Icons.event_available, size: 10, color: XeneTheme.ytRed),
+        const SizedBox(width: 3),
+        Flexible(
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.dmMono(
+              fontSize: 9,
+              fontWeight: FontWeight.w700,
+              color: dark ? Colors.white70 : XeneTheme.ytRed,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

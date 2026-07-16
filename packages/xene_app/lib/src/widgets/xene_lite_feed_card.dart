@@ -46,6 +46,7 @@ class XeneLiteFeedCard extends StatelessWidget {
     final url = item.artworkUrl ?? '';
     final platform = item.platform.toLowerCase();
     final directPlay = platform == 'soundcloud' || platform == 'youtube';
+    final premiereLabel = _premiereLabel(item);
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
@@ -117,6 +118,19 @@ class XeneLiteFeedCard extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
+                  if (premiereLabel != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      premiereLabel,
+                      style: GoogleFonts.dmMono(
+                        fontSize: 8,
+                        fontWeight: FontWeight.w700,
+                        color: const Color(0xFFFF4444),
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -125,6 +139,31 @@ class XeneLiteFeedCard extends StatelessWidget {
       ),
     );
   }
+}
+
+String? _premiereLabel(FeedItem item) {
+  if (item.platform.toLowerCase() != 'youtube') return null;
+  final date = _upcomingDate(item);
+  if (date == null) return null;
+  return 'PREMIERES ${_formatShortDateTime(date)}';
+}
+
+DateTime? _upcomingDate(FeedItem item) {
+  final now = DateTime.now();
+  final releaseAt = item.releaseAt?.toLocal();
+  if (item.isUpcoming && releaseAt != null) return releaseAt;
+  if (releaseAt != null && releaseAt.isAfter(now)) return releaseAt;
+  final publishedAt = item.publishedAt.toLocal();
+  if (publishedAt.isAfter(now)) return publishedAt;
+  return null;
+}
+
+String _formatShortDateTime(DateTime value) {
+  final local = value.toLocal();
+  final hour12 = local.hour % 12 == 0 ? 12 : local.hour % 12;
+  final minute = local.minute.toString().padLeft(2, '0');
+  final period = local.hour >= 12 ? 'PM' : 'AM';
+  return '${local.month}.${local.day}.${local.year % 100} $hour12:$minute $period';
 }
 
 class _LiteThumbnailPlayButton extends ConsumerWidget {

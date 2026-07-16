@@ -32,6 +32,7 @@ class XeneContentModal extends ConsumerWidget {
     final isPlayable = canPlayInApp(item);
     final repostAttribution = _repostAttribution(item);
     final bodyText = _bodyWithoutAttribution(item.body, repostAttribution);
+    final premiereLabel = _premiereLabel(item);
     final bottomInteractionPadding =
         MediaQuery.of(context).padding.bottom + 128;
 
@@ -192,6 +193,10 @@ class XeneContentModal extends ConsumerWidget {
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
+                        if (premiereLabel != null) ...[
+                          const SizedBox(height: 12),
+                          _PremiereBanner(label: premiereLabel),
+                        ],
                         if (repostAttribution != null) ...[
                           const SizedBox(height: 10),
                           _RepostAttribution(text: repostAttribution),
@@ -335,6 +340,52 @@ class _RepostAttribution extends StatelessWidget {
   }
 }
 
+class _PremiereBanner extends StatelessWidget {
+  const _PremiereBanner({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFF0000).withValues(alpha: 0.14),
+          border: Border.all(
+            color: const Color(0xFFFF0000).withValues(alpha: 0.38),
+          ),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.event_available,
+              size: 13,
+              color: Color(0xFFFF8A8A),
+            ),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.dmMono(
+                  color: const Color(0xFFFFB0B0),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 String? _repostAttribution(FeedItem item) {
   final body = item.body?.trim();
   if (body != null && body.startsWith('\u21bb by ')) {
@@ -369,6 +420,31 @@ String? _bodyWithoutAttribution(String? body, String? attribution) {
 
 String _normaliseName(String value) {
   return value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
+}
+
+String? _premiereLabel(FeedItem item) {
+  if (item.platform.toLowerCase() != 'youtube') return null;
+  final date = _upcomingDate(item);
+  if (date == null) return null;
+  return 'PREMIERES ${_formatShortDateTime(date)}';
+}
+
+DateTime? _upcomingDate(FeedItem item) {
+  final now = DateTime.now();
+  final releaseAt = item.releaseAt?.toLocal();
+  if (item.isUpcoming && releaseAt != null) return releaseAt;
+  if (releaseAt != null && releaseAt.isAfter(now)) return releaseAt;
+  final publishedAt = item.publishedAt.toLocal();
+  if (publishedAt.isAfter(now)) return publishedAt;
+  return null;
+}
+
+String _formatShortDateTime(DateTime value) {
+  final local = value.toLocal();
+  final hour12 = local.hour % 12 == 0 ? 12 : local.hour % 12;
+  final minute = local.minute.toString().padLeft(2, '0');
+  final period = local.hour >= 12 ? 'PM' : 'AM';
+  return '${local.month}.${local.day}.${local.year % 100} $hour12:$minute $period';
 }
 
 class _PinnedDismissPill extends StatelessWidget {

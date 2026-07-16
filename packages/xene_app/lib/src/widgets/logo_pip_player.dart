@@ -10,6 +10,7 @@ import 'package:xene_app/src/providers/saved_provider.dart';
 import 'package:xene_app/src/widgets/auth_gate_sheet.dart';
 import 'package:xene_app/src/widgets/soundcloud_embed.dart';
 import 'package:xene_app/src/widgets/youtube_embed.dart';
+import 'package:xene_domain/xene_domain.dart';
 
 class LogoPipPlayer extends ConsumerStatefulWidget {
   const LogoPipPlayer({super.key, this.metrics});
@@ -152,6 +153,7 @@ class _LogoPipPlayerState extends ConsumerState<LogoPipPlayer>
     if (!playerState.isVisible || currentTrack == null) {
       return const SizedBox.shrink();
     }
+    final premiereLabel = _premiereLabel(currentTrack);
 
     // Constants
     const double sheetWidth = 175.0;
@@ -293,6 +295,41 @@ class _LogoPipPlayerState extends ConsumerState<LogoPipPlayer>
                           ],
                         ),
                       ),
+                      if (premiereLabel != null)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 5,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(
+                                0xFFFF0000,
+                              ).withValues(alpha: isLandscape ? 0.10 : 0.18),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(
+                                color: const Color(
+                                  0xFFFF0000,
+                                ).withValues(alpha: 0.34),
+                              ),
+                            ),
+                            child: Text(
+                              premiereLabel,
+                              textAlign: TextAlign.center,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: isLandscape
+                                    ? const Color(0xFFB00000)
+                                    : const Color(0xFFFF9A9A),
+                                fontSize: 9,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 0.4,
+                              ),
+                            ),
+                          ),
+                        ),
 
                       // Player Well
                       Expanded(
@@ -388,4 +425,29 @@ class _LogoPipPlayerState extends ConsumerState<LogoPipPlayer>
       ),
     );
   }
+}
+
+String? _premiereLabel(FeedItem item) {
+  if (item.platform.toLowerCase() != 'youtube') return null;
+  final date = _upcomingDate(item);
+  if (date == null) return null;
+  return 'PREMIERES ${_formatShortDateTime(date)}';
+}
+
+DateTime? _upcomingDate(FeedItem item) {
+  final now = DateTime.now();
+  final releaseAt = item.releaseAt?.toLocal();
+  if (item.isUpcoming && releaseAt != null) return releaseAt;
+  if (releaseAt != null && releaseAt.isAfter(now)) return releaseAt;
+  final publishedAt = item.publishedAt.toLocal();
+  if (publishedAt.isAfter(now)) return publishedAt;
+  return null;
+}
+
+String _formatShortDateTime(DateTime value) {
+  final local = value.toLocal();
+  final hour12 = local.hour % 12 == 0 ? 12 : local.hour % 12;
+  final minute = local.minute.toString().padLeft(2, '0');
+  final period = local.hour >= 12 ? 'PM' : 'AM';
+  return '${local.month}.${local.day}.${local.year % 100} $hour12:$minute $period';
 }
