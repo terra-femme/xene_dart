@@ -209,6 +209,8 @@ class FeedNotifier extends AsyncNotifier<List<FeedItem>> {
     _dio = ref.watch(authenticatedDioProvider);
     final currentPreset = ref.watch(activePresetSlugProvider);
     final cache = ref.read(feedFrontendCacheProvider);
+    var cancelled = false;
+    ref.onDispose(() => cancelled = true);
 
     // Suspend until presetDialProvider has resolved.
     // Returning [] would set _dataReady=true in LoadingOverlay immediately,
@@ -224,7 +226,10 @@ class FeedNotifier extends AsyncNotifier<List<FeedItem>> {
       try {
         await ref.read(presetDialProvider.future);
       } catch (_) {}
-      return const <FeedItem>[];
+      if (cancelled) return const <FeedItem>[];
+      debugPrint(
+        '[feedProvider] presetDialProvider resolved — continuing feed build',
+      );
     }
 
     // Reset per-preset phase tracking so background refreshes always merge
@@ -236,8 +241,6 @@ class FeedNotifier extends AsyncNotifier<List<FeedItem>> {
     // queuing multiple concurrent build() calls. The dispose flag fires when
     // this scope is superseded so in-flight work can be abandoned early.
     // This delay is also defined in config.json as limits.feed_fetch_delay_milliseconds (150).
-    var cancelled = false;
-    ref.onDispose(() => cancelled = true);
     await Future<void>.delayed(const Duration(milliseconds: 150));
     if (cancelled) return const <FeedItem>[];
 
