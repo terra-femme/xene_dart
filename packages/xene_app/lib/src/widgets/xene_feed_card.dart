@@ -187,52 +187,56 @@ class XeneFeedCard extends StatelessWidget {
                         children: [
                           // 1. Thumbnail (Left) — decorative, described by card label
                           ExcludeSemantics(
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(5),
-                              child: Stack(
-                                fit: StackFit.expand,
-                                children: [
-                                  thumbnailProvider == null
-                                      ? Container(
-                                          width: thumbnailSize,
-                                          height: thumbnailSize,
-                                          color: placeholderColor,
-                                          alignment: Alignment.center,
-                                          child: Icon(
-                                            Icons.music_note,
-                                            size: compact ? 18 : 20,
-                                            color: errorIconColor,
-                                          ),
-                                        )
-                                      : Image(
-                                          image: thumbnailProvider,
-                                          width: thumbnailSize,
-                                          height: thumbnailSize,
-                                          fit: BoxFit.cover,
-                                          gaplessPlayback: true,
-                                          errorBuilder:
-                                              (context, error, stack) =>
-                                                  Container(
-                                                    width: thumbnailSize,
-                                                    height: thumbnailSize,
-                                                    color: placeholderColor,
-                                                    alignment: Alignment.center,
-                                                    child: Icon(
-                                                      Icons.music_note,
-                                                      size: compact ? 18 : 20,
-                                                      color: errorIconColor,
+                            child: SizedBox.square(
+                              dimension: thumbnailSize,
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(5),
+                                child: Stack(
+                                  fit: StackFit.expand,
+                                  children: [
+                                    thumbnailProvider == null
+                                        ? Container(
+                                            width: thumbnailSize,
+                                            height: thumbnailSize,
+                                            color: placeholderColor,
+                                            alignment: Alignment.center,
+                                            child: Icon(
+                                              Icons.music_note,
+                                              size: compact ? 18 : 20,
+                                              color: errorIconColor,
+                                            ),
+                                          )
+                                        : Image(
+                                            image: thumbnailProvider,
+                                            width: thumbnailSize,
+                                            height: thumbnailSize,
+                                            fit: BoxFit.cover,
+                                            gaplessPlayback: true,
+                                            errorBuilder:
+                                                (context, error, stack) =>
+                                                    Container(
+                                                      width: thumbnailSize,
+                                                      height: thumbnailSize,
+                                                      color: placeholderColor,
+                                                      alignment:
+                                                          Alignment.center,
+                                                      child: Icon(
+                                                        Icons.music_note,
+                                                        size: compact ? 18 : 20,
+                                                        color: errorIconColor,
+                                                      ),
                                                     ),
-                                                  ),
+                                          ),
+                                    if (directPlay)
+                                      Center(
+                                        child: _ThumbnailPlayButton(
+                                          item: item,
+                                          visualSize: compact ? 22 : 24,
+                                          iconSize: compact ? 15 : 17,
                                         ),
-                                  if (directPlay)
-                                    Center(
-                                      child: _ThumbnailPlayButton(
-                                        item: item,
-                                        visualSize: compact ? 22 : 24,
-                                        iconSize: compact ? 15 : 17,
                                       ),
-                                    ),
-                                ],
+                                  ],
+                                ),
                               ),
                             ),
                           ),
