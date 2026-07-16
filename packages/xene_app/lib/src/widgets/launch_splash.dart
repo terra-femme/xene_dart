@@ -23,13 +23,44 @@ class LaunchSplash extends StatelessWidget {
   }
 }
 
-class _NewLottieSplash extends StatelessWidget {
+class _NewLottieSplash extends StatefulWidget {
   const _NewLottieSplash();
+
+  @override
+  State<_NewLottieSplash> createState() => _NewLottieSplashState();
+}
+
+class _NewLottieSplashState extends State<_NewLottieSplash> {
+  bool _firstFrameLogged = false;
+
+  @override
+  void initState() {
+    super.initState();
+    debugPrint('[LaunchSplash] mounted asset=$_loadingSplashAsset');
+  }
+
+  @override
+  void dispose() {
+    debugPrint('[LaunchSplash] disposed asset=$_loadingSplashAsset');
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
+        if (!_firstFrameLogged) {
+          _firstFrameLogged = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            debugPrint(
+              '[LaunchSplash] first splash widget frame painted '
+              'size=${constraints.maxWidth.toStringAsFixed(1)}x'
+              '${constraints.maxHeight.toStringAsFixed(1)}',
+            );
+          });
+        }
+
         return Stack(
           fit: StackFit.expand,
           children: [
@@ -39,6 +70,19 @@ class _NewLottieSplash extends StatelessWidget {
               repeat: true,
               fit: BoxFit.cover,
               alignment: Alignment.center,
+              onLoaded: (composition) {
+                debugPrint(
+                  '[LaunchSplash] Lottie loaded asset=$_loadingSplashAsset '
+                  'duration=${composition.duration.inMilliseconds}ms',
+                );
+              },
+              errorBuilder: (context, error, stackTrace) {
+                debugPrint(
+                  '[LaunchSplash] Lottie failed asset=$_loadingSplashAsset '
+                  'error=$error',
+                );
+                return const SizedBox.shrink();
+              },
             ),
             const _ImmediateSplashLogo(),
           ],

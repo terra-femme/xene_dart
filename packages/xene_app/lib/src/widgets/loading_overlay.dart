@@ -15,6 +15,8 @@ class LoadingOverlay extends ConsumerStatefulWidget {
 class _LoadingOverlayState extends ConsumerState<LoadingOverlay>
     with SingleTickerProviderStateMixin {
   late final AnimationController _fade;
+  late final Stopwatch _visibleStopwatch;
+  bool _firstBuildLogged = false;
 
   // Reveal fires only when BOTH conditions are true:
   // 1. Minimum hold time has elapsed (JIT warm-up + HTTP parse spike absorbed)
@@ -29,6 +31,8 @@ class _LoadingOverlayState extends ConsumerState<LoadingOverlay>
   @override
   void initState() {
     super.initState();
+    _visibleStopwatch = Stopwatch()..start();
+    debugPrint('[LoadingOverlay] Flutter splash shown at t=0ms');
     _fade = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 700),
@@ -40,12 +44,21 @@ class _LoadingOverlayState extends ConsumerState<LoadingOverlay>
     // so neither event can interrupt the Lottie mid-animation.
     _minimumTimer = Timer(const Duration(milliseconds: 2500), () {
       _minimumElapsed = true;
+      debugPrint(
+        '[LoadingOverlay] minimum hold elapsed at '
+        't=${_visibleStopwatch.elapsedMilliseconds}ms',
+      );
       _checkRevealConditions();
     });
   }
 
   @override
   void dispose() {
+    debugPrint(
+      '[LoadingOverlay] disposed at '
+      't=${_visibleStopwatch.elapsedMilliseconds}ms '
+      'removed=$_removed revealed=$_revealed dataReady=$_dataReady',
+    );
     _minimumTimer?.cancel();
     _fade.dispose();
     super.dispose();
@@ -62,6 +75,10 @@ class _LoadingOverlayState extends ConsumerState<LoadingOverlay>
   void _startReveal() {
     if (_revealed) return;
     _revealed = true;
+    debugPrint(
+      '[LoadingOverlay] reveal starting at '
+      't=${_visibleStopwatch.elapsedMilliseconds}ms',
+    );
 
     // Step 1: Pre-warm — jump all UI layers to fully visible WHILE the overlay
     // is still fully opaque. The user never sees this; it lets Flutter build and
@@ -77,6 +94,10 @@ class _LoadingOverlayState extends ConsumerState<LoadingOverlay>
 
         // Step 3: Single clean fade — no competing animations, no concurrent
         // full-tree rebuilds. The UI behind is already fully built and idle.
+        debugPrint(
+          '[LoadingOverlay] fade-out started at '
+          't=${_visibleStopwatch.elapsedMilliseconds}ms',
+        );
         _fade.reverse();
 
         // Step 4: After fade completes, remove overlay and unlock the crawl ticker.
@@ -84,6 +105,11 @@ class _LoadingOverlayState extends ConsumerState<LoadingOverlay>
           if (!mounted) return;
           ref.read(revealCompleteProvider.notifier).state = true;
           setState(() => _removed = true);
+          _visibleStopwatch.stop();
+          debugPrint(
+            '[LoadingOverlay] splash removed after '
+            '${_visibleStopwatch.elapsedMilliseconds}ms',
+          );
         });
       });
     });
@@ -93,11 +119,26 @@ class _LoadingOverlayState extends ConsumerState<LoadingOverlay>
   Widget build(BuildContext context) {
     if (_removed) return const SizedBox.shrink();
 
+    if (!_firstBuildLogged) {
+      _firstBuildLogged = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        debugPrint(
+          '[LoadingOverlay] first Flutter splash frame painted at '
+          't=${_visibleStopwatch.elapsedMilliseconds}ms',
+        );
+      });
+    }
+
     final feedAsync = ref.watch(feedProvider);
 
     // Trigger on data OR error so a network failure never leaves the overlay up.
     if ((feedAsync.hasValue || feedAsync.hasError) && !_dataReady) {
       _dataReady = true;
+      debugPrint(
+        '[LoadingOverlay] feed ${feedAsync.hasError ? 'error' : 'data'} ready '
+        'at t=${_visibleStopwatch.elapsedMilliseconds}ms',
+      );
       _checkRevealConditions();
     }
 
