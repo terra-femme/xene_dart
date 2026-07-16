@@ -32,6 +32,8 @@ class XeneContentModal extends ConsumerWidget {
     final isPlayable = canPlayInApp(item);
     final repostAttribution = _repostAttribution(item);
     final bodyText = _bodyWithoutAttribution(item.body, repostAttribution);
+    final bottomInteractionPadding =
+        MediaQuery.of(context).padding.bottom + 128;
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -58,7 +60,12 @@ class XeneContentModal extends ConsumerWidget {
                 Expanded(
                   child: SingleChildScrollView(
                     physics: const BouncingScrollPhysics(),
-                    padding: const EdgeInsets.fromLTRB(24, 12, 24, 32),
+                    padding: EdgeInsets.fromLTRB(
+                      24,
+                      12,
+                      24,
+                      bottomInteractionPadding,
+                    ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
