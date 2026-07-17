@@ -9,7 +9,6 @@ import 'package:go_router/go_router.dart';
 import 'package:xene_app/src/platform/auth_url_cleanup_stub.dart'
     if (dart.library.html) 'package:xene_app/src/platform/auth_url_cleanup_web.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:lottie/lottie.dart';
 import 'package:device_preview_plus/device_preview_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -31,6 +30,7 @@ import 'package:xene_app/src/screens/party_screen.dart';
 import 'package:xene_app/src/screens/settings_screen.dart';
 import 'package:xene_app/src/widgets/xene_header.dart';
 import 'package:xene_app/src/layout/root_shell.dart';
+import 'package:xene_app/src/widgets/launch_splash.dart';
 import 'package:xene_app/src/sandbox/sandbox_preview.dart';
 import 'package:xene_app/src/sandbox/av_sphere_sandbox.dart';
 import 'package:xene_app/src/sandbox/av_stream_test.dart';
@@ -359,7 +359,7 @@ class _InnerPageLayout extends StatelessWidget {
 /// [_router]'s redirect). Kept outside the shell so RootShell's authenticated
 /// providers never build against a null session.
 ///
-/// Renders the SAME black + LoadingLottie visual as [LoadingOverlay] so the
+/// Renders the same black + launch splash visual as [LoadingOverlay] so the
 /// no-session wait is seamless — the user just sees the normal branded loader a
 /// beat longer, then the app, not a separate spinner. LoadingOverlay itself
 /// can't cover this window: it lives inside RootShell and watches feedProvider,
@@ -369,18 +369,7 @@ class _SessionGateScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Center(
-        child: Lottie.asset(
-          'assets/animations/LoadingLottie.json',
-          width: 140,
-          height: 140,
-          repeat: true,
-          fit: BoxFit.contain,
-        ),
-      ),
-    );
+    return Scaffold(backgroundColor: Colors.black, body: const LaunchSplash());
   }
 }
 

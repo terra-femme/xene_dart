@@ -11,6 +11,9 @@ class SoundCloudEmbed extends StatelessWidget {
     required this.trackId,
     this.isVisual = false,
     this.artworkUrl,
+    this.title,
+    this.artistName,
+    this.durationSeconds,
   });
 
   final String trackId;
@@ -18,6 +21,9 @@ class SoundCloudEmbed extends StatelessWidget {
 
   // Accepted for facade-signature parity with the native embed.
   final String? artworkUrl;
+  final String? title;
+  final String? artistName;
+  final int? durationSeconds;
 
   @override
   Widget build(BuildContext context) {

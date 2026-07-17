@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:xene_domain/xene_domain.dart';
 
+import '../platform/now_playing_metadata.dart';
 import 'history_provider.dart';
 
 enum ActivePlatform { none, soundcloud, youtube }
@@ -103,6 +106,7 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
       activePlatform: platform,
       isVisible: shouldMountImmediately,
     );
+    unawaited(NowPlayingMetadataBridge.update(item.toNowPlayingMetadata()));
 
     if (!shouldMountImmediately) {
       // Cascade Delay: Wait for the modal to slide down ~90% (approx 350ms)
@@ -118,7 +122,9 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     // For now, we only use just_audio if we have a direct streamUrl.
     String? streamUrl = item.mediaUrl;
 
-    if (streamUrl != null && streamUrl.isNotEmpty) {
+    if (platform != ActivePlatform.soundcloud &&
+        streamUrl != null &&
+        streamUrl.isNotEmpty) {
       try {
         await _audioPlayer.setUrl(streamUrl);
         await _audioPlayer.play();
@@ -130,6 +136,7 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
 
   void stopAndHide() {
     _audioPlayer.stop();
+    unawaited(NowPlayingMetadataBridge.clear());
     state = state.copyWith(
       isVisible: false,
       activePlatform: ActivePlatform.none,

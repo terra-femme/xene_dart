@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:xene_domain/xene_domain.dart';
 
@@ -37,15 +38,47 @@ class SavedNotifier extends StateNotifier<List<SavedItem>> {
 
   Future<void> bookmark(QueueItem item) async {
     if (_isAnon) return;
+    if (matchForUrl(item.externalUrl) != null) return;
+
+    final now = DateTime.now();
+    final optimisticItem = SavedItem(
+      id: 'pending_${item.platform}_${item.externalUrl.hashCode}_${now.microsecondsSinceEpoch}',
+      platform: item.platform,
+      externalUrl: item.externalUrl,
+      savedAt: now,
+      expiresAt: now.add(const Duration(days: 31)),
+      trackId: item.trackId,
+      title: item.title,
+      artistName: item.artistName,
+      artworkUrl: item.artworkUrl,
+      durationSeconds: item.durationSeconds,
+    );
+    final previous = state;
+    state = [optimisticItem, ...state];
+
     try {
       final resp = await _dio.post<Map<String, dynamic>>(
         '/user/saved',
         data: item.toPostBody(),
       );
       final saved = SavedItem.fromJson(resp.data!);
-      state = [saved, ...state.where((s) => s.id != saved.id)];
+      state = [
+        saved,
+        ...state.where(
+          (s) =>
+              s.id != saved.id &&
+              _bookmarkUrlKey(s.externalUrl) !=
+                  _bookmarkUrlKey(saved.externalUrl),
+        ),
+      ];
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 409) {
+        await _load();
+        return;
+      }
+      state = previous;
     } catch (_) {
-      // 409 = already saved — silently ignore
+      state = previous;
     }
   }
 

@@ -56,14 +56,15 @@
     hapticBridge ? 'native-bridge' : (navigatorVibrate ? 'navigator.vibrate' : 'none'),
     'nativeIos=' + isNativeIosHost
   );
-  /** @param {number} level */
-  function fireHaptic(level) {
+  /** @param {number} level @param {boolean=} mirror */
+  function fireHaptic(level, mirror) {
     const bridge = getHapticBridge();
     if (bridge) {
       bridge.postMessage(level > 0.75 ? 'heavy' : level > 0.5 ? 'medium' : 'light');
     } else if (!isNativeIosHost && navigator.vibrate) {
       navigator.vibrate(Math.round(8 + Math.min(1, level) * 32)); // 8-40ms
     }
+    if (mirror === false) return;
     pulseHapticIndicator(level); // visual mirror — SEE the tap timing where you can't feel it (desktop/iOS web)
   }
 
@@ -72,32 +73,39 @@
   const hapticDot = document.createElement('div');
   Object.assign(hapticDot.style, {
     position: 'fixed', right: '18px', top: 'calc(env(safe-area-inset-top, 0px) + 72px)',
-    transform: 'scale(0.7)', width: '28px', height: '28px', borderRadius: '50%',
+    transform: 'scale(0.7)', width: '34px', height: '34px', borderRadius: '50%',
     background: '#8fe6c2', opacity: '0.22', pointerEvents: 'none', zIndex: '100000',
-    border: '1px solid rgba(255,255,255,0.75)',
+    border: '1px solid rgba(255,255,255,0.85)', outline: '1px solid rgba(0,0,0,0.75)',
   });
   const hapticLbl = document.createElement('div');
   Object.assign(hapticLbl.style, {
-    position: 'fixed', right: '15px', top: 'calc(env(safe-area-inset-top, 0px) + 106px)',
+    position: 'fixed', right: '12px', top: 'calc(env(safe-area-inset-top, 0px) + 112px)',
     font: '9px ui-monospace, Menlo, monospace', letterSpacing: '0.18em',
     color: 'rgba(255,255,255,0.72)', pointerEvents: 'none', zIndex: '100000',
   });
-  hapticLbl.textContent = 'HAPTIC';
+  let hapticPulseCount = 0;
+  let hapticFadeTimer = 0;
+  hapticLbl.textContent = 'HAPTIC 0';
   document.body.appendChild(hapticDot);
   document.body.appendChild(hapticLbl);
   /** @param {number} level */
   function pulseHapticIndicator(level) {
     const lvl = Math.min(1, Math.max(0, level));
     const color = lvl > 0.75 ? '#ff5a7a' : lvl > 0.5 ? '#ffb14a' : '#8fe6c2';
+    hapticPulseCount++;
+    hapticLbl.textContent = 'HAPTIC ' + hapticPulseCount;
+    window.clearTimeout(hapticFadeTimer);
     hapticDot.style.transition = 'none';
     hapticDot.style.background = color;
-    hapticDot.style.boxShadow = '0 0 18px ' + color;
+    hapticDot.style.boxShadow = '0 0 24px ' + color + ', 0 0 2px rgba(255,255,255,0.9) inset';
     hapticDot.style.opacity = '1';
     hapticDot.style.transform = 'scale(' + (0.9 + lvl * 1.2) + ')';
     void hapticDot.offsetWidth; // reflow so the fade re-triggers on every hit
-    hapticDot.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
-    hapticDot.style.opacity = '0.22';
-    hapticDot.style.transform = 'scale(0.7)';
+    hapticFadeTimer = window.setTimeout(() => {
+      hapticDot.style.transition = 'opacity 0.24s ease, transform 0.24s ease';
+      hapticDot.style.opacity = '0.22';
+      hapticDot.style.transform = 'scale(0.7)';
+    }, 90);
   }
   let hapticsOn = hapticBridge || (!isNativeIosHost && navigatorVibrate);
   // Drums-only haptic test: mirror the center wire/noise ball's drum drive.
@@ -611,7 +619,8 @@
     const lines = dbgOrder.map(([key, tag]) => {
       const s = engine.signals[key] || {};
       const r = s.react || 0;
-      return `${tag} ${bar10(r)} ${(r * 100).toFixed(0).padStart(3)}`;
+      const hit = key === 'drums' ? ` h${((s.hit || 0) * 100).toFixed(0).padStart(3)}` : '';
+      return `${tag} ${bar10(r)} ${(r * 100).toFixed(0).padStart(3)}${hit}`;
     });
     // live layout scale (mirrors scene.js resize()): tells us exactly what the
     // app is drawing the organism at — 0.72 (mobile) or 1.0 (desktop).
@@ -655,9 +664,10 @@
       console.log('[haptics] native bridge attached late');
     }
 
-    // Drums-only haptic onset. This tracks the same raw drums.react that drives
-    // the center wire/noise ball in scene.js.
-    const drive = (engine.signals.drums && engine.signals.drums.react) || 0;
+    // Drums-only haptic onset. `hit` is the raw per-frame transient; `react`
+    // is smoothed for visuals and can stay high long after a drum attack.
+    const drumSignal = engine.signals.drums || {};
+    const drive = drumSignal.hit || 0;
     const rising = drive - hapticGate.prev;
     const enoughGap = now - hapticGate.lastMs >= HAPTIC_MIN_GAP_MS;
     if (playing && hapticGate.armed && enoughGap &&
@@ -671,7 +681,7 @@
         console.log('[haptics] drum hit', 'drive=' + drive.toFixed(3), 'rise=' + rising.toFixed(3));
       }
       if (hapticsOn) {
-        fireHaptic(hapticLevel);
+        fireHaptic(hapticLevel, false);
       }
     } else if (drive < HAPTIC_OFF_THRESHOLD || !playing) {
       hapticGate.armed = true;

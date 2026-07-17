@@ -4,11 +4,13 @@ import 'package:xene_app/src/layout/xene_layout_metrics.dart';
 import 'package:xene_app/src/providers/accessibility_provider.dart';
 import 'package:xene_app/src/layout/xene_responsive_debug.dart';
 import 'package:xene_app/src/providers/auth_provider.dart';
+import 'package:xene_app/src/providers/nav_swipe_provider.dart';
 import 'package:xene_app/src/providers/player_provider.dart';
 import 'package:xene_app/src/providers/saved_provider.dart';
 import 'package:xene_app/src/widgets/auth_gate_sheet.dart';
 import 'package:xene_app/src/widgets/soundcloud_embed.dart';
 import 'package:xene_app/src/widgets/youtube_embed.dart';
+import 'package:xene_domain/xene_domain.dart';
 
 class LogoPipPlayer extends ConsumerStatefulWidget {
   const LogoPipPlayer({super.key, this.metrics});
@@ -63,6 +65,7 @@ class _LogoPipPlayerState extends ConsumerState<LogoPipPlayer>
   }
 
   void _handleDragEnd(DragEndDetails details) {
+    ref.read(navSwipeBlockedProvider.notifier).state = false;
     final isLandscape =
         MediaQuery.of(context).orientation == Orientation.landscape;
 
@@ -78,9 +81,15 @@ class _LogoPipPlayerState extends ConsumerState<LogoPipPlayer>
     }
   }
 
-  void _close() async {
-    if (_entryController.isAnimating) return;
-    await _entryController.reverse();
+  void _handleDragCancel() {
+    ref.read(navSwipeBlockedProvider.notifier).state = false;
+    setState(() => _dragOffset = 0);
+  }
+
+  void _close() {
+    ref.read(navSwipeBlockedProvider.notifier).state = false;
+    _entryController.stop();
+    _entryController.value = 0.0;
     ref.read(playerProvider.notifier).stopAndHide();
   }
 
@@ -144,6 +153,10 @@ class _LogoPipPlayerState extends ConsumerState<LogoPipPlayer>
     if (!playerState.isVisible || currentTrack == null) {
       return const SizedBox.shrink();
     }
+    final premiereLabel = _premiereLabel(currentTrack);
+    final isPremierePreview =
+        playerState.activePlatform == ActivePlatform.youtube &&
+        premiereLabel != null;
 
     // Constants
     const double sheetWidth = 175.0;
@@ -285,6 +298,41 @@ class _LogoPipPlayerState extends ConsumerState<LogoPipPlayer>
                           ],
                         ),
                       ),
+                      if (premiereLabel != null && !isPremierePreview)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 5,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(
+                                0xFFFF0000,
+                              ).withValues(alpha: isLandscape ? 0.10 : 0.18),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(
+                                color: const Color(
+                                  0xFFFF0000,
+                                ).withValues(alpha: 0.34),
+                              ),
+                            ),
+                            child: Text(
+                              premiereLabel,
+                              textAlign: TextAlign.center,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: isLandscape
+                                    ? const Color(0xFFB00000)
+                                    : const Color(0xFFFF9A9A),
+                                fontSize: 9,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 0.4,
+                              ),
+                            ),
+                          ),
+                        ),
 
                       // Player Well
                       Expanded(
@@ -309,14 +357,28 @@ class _LogoPipPlayerState extends ConsumerState<LogoPipPlayer>
                                     ),
                                     trackId: currentTrack.id,
                                     isVisual: true,
+                                    artworkUrl: currentTrack.artworkUrl,
+                                    title: currentTrack.title,
+                                    artistName: currentTrack.artistName,
+                                    durationSeconds:
+                                        currentTrack.durationSeconds,
                                   ),
-                                  ActivePlatform.youtube => YouTubeEmbed(
-                                    key: ValueKey(
-                                      'pip-youtube-${currentTrack.id}-${currentTrack.externalUrl}',
-                                    ),
-                                    videoId: currentTrack.id,
-                                    externalUrl: currentTrack.externalUrl,
-                                  ),
+                                  ActivePlatform.youtube =>
+                                    isPremierePreview
+                                        ? _PremiereThumbnailPreview(
+                                            item: currentTrack,
+                                            label: premiereLabel,
+                                            isLandscape: isLandscape,
+                                          )
+                                        : YouTubeEmbed(
+                                            key: ValueKey(
+                                              'pip-youtube-${currentTrack.id}-${currentTrack.externalUrl}',
+                                            ),
+                                            videoId: currentTrack.id,
+                                            externalUrl:
+                                                currentTrack.externalUrl,
+                                            artworkUrl: currentTrack.artworkUrl,
+                                          ),
                                   ActivePlatform.none =>
                                     const SizedBox.shrink(),
                                 },
@@ -341,7 +403,12 @@ class _LogoPipPlayerState extends ConsumerState<LogoPipPlayer>
                       child: GestureDetector(
                         behavior: HitTestBehavior.opaque,
                         onHorizontalDragUpdate: _handleDragUpdate,
+                        onHorizontalDragStart: (_) {
+                          ref.read(navSwipeBlockedProvider.notifier).state =
+                              true;
+                        },
                         onHorizontalDragEnd: _handleDragEnd,
+                        onHorizontalDragCancel: _handleDragCancel,
                         child: Align(
                           alignment: isLandscape
                               ? Alignment.centerLeft
@@ -369,4 +436,152 @@ class _LogoPipPlayerState extends ConsumerState<LogoPipPlayer>
       ),
     );
   }
+}
+
+class _PremiereThumbnailPreview extends StatelessWidget {
+  const _PremiereThumbnailPreview({
+    required this.item,
+    required this.label,
+    required this.isLandscape,
+  });
+
+  final FeedItem item;
+  final String label;
+  final bool isLandscape;
+
+  @override
+  Widget build(BuildContext context) {
+    final artworkUrl = item.artworkUrl;
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        if (artworkUrl != null && artworkUrl.isNotEmpty)
+          Image.network(
+            artworkUrl,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => const _PremiereThumbnailFallback(),
+          )
+        else
+          const _PremiereThumbnailFallback(),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Colors.black.withValues(alpha: 0.10),
+                Colors.black.withValues(alpha: 0.78),
+              ],
+            ),
+          ),
+        ),
+        Positioned(
+          left: 10,
+          right: 10,
+          bottom: 10,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFF0000).withValues(alpha: 0.86),
+                  borderRadius: BorderRadius.circular(5),
+                ),
+                child: Text(
+                  label,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 9,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+              ),
+              if (item.title?.trim().isNotEmpty == true) ...[
+                const SizedBox(height: 7),
+                Text(
+                  item.title!.trim(),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: isLandscape ? 10 : 11,
+                    fontWeight: FontWeight.w700,
+                    height: 1.1,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _PremiereThumbnailFallback extends StatelessWidget {
+  const _PremiereThumbnailFallback();
+
+  @override
+  Widget build(BuildContext context) {
+    return const ColoredBox(
+      color: Color(0xFF120808),
+      child: Center(
+        child: Icon(Icons.event_available, color: Color(0xFFFF6B6B), size: 32),
+      ),
+    );
+  }
+}
+
+String? _premiereLabel(FeedItem item) {
+  if (item.platform.toLowerCase() != 'youtube') return null;
+  final date = _upcomingDate(item);
+  if (date == null) return null;
+  return 'PREMIERES ${_formatShortDateTime(date)}';
+}
+
+DateTime? _upcomingDate(FeedItem item) {
+  final now = DateTime.now();
+  final releaseAt = item.releaseAt?.toLocal();
+  if (item.isUpcoming && releaseAt != null) return releaseAt;
+  if (releaseAt != null && releaseAt.isAfter(now)) return releaseAt;
+  final publishedAt = item.publishedAt.toLocal();
+  if (publishedAt.isAfter(now)) return publishedAt;
+  return _premiereDateFromText(item.title) ?? _premiereDateFromText(item.body);
+}
+
+DateTime? _premiereDateFromText(String? value) {
+  if (value == null || value.trim().isEmpty) return null;
+  final match = RegExp(
+    r'premieres?\s+(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})(?:,?\s+(\d{1,2})(?::(\d{2}))?\s*([ap]\.?m\.?))?',
+    caseSensitive: false,
+  ).firstMatch(value);
+  if (match == null) return null;
+
+  final month = int.tryParse(match.group(1)!);
+  final day = int.tryParse(match.group(2)!);
+  var year = int.tryParse(match.group(3)!);
+  if (month == null || day == null || year == null) return null;
+  if (year < 100) year += 2000;
+
+  var hour = int.tryParse(match.group(4) ?? '0') ?? 0;
+  final minute = int.tryParse(match.group(5) ?? '0') ?? 0;
+  final period = match.group(6)?.toLowerCase().replaceAll('.', '');
+  if (period == 'pm' && hour < 12) hour += 12;
+  if (period == 'am' && hour == 12) hour = 0;
+
+  final parsed = DateTime(year, month, day, hour, minute);
+  return parsed.isAfter(DateTime.now()) ? parsed : null;
+}
+
+String _formatShortDateTime(DateTime value) {
+  final local = value.toLocal();
+  final hour12 = local.hour % 12 == 0 ? 12 : local.hour % 12;
+  final minute = local.minute.toString().padLeft(2, '0');
+  final period = local.hour >= 12 ? 'PM' : 'AM';
+  return '${local.month}.${local.day}.${local.year % 100} $hour12:$minute $period';
 }

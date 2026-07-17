@@ -1,7 +1,10 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:xene_domain/xene_domain.dart';
+
+import '../providers/player_provider.dart';
 
 /// A deliberately shallow feed card for low-end devices (see
 /// [FeedRenderMode.lite]).
@@ -41,6 +44,9 @@ class XeneLiteFeedCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final url = item.artworkUrl ?? '';
+    final platform = item.platform.toLowerCase();
+    final directPlay = platform == 'soundcloud' || platform == 'youtube';
+    final premiereLabel = _premiereLabel(item);
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
@@ -51,39 +57,40 @@ class XeneLiteFeedCard extends StatelessWidget {
           children: [
             ClipRRect(
               borderRadius: BorderRadius.circular(6),
-              child: url.isEmpty
-                  ? Container(
-                      width: _thumb,
-                      height: _thumb,
-                      color: const Color(0xFFEDEDED),
-                      child: const Icon(
-                        Icons.music_note,
-                        size: 22,
-                        color: Colors.black26,
-                      ),
-                    )
-                  : CachedNetworkImage(
-                      imageUrl: url,
-                      width: _thumb,
-                      height: _thumb,
-                      fit: BoxFit.cover,
-                      memCacheWidth: 120,
-                      placeholder: (_, __) => Container(
-                        width: _thumb,
-                        height: _thumb,
-                        color: const Color(0xFFEDEDED),
-                      ),
-                      errorWidget: (_, __, ___) => Container(
-                        width: _thumb,
-                        height: _thumb,
-                        color: const Color(0xFFEDEDED),
-                        child: const Icon(
-                          Icons.broken_image,
-                          size: 20,
-                          color: Colors.black26,
-                        ),
-                      ),
-                    ),
+              child: SizedBox(
+                width: _thumb,
+                height: _thumb,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    url.isEmpty
+                        ? Container(
+                            color: const Color(0xFFEDEDED),
+                            child: const Icon(
+                              Icons.music_note,
+                              size: 22,
+                              color: Colors.black26,
+                            ),
+                          )
+                        : CachedNetworkImage(
+                            imageUrl: url,
+                            fit: BoxFit.cover,
+                            memCacheWidth: 120,
+                            placeholder: (_, __) =>
+                                Container(color: const Color(0xFFEDEDED)),
+                            errorWidget: (_, __, ___) => Container(
+                              color: const Color(0xFFEDEDED),
+                              child: const Icon(
+                                Icons.broken_image,
+                                size: 20,
+                                color: Colors.black26,
+                              ),
+                            ),
+                          ),
+                    if (directPlay) _LiteThumbnailPlayButton(item: item),
+                  ],
+                ),
+              ),
             ),
             const SizedBox(width: 10),
             Expanded(
@@ -111,10 +118,87 @@ class XeneLiteFeedCard extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
+                  if (premiereLabel != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      premiereLabel,
+                      style: GoogleFonts.dmMono(
+                        fontSize: 8,
+                        fontWeight: FontWeight.w700,
+                        color: const Color(0xFFFF4444),
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
                 ],
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+String? _premiereLabel(FeedItem item) {
+  if (item.platform.toLowerCase() != 'youtube') return null;
+  final date = _upcomingDate(item);
+  if (date == null) return null;
+  return 'PREMIERES ${_formatShortDateTime(date)}';
+}
+
+DateTime? _upcomingDate(FeedItem item) {
+  final now = DateTime.now();
+  final releaseAt = item.releaseAt?.toLocal();
+  if (item.isUpcoming && releaseAt != null) return releaseAt;
+  if (releaseAt != null && releaseAt.isAfter(now)) return releaseAt;
+  final publishedAt = item.publishedAt.toLocal();
+  if (publishedAt.isAfter(now)) return publishedAt;
+  return null;
+}
+
+String _formatShortDateTime(DateTime value) {
+  final local = value.toLocal();
+  final hour12 = local.hour % 12 == 0 ? 12 : local.hour % 12;
+  final minute = local.minute.toString().padLeft(2, '0');
+  final period = local.hour >= 12 ? 'PM' : 'AM';
+  return '${local.month}.${local.day}.${local.year % 100} $hour12:$minute $period';
+}
+
+class _LiteThumbnailPlayButton extends ConsumerWidget {
+  const _LiteThumbnailPlayButton({required this.item});
+
+  final FeedItem item;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Center(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => ref.read(playerProvider.notifier).playTrack(item),
+        child: SizedBox(
+          width: 44,
+          height: 44,
+          child: Center(
+            child: Container(
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.22),
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.26),
+                  width: 0.8,
+                ),
+              ),
+              child: Icon(
+                Icons.play_arrow_rounded,
+                color: Colors.white.withValues(alpha: 0.88),
+                size: 19,
+              ),
+            ),
+          ),
         ),
       ),
     );

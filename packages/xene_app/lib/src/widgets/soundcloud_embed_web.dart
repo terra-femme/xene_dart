@@ -86,6 +86,9 @@ class SoundCloudEmbed extends StatefulWidget {
     required this.trackId,
     this.isVisual = false,
     this.artworkUrl,
+    this.title,
+    this.artistName,
+    this.durationSeconds,
   });
 
   final String trackId;
@@ -94,6 +97,9 @@ class SoundCloudEmbed extends StatefulWidget {
   // Accepted for facade-signature parity with the native embed (which uses it
   // for the artwork fallback). Unused on web, where the iframe renders directly.
   final String? artworkUrl;
+  final String? title;
+  final String? artistName;
+  final int? durationSeconds;
 
   @override
   State<SoundCloudEmbed> createState() => _SoundCloudEmbedState();

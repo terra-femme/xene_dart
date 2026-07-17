@@ -104,6 +104,7 @@ class StemEngine {
     for (const key of Object.keys(SOURCES)) {
       this.signals[key] = {
         level: 0,
+        hit: 0,
         react: 0,
         reactSlow: 0,
         peak: 0.0001,
@@ -431,7 +432,7 @@ class StemEngine {
     this._duration = 0;
     this.chart = null;
     for (const sig of Object.values(this.signals)) {
-      sig.level = 0; sig.react = 0; sig.reactSlow = 0;
+      sig.level = 0; sig.hit = 0; sig.react = 0; sig.reactSlow = 0;
       sig.peak = 0.0001; sig.baseline = 0; sig.prevLevel = 0;
     }
     this.keyEnergies.fill(0);
@@ -477,6 +478,7 @@ class StemEngine {
    */
   _updateSignal(analyser, sig, type) {
     if (!analyser || !this._playing) {
+      sig.hit = 0;
       sig.react *= this.decay;
       sig.reactSlow *= Math.min(0.995, this.decay + 0.04);
       sig.level *= 0.85;
@@ -489,6 +491,7 @@ class StemEngine {
     sig.level = rms;
 
     if (rms < this.noiseGate) {
+      sig.hit = 0;
       sig.prevLevel = 0;
       sig.react *= this.decay;
       sig.reactSlow *= Math.min(0.995, this.decay + 0.04);
@@ -508,6 +511,7 @@ class StemEngine {
     }
     sig.prevLevel = norm;
     drive = Math.max(0, Math.min(1, drive));
+    sig.hit = drive;
 
     if (drive > sig.react) sig.react += (drive - sig.react) * this.attack;
     else sig.react *= this.decay;
@@ -563,6 +567,7 @@ class StemEngine {
           continue;
         }
         // not charted (or paused) → decay exactly like a missing analyser
+        sig.hit = 0;
         sig.react *= this.decay;
         sig.reactSlow *= Math.min(0.995, this.decay + 0.04);
         sig.level *= 0.85;
@@ -571,6 +576,7 @@ class StemEngine {
       sig.react = this._sampleChart(ch.react, t, chart.rate);
       sig.reactSlow = this._sampleChart(ch.reactSlow, t, chart.rate);
       sig.level = this._sampleChart(ch.level, t, chart.rate);
+      sig.hit = 0;
       sig.peak = 1.0; // charted levels are already normalised for the meters
     }
 
