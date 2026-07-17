@@ -302,7 +302,7 @@ class _SoundCloudArtworkPreview extends StatelessWidget {
       children: [
         SoundCloudEmbed(
           key: ValueKey('soundcloud-${item.id}-${item.externalUrl}'),
-          trackId: item.externalUrl,
+          trackId: item.trackId ?? item.externalUrl,
           isVisual: false,
           artworkUrl: item.artworkUrl,
           title: item.title,

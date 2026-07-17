@@ -352,7 +352,7 @@ class _LogoPipPlayerState extends ConsumerState<LogoPipPlayer>
                                     key: ValueKey(
                                       'pip-soundcloud-${currentTrack.id}-${currentTrack.externalUrl}',
                                     ),
-                                    trackId: currentTrack.externalUrl,
+                                    trackId: currentTrack.id,
                                     isVisual: true,
                                     artworkUrl: currentTrack.artworkUrl,
                                     title: currentTrack.title,
@@ -441,7 +441,31 @@ DateTime? _upcomingDate(FeedItem item) {
   if (releaseAt != null && releaseAt.isAfter(now)) return releaseAt;
   final publishedAt = item.publishedAt.toLocal();
   if (publishedAt.isAfter(now)) return publishedAt;
-  return null;
+  return _premiereDateFromText(item.title) ?? _premiereDateFromText(item.body);
+}
+
+DateTime? _premiereDateFromText(String? value) {
+  if (value == null || value.trim().isEmpty) return null;
+  final match = RegExp(
+    r'premieres?\s+(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})(?:,?\s+(\d{1,2})(?::(\d{2}))?\s*([ap]\.?m\.?))?',
+    caseSensitive: false,
+  ).firstMatch(value);
+  if (match == null) return null;
+
+  final month = int.tryParse(match.group(1)!);
+  final day = int.tryParse(match.group(2)!);
+  var year = int.tryParse(match.group(3)!);
+  if (month == null || day == null || year == null) return null;
+  if (year < 100) year += 2000;
+
+  var hour = int.tryParse(match.group(4) ?? '0') ?? 0;
+  final minute = int.tryParse(match.group(5) ?? '0') ?? 0;
+  final period = match.group(6)?.toLowerCase().replaceAll('.', '');
+  if (period == 'pm' && hour < 12) hour += 12;
+  if (period == 'am' && hour == 12) hour = 0;
+
+  final parsed = DateTime(year, month, day, hour, minute);
+  return parsed.isAfter(DateTime.now()) ? parsed : null;
 }
 
 String _formatShortDateTime(DateTime value) {
