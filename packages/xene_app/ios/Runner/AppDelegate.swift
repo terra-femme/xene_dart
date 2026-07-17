@@ -12,6 +12,7 @@ import UIKit
   private var nowPlayingArtworkTask: URLSessionDataTask?
   private var nowPlayingGeneration = 0
   private var lastXeneNowPlayingInfo: [String: Any]?
+  private var nowPlayingAudioSessionConfigured = false
 
   override func application(
     _ application: UIApplication,
@@ -130,12 +131,21 @@ import UIKit
     let generation = nowPlayingGeneration
     nowPlayingArtworkTask?.cancel()
 
-    do {
-      try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [])
-      try AVAudioSession.sharedInstance().setActive(true)
-    } catch {
-      print("[xeneNowPlaying] audio session activation failed: \(error)")
+    // Configure the shared audio session ONCE per app run. Metadata updates
+    // arrive every ~15s while a track plays; re-running setCategory/setActive
+    // on each update interrupts WKWebView's own media session and killed
+    // SoundCloud playback at exactly the 15s throttle boundary.
+    if !nowPlayingAudioSessionConfigured {
+      do {
+        try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [])
+        try AVAudioSession.sharedInstance().setActive(true)
+        nowPlayingAudioSessionConfigured = true
+        print("[xeneNowPlaying] audio session configured (once per run)")
+      } catch {
+        print("[xeneNowPlaying] audio session activation failed: \(error)")
+      }
     }
+    // Idempotent and undone by clearXeneNowPlaying, so re-arm on every update.
     UIApplication.shared.beginReceivingRemoteControlEvents()
 
     let title = nonEmptyString(args["title"]) ?? "Unknown Track"
