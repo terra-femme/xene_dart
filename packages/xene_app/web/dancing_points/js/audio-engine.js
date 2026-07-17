@@ -143,9 +143,9 @@ class StemEngine {
     // hats — instead of firing on every transient in the stem. Built lazily in
     // _ensureGraph (needs ctx.sampleRate); polled from app.js at ~120Hz,
     // independent of the render loop, so onset timing isn't quantised to the
-    // native host's 30fps frame clamp. NOTE: live-stem mode only — chart mode
-    // has no drums stem, so charted playlist tracks produce no drum haptics
-    // until onsets are baked into the chart (follow-up).
+    // native host's 30fps frame clamp. Works in BOTH live-DSP and chart mode:
+    // playlist.js keeps the drums stem raw+connected even when a chart drives
+    // the visuals, specifically so haptics stay live. See pollDrumOnset.
     /** @type {any} */ this._drumOnset = null;
     /** @type {Uint8Array|null} */ this._drumFreq = null;
 
@@ -580,7 +580,12 @@ class StemEngine {
     const st = this._drumOnset;
     const an = this.stemAnalyser.drums;
     const freq = this._drumFreq;
-    if (!st || !an || !freq || !this._playing || this.chart) return null;
+    // NOTE: chart mode does NOT disqualify this. playlist.js deliberately
+    // keeps the raw drums stem downloaded and connected even when a chart
+    // drives the visuals (see loadTrack's fileEntries filter) specifically
+    // so live drum haptics keep working on charted tracks. Only bail when
+    // there is truly no analyser/signal to read.
+    if (!st || !an || !freq || !this._playing) return null;
     an.getByteFrequencyData(freq);
 
     /** @type {'kick'|'snare'|'hat'|null} */ let bestKind = null;
