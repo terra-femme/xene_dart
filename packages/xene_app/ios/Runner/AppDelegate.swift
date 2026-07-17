@@ -1,5 +1,4 @@
 import Flutter
-import AudioToolbox
 import AVFoundation
 import MediaPlayer
 import UIKit
@@ -8,7 +7,6 @@ import UIKit
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private var xeneNativeHapticsChannel: FlutterMethodChannel?
   private var xeneNowPlayingChannel: FlutterMethodChannel?
-  private var lastXeneSystemVibrationAt: CFAbsoluteTime = 0
   private var nowPlayingArtworkTask: URLSessionDataTask?
   private var nowPlayingGeneration = 0
   private var lastXeneNowPlayingInfo: [String: Any]?
@@ -81,7 +79,8 @@ import UIKit
 
       let args = call.arguments as? [String: Any]
       let kind = args?["kind"] as? String ?? "medium"
-      self?.fireXeneNativeImpact(kind: kind)
+      let intensity = args?["intensity"] as? Double
+      self?.fireXeneNativeImpact(kind: kind, intensity: intensity)
       result(true)
     }
     xeneNativeHapticsChannel = channel
@@ -228,29 +227,50 @@ import UIKit
     return nil
   }
 
-  private func fireXeneNativeImpact(kind: String) {
+  // One prepared generator per style, reused across hits. Recreating a
+  // generator per impact adds latency variance the hand feels as sloppy
+  // timing; prepare() after each hit keeps the Taptic Engine warm.
+  private var xeneImpactGenerators: [UIImpactFeedbackGenerator.FeedbackStyle: UIImpactFeedbackGenerator] = [:]
+
+  private func xenePreparedGenerator(
+    _ style: UIImpactFeedbackGenerator.FeedbackStyle
+  ) -> UIImpactFeedbackGenerator {
+    if let generator = xeneImpactGenerators[style] { return generator }
+    let generator = UIImpactFeedbackGenerator(style: style)
+    generator.prepare()
+    xeneImpactGenerators[style] = generator
+    return generator
+  }
+
+  private func fireXeneNativeImpact(kind: String, intensity: Double? = nil) {
     DispatchQueue.main.async {
-      let generator: UIImpactFeedbackGenerator
-      if #available(iOS 13.0, *) {
-        generator = UIImpactFeedbackGenerator(style: kind == "light" ? .medium : .rigid)
-      } else {
-        generator = UIImpactFeedbackGenerator(style: kind == "light" ? .medium : .heavy)
+      // NOTE: no AudioServicesPlaySystemSound(kSystemSoundID_Vibrate) here.
+      // That system vibration is a ~400ms buzz — stacked on the crisp taps it
+      // smeared every drum hit into mush and made the rhythm feel random.
+      guard #available(iOS 13.0, *) else {
+        let style: UIImpactFeedbackGenerator.FeedbackStyle =
+          (kind == "kick" || kind == "heavy") ? .heavy : kind == "hat" || kind == "light" ? .light : .medium
+        self.xenePreparedGenerator(style).impactOccurred()
+        return
       }
 
+      // Drum voices get distinct characters (deep kick thud, crisp snare
+      // crack, feather hat tick); legacy UI kinds keep their old feel.
+      let style: UIImpactFeedbackGenerator.FeedbackStyle
+      let defaultIntensity: Double
+      switch kind {
+      case "kick": style = .heavy; defaultIntensity = 1.0
+      case "snare": style = .rigid; defaultIntensity = 0.85
+      case "hat": style = .light; defaultIntensity = 0.55
+      case "light": style = .medium; defaultIntensity = 0.9
+      case "heavy": style = .rigid; defaultIntensity = 1.0
+      default: style = .rigid; defaultIntensity = 0.9
+      }
+
+      let generator = self.xenePreparedGenerator(style)
+      let clamped = min(1.0, max(0.0, intensity ?? defaultIntensity))
+      generator.impactOccurred(intensity: CGFloat(clamped))
       generator.prepare()
-      if #available(iOS 13.0, *) {
-        generator.impactOccurred(intensity: kind == "heavy" ? 1.0 : 0.9)
-      } else {
-        generator.impactOccurred()
-      }
-
-      if kind != "light" {
-        let now = CFAbsoluteTimeGetCurrent()
-        if now - self.lastXeneSystemVibrationAt >= 0.18 {
-          self.lastXeneSystemVibrationAt = now
-          AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
-        }
-      }
     }
   }
 }

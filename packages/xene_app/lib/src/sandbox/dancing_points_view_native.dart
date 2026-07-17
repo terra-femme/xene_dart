@@ -29,8 +29,9 @@ class DancingPointsView extends StatefulWidget {
 }
 
 class _DancingPointsViewState extends State<DancingPointsView> {
-  static const MethodChannel _nativeHaptics =
-      MethodChannel('xene/native_haptics');
+  static const MethodChannel _nativeHaptics = MethodChannel(
+    'xene/native_haptics',
+  );
 
   WebViewController? _controller;
   bool _supported = true;
@@ -102,13 +103,31 @@ class _DancingPointsViewState extends State<DancingPointsView> {
       ..addJavaScriptChannel(
         'XeneHaptics',
         onMessageReceived: (JavaScriptMessage message) {
-          final kind = message.message;
+          // Two message shapes ride this channel:
+          //  - legacy plain kind string ('light'/'medium'/'heavy')
+          //  - drum-voice JSON {"kind":"kick"|"snare"|"hat","intensity":0..1}
+          final raw = message.message;
+          var kind = raw;
+          double? intensity;
+          if (raw.startsWith('{')) {
+            try {
+              final decoded = jsonDecode(raw) as Map<String, dynamic>;
+              kind = decoded['kind'] as String? ?? 'medium';
+              intensity = (decoded['intensity'] as num?)?.toDouble();
+            } catch (error) {
+              debugPrint('[dpWeb][haptic] bad payload "$raw": $error');
+              return;
+            }
+          }
           _hapticMessageCount += 1;
           if (_hapticMessageCount <= 16) {
-            debugPrint('[dpWeb][haptic] received $kind #$_hapticMessageCount');
+            debugPrint(
+              '[dpWeb][haptic] received $kind '
+              'intensity=$intensity #$_hapticMessageCount',
+            );
           }
           // Beat intensity → native impact. iOS drives the Taptic Engine here.
-          unawaited(_fireNativeHaptic(kind));
+          unawaited(_fireNativeHaptic(kind, intensity));
         },
       );
 
@@ -121,12 +140,12 @@ class _DancingPointsViewState extends State<DancingPointsView> {
     return controller;
   }
 
-  Future<void> _fireNativeHaptic(String kind) async {
+  Future<void> _fireNativeHaptic(String kind, double? intensity) async {
     if (defaultTargetPlatform == TargetPlatform.iOS) {
       try {
         final ok = await _nativeHaptics.invokeMethod<bool>(
           'impact',
-          <String, Object?>{'kind': kind},
+          <String, Object?>{'kind': kind, 'intensity': intensity},
         );
         if (_hapticMessageCount <= 16) {
           debugPrint('[dpWeb][haptic] native impact ok=$ok kind=$kind');
@@ -138,12 +157,15 @@ class _DancingPointsViewState extends State<DancingPointsView> {
     }
 
     switch (kind) {
+      case 'kick':
       case 'heavy':
         await HapticFeedback.heavyImpact();
         break;
+      case 'snare':
       case 'medium':
         await HapticFeedback.mediumImpact();
         break;
+      case 'hat':
       case 'light':
       default:
         await HapticFeedback.lightImpact();
@@ -210,7 +232,9 @@ class _DancingPointsViewState extends State<DancingPointsView> {
       'app.js',
     ];
     for (final script in scripts) {
-      final source = await rootBundle.loadString('web/dancing_points/js/$script');
+      final source = await rootBundle.loadString(
+        'web/dancing_points/js/$script',
+      );
       final escapedSource = source.replaceAll('</script>', '<\\/script>');
       html = html.replaceFirst(
         RegExp('<script src="js/$script(?:\\?[^"]*)?"></script>'),

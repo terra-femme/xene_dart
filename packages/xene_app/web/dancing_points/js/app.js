@@ -108,13 +108,31 @@
     }, 90);
   }
   let hapticsOn = hapticBridge || (!isNativeIosHost && navigatorVibrate);
-  // Drums-only haptic test: mirror the center wire/noise ball's drum drive.
-  // Bass resonance is a separate later pass once the drum feel is judged.
-  const HAPTIC_ON_THRESHOLD = 0.16;
-  const HAPTIC_OFF_THRESHOLD = 0.07;
-  const HAPTIC_ATTACK_DELTA = 0.018;
-  const HAPTIC_MIN_GAP_MS = 90;
-  const hapticGate = { prev: 0, armed: true, lastMs: -10000, count: 0 };
+
+  // Drum haptics: onset detection lives in the engine (pollDrumOnset — band-
+  // split kick/snare/hat with adaptive thresholds). Here each voice gets its
+  // own haptic character so a deaf listener feels the drum PATTERN the way a
+  // drummer's hands play it: kick = deep heavy thud, snare = crisp crack,
+  // hat = feather tick. Kind strings ride the existing XeneHaptics bridge.
+  const DRUM_HAPTIC = {
+    kick:  { indicator: 0.9,  vibrateMs: 24, baseIntensity: 0.85, intensitySpan: 0.15 },
+    snare: { indicator: 0.65, vibrateMs: 14, baseIntensity: 0.6,  intensitySpan: 0.3 },
+    hat:   { indicator: 0.35, vibrateMs: 7,  baseIntensity: 0.45, intensitySpan: 0.25 },
+  };
+  let drumHapticLogCount = 0;
+  /** @param {'kick'|'snare'|'hat'} kind @param {number} strength */
+  function fireDrumHaptic(kind, strength) {
+    const spec = DRUM_HAPTIC[kind];
+    const bridge = getHapticBridge();
+    if (bridge) {
+      bridge.postMessage(JSON.stringify({
+        kind,
+        intensity: Math.min(1, spec.baseIntensity + spec.intensitySpan * strength),
+      }));
+    } else if (!isNativeIosHost && navigator.vibrate) {
+      navigator.vibrate(spec.vibrateMs);
+    }
+  }
 
   const state = {
     source: 'vocals',
@@ -664,29 +682,8 @@
       console.log('[haptics] native bridge attached late');
     }
 
-    // Drums-only haptic onset. `hit` is the raw per-frame transient; `react`
-    // is smoothed for visuals and can stay high long after a drum attack.
-    const drumSignal = engine.signals.drums || {};
-    const drive = drumSignal.hit || 0;
-    const rising = drive - hapticGate.prev;
-    const enoughGap = now - hapticGate.lastMs >= HAPTIC_MIN_GAP_MS;
-    if (playing && hapticGate.armed && enoughGap &&
-        drive > HAPTIC_ON_THRESHOLD && rising > HAPTIC_ATTACK_DELTA) {
-      hapticGate.lastMs = now;
-      hapticGate.armed = false;
-      const hapticLevel = Math.min(1, Math.max(0.35, drive));
-      pulseHapticIndicator(hapticLevel);
-      hapticGate.count++;
-      if (hapticGate.count <= 12) {
-        console.log('[haptics] drum hit', 'drive=' + drive.toFixed(3), 'rise=' + rising.toFixed(3));
-      }
-      if (hapticsOn) {
-        fireHaptic(hapticLevel, false);
-      }
-    } else if (drive < HAPTIC_OFF_THRESHOLD || !playing) {
-      hapticGate.armed = true;
-    }
-    hapticGate.prev = drive;
+    // (Drum haptics moved to the dedicated 120Hz poll loop below — detecting
+    // onsets here quantised them to the native host's 30fps frame clamp.)
 
     // meters
     mLevel.style.width = Math.min(100, (engine.level / (engine.peak + 1e-5)) * 100) + '%';
@@ -721,4 +718,19 @@
   setTimeout(() => {
     if (rafCount < 2) setInterval(() => tick(performance.now()), 16);
   }, 250);
+
+  // ---------- drum haptic poll (accessibility core) ----------
+  // ~120Hz, independent of the render loop: the native host clamps rAF to
+  // 30fps, which quantised every drum tap to a 33ms grid — enough jitter to
+  // break rhythm perception. Reading the analyser here costs microseconds.
+  setInterval(() => {
+    const ev = engine.pollDrumOnset(performance.now());
+    if (!ev) return;
+    pulseHapticIndicator(DRUM_HAPTIC[ev.kind].indicator);
+    if (drumHapticLogCount < 12) {
+      drumHapticLogCount++;
+      console.log('[haptics]', ev.kind, 'strength=' + ev.strength.toFixed(2));
+    }
+    if (hapticsOn) fireDrumHaptic(ev.kind, ev.strength);
+  }, 8);
 })();
