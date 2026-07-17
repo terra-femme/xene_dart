@@ -154,6 +154,9 @@ class _LogoPipPlayerState extends ConsumerState<LogoPipPlayer>
       return const SizedBox.shrink();
     }
     final premiereLabel = _premiereLabel(currentTrack);
+    final isPremierePreview =
+        playerState.activePlatform == ActivePlatform.youtube &&
+        premiereLabel != null;
 
     // Constants
     const double sheetWidth = 175.0;
@@ -295,7 +298,7 @@ class _LogoPipPlayerState extends ConsumerState<LogoPipPlayer>
                           ],
                         ),
                       ),
-                      if (premiereLabel != null)
+                      if (premiereLabel != null && !isPremierePreview)
                         Padding(
                           padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
                           child: Container(
@@ -360,14 +363,22 @@ class _LogoPipPlayerState extends ConsumerState<LogoPipPlayer>
                                     durationSeconds:
                                         currentTrack.durationSeconds,
                                   ),
-                                  ActivePlatform.youtube => YouTubeEmbed(
-                                    key: ValueKey(
-                                      'pip-youtube-${currentTrack.id}-${currentTrack.externalUrl}',
-                                    ),
-                                    videoId: currentTrack.id,
-                                    externalUrl: currentTrack.externalUrl,
-                                    artworkUrl: currentTrack.artworkUrl,
-                                  ),
+                                  ActivePlatform.youtube =>
+                                    isPremierePreview
+                                        ? _PremiereThumbnailPreview(
+                                            item: currentTrack,
+                                            label: premiereLabel,
+                                            isLandscape: isLandscape,
+                                          )
+                                        : YouTubeEmbed(
+                                            key: ValueKey(
+                                              'pip-youtube-${currentTrack.id}-${currentTrack.externalUrl}',
+                                            ),
+                                            videoId: currentTrack.id,
+                                            externalUrl:
+                                                currentTrack.externalUrl,
+                                            artworkUrl: currentTrack.artworkUrl,
+                                          ),
                                   ActivePlatform.none =>
                                     const SizedBox.shrink(),
                                 },
@@ -422,6 +433,105 @@ class _LogoPipPlayerState extends ConsumerState<LogoPipPlayer>
             );
           },
         ),
+      ),
+    );
+  }
+}
+
+class _PremiereThumbnailPreview extends StatelessWidget {
+  const _PremiereThumbnailPreview({
+    required this.item,
+    required this.label,
+    required this.isLandscape,
+  });
+
+  final FeedItem item;
+  final String label;
+  final bool isLandscape;
+
+  @override
+  Widget build(BuildContext context) {
+    final artworkUrl = item.artworkUrl;
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        if (artworkUrl != null && artworkUrl.isNotEmpty)
+          Image.network(
+            artworkUrl,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => const _PremiereThumbnailFallback(),
+          )
+        else
+          const _PremiereThumbnailFallback(),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Colors.black.withValues(alpha: 0.10),
+                Colors.black.withValues(alpha: 0.78),
+              ],
+            ),
+          ),
+        ),
+        Positioned(
+          left: 10,
+          right: 10,
+          bottom: 10,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFF0000).withValues(alpha: 0.86),
+                  borderRadius: BorderRadius.circular(5),
+                ),
+                child: Text(
+                  label,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 9,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+              ),
+              if (item.title?.trim().isNotEmpty == true) ...[
+                const SizedBox(height: 7),
+                Text(
+                  item.title!.trim(),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: isLandscape ? 10 : 11,
+                    fontWeight: FontWeight.w700,
+                    height: 1.1,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _PremiereThumbnailFallback extends StatelessWidget {
+  const _PremiereThumbnailFallback();
+
+  @override
+  Widget build(BuildContext context) {
+    return const ColoredBox(
+      color: Color(0xFF120808),
+      child: Center(
+        child: Icon(Icons.event_available, color: Color(0xFFFF6B6B), size: 32),
       ),
     );
   }
