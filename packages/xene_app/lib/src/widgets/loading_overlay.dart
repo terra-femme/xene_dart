@@ -14,6 +14,8 @@ class LoadingOverlay extends ConsumerStatefulWidget {
 
 class _LoadingOverlayState extends ConsumerState<LoadingOverlay>
     with SingleTickerProviderStateMixin {
+  static const _fallbackFullSplashDuration = Duration(milliseconds: 5000);
+
   late final AnimationController _fade;
   late final Stopwatch _visibleStopwatch;
   bool _firstBuildLogged = false;
@@ -27,6 +29,7 @@ class _LoadingOverlayState extends ConsumerState<LoadingOverlay>
   bool _removed = false;
 
   Timer? _minimumTimer;
+  bool _primarySplashLoaded = false;
 
   @override
   void initState() {
@@ -39,17 +42,9 @@ class _LoadingOverlayState extends ConsumerState<LoadingOverlay>
       value: 1.0,
     );
 
-    // Guarantee at least 2500ms of Lottie playback.
-    // This absorbs the JIT cold-start (~300ms) and any HTTP JSON parse spike
-    // so neither event can interrupt the Lottie mid-animation.
-    _minimumTimer = Timer(const Duration(milliseconds: 2500), () {
-      _minimumElapsed = true;
-      debugPrint(
-        '[LoadingOverlay] minimum hold elapsed at '
-        't=${_visibleStopwatch.elapsedMilliseconds}ms',
-      );
-      _checkRevealConditions();
-    });
+    // Safety fallback only. The normal path is set by LaunchSplash.onLoaded,
+    // which holds the overlay for the authored Lottie's full composition.
+    _scheduleMinimumHold(_fallbackFullSplashDuration, reason: 'fallback');
   }
 
   @override
@@ -70,6 +65,39 @@ class _LoadingOverlayState extends ConsumerState<LoadingOverlay>
         if (mounted) _startReveal();
       });
     }
+  }
+
+  void _handleSplashAnimationLoaded(Duration duration) {
+    if (_primarySplashLoaded || _revealed || _removed) return;
+    _primarySplashLoaded = true;
+    _scheduleMinimumHold(duration, reason: 'lottie-full-duration');
+  }
+
+  void _handleSplashAnimationFailed() {
+    if (_primarySplashLoaded || _revealed || _removed) return;
+    debugPrint(
+      '[LoadingOverlay] primary splash failed; using fallback hold '
+      '${_fallbackFullSplashDuration.inMilliseconds}ms',
+    );
+    _scheduleMinimumHold(_fallbackFullSplashDuration, reason: 'lottie-failed');
+  }
+
+  void _scheduleMinimumHold(Duration duration, {required String reason}) {
+    _minimumElapsed = false;
+    _minimumTimer?.cancel();
+    debugPrint(
+      '[LoadingOverlay] full splash hold scheduled reason=$reason '
+      'duration=${duration.inMilliseconds}ms '
+      'at t=${_visibleStopwatch.elapsedMilliseconds}ms',
+    );
+    _minimumTimer = Timer(duration, () {
+      _minimumElapsed = true;
+      debugPrint(
+        '[LoadingOverlay] full splash hold elapsed reason=$reason '
+        'at t=${_visibleStopwatch.elapsedMilliseconds}ms',
+      );
+      _checkRevealConditions();
+    });
   }
 
   void _startReveal() {
@@ -145,7 +173,13 @@ class _LoadingOverlayState extends ConsumerState<LoadingOverlay>
     return AbsorbPointer(
       child: FadeTransition(
         opacity: _fade,
-        child: Container(color: Colors.black, child: const LaunchSplash()),
+        child: Container(
+          color: Colors.black,
+          child: LaunchSplash(
+            onPrimaryAnimationLoaded: _handleSplashAnimationLoaded,
+            onPrimaryAnimationFailed: _handleSplashAnimationFailed,
+          ),
+        ),
       ),
     );
   }

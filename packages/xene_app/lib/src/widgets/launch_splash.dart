@@ -12,19 +12,32 @@ const _loadingSplashAsset = 'assets/animations/Splash_X.json';
 const _legacyLoadingLottieAsset = 'assets/animations/LoadingLottie.json';
 
 class LaunchSplash extends StatelessWidget {
-  const LaunchSplash({super.key});
+  const LaunchSplash({
+    super.key,
+    this.onPrimaryAnimationLoaded,
+    this.onPrimaryAnimationFailed,
+  });
+
+  final ValueChanged<Duration>? onPrimaryAnimationLoaded;
+  final VoidCallback? onPrimaryAnimationFailed;
 
   @override
   Widget build(BuildContext context) {
     return switch (launchSplashVariant) {
-      LaunchSplashVariant.loadingSplash => const _NewLottieSplash(),
+      LaunchSplashVariant.loadingSplash => _NewLottieSplash(
+        onLoaded: onPrimaryAnimationLoaded,
+        onFailed: onPrimaryAnimationFailed,
+      ),
       LaunchSplashVariant.loadingLottie => const _LegacyLottieSplash(),
     };
   }
 }
 
 class _NewLottieSplash extends StatefulWidget {
-  const _NewLottieSplash();
+  const _NewLottieSplash({this.onLoaded, this.onFailed});
+
+  final ValueChanged<Duration>? onLoaded;
+  final VoidCallback? onFailed;
 
   @override
   State<_NewLottieSplash> createState() => _NewLottieSplashState();
@@ -71,6 +84,7 @@ class _NewLottieSplashState extends State<_NewLottieSplash> {
               fit: BoxFit.cover,
               alignment: Alignment.center,
               onLoaded: (composition) {
+                widget.onLoaded?.call(composition.duration);
                 debugPrint(
                   '[LaunchSplash] Lottie loaded asset=$_loadingSplashAsset '
                   'duration=${composition.duration.inMilliseconds}ms',
@@ -81,6 +95,7 @@ class _NewLottieSplashState extends State<_NewLottieSplash> {
                   '[LaunchSplash] Lottie failed asset=$_loadingSplashAsset '
                   'error=$error',
                 );
+                widget.onFailed?.call();
                 return const _ImmediateSplashLogo();
               },
             ),
