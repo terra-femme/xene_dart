@@ -81,10 +81,9 @@ class _NewLottieSplashState extends State<_NewLottieSplash> {
                   '[LaunchSplash] Lottie failed asset=$_loadingSplashAsset '
                   'error=$error',
                 );
-                return const SizedBox.shrink();
+                return const _ImmediateSplashLogo();
               },
             ),
-            const _ImmediateSplashLogo(),
           ],
         );
       },
