@@ -8,7 +8,13 @@ enum LaunchSplashVariant { loadingSplash, loadingLottie }
 // Swap this to LaunchSplashVariant.loadingLottie to revert the launch loader.
 const launchSplashVariant = LaunchSplashVariant.loadingSplash;
 
-const _loadingSplashAsset = 'assets/animations/Splash_X.json';
+// Animated WebP frame sequence (NOT a Lottie). The original Splash_X.json was
+// a 15 MB Lottie wrapping 83 embedded 1920x1080 raster frames; the lottie
+// package pre-decodes every embedded image at load time (~660 MB of bitmaps),
+// which fails on iOS devices and flashed the fallback. Flutter's Image widget
+// decodes animated WebP frames on demand, so this stays cheap.
+const _loadingSplashAsset = 'assets/animations/Splash_X.webp';
+const _loadingSplashDuration = Duration(seconds: 5);
 const _legacyLoadingLottieAsset = 'assets/animations/LoadingLottie.json';
 
 class LaunchSplash extends StatelessWidget {
@@ -24,7 +30,7 @@ class LaunchSplash extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return switch (launchSplashVariant) {
-      LaunchSplashVariant.loadingSplash => _NewLottieSplash(
+      LaunchSplashVariant.loadingSplash => _AnimatedWebpSplash(
         onLoaded: onPrimaryAnimationLoaded,
         onFailed: onPrimaryAnimationFailed,
       ),
@@ -33,18 +39,19 @@ class LaunchSplash extends StatelessWidget {
   }
 }
 
-class _NewLottieSplash extends StatefulWidget {
-  const _NewLottieSplash({this.onLoaded, this.onFailed});
+class _AnimatedWebpSplash extends StatefulWidget {
+  const _AnimatedWebpSplash({this.onLoaded, this.onFailed});
 
   final ValueChanged<Duration>? onLoaded;
   final VoidCallback? onFailed;
 
   @override
-  State<_NewLottieSplash> createState() => _NewLottieSplashState();
+  State<_AnimatedWebpSplash> createState() => _AnimatedWebpSplashState();
 }
 
-class _NewLottieSplashState extends State<_NewLottieSplash> {
-  bool _firstFrameLogged = false;
+class _AnimatedWebpSplashState extends State<_AnimatedWebpSplash> {
+  bool _loadedReported = false;
+  bool _failedReported = false;
 
   @override
   void initState() {
@@ -58,50 +65,54 @@ class _NewLottieSplashState extends State<_NewLottieSplash> {
     super.dispose();
   }
 
+  void _reportLoaded() {
+    if (_loadedReported) return;
+    _loadedReported = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      debugPrint(
+        '[LaunchSplash] animated webp first frame decoded '
+        'asset=$_loadingSplashAsset '
+        'duration=${_loadingSplashDuration.inMilliseconds}ms',
+      );
+      widget.onLoaded?.call(_loadingSplashDuration);
+    });
+  }
+
+  void _reportFailed(Object error) {
+    if (_failedReported) return;
+    _failedReported = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      debugPrint(
+        '[LaunchSplash] animated webp failed asset=$_loadingSplashAsset '
+        'error=$error',
+      );
+      widget.onFailed?.call();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        if (!_firstFrameLogged) {
-          _firstFrameLogged = true;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!mounted) return;
-            debugPrint(
-              '[LaunchSplash] first splash widget frame painted '
-              'size=${constraints.maxWidth.toStringAsFixed(1)}x'
-              '${constraints.maxHeight.toStringAsFixed(1)}',
-            );
-          });
-        }
-
-        return Stack(
-          fit: StackFit.expand,
-          children: [
-            const ColoredBox(color: Colors.white),
-            Lottie.asset(
-              _loadingSplashAsset,
-              repeat: true,
-              fit: BoxFit.cover,
-              alignment: Alignment.center,
-              onLoaded: (composition) {
-                widget.onLoaded?.call(composition.duration);
-                debugPrint(
-                  '[LaunchSplash] Lottie loaded asset=$_loadingSplashAsset '
-                  'duration=${composition.duration.inMilliseconds}ms',
-                );
-              },
-              errorBuilder: (context, error, stackTrace) {
-                debugPrint(
-                  '[LaunchSplash] Lottie failed asset=$_loadingSplashAsset '
-                  'error=$error',
-                );
-                widget.onFailed?.call();
-                return const _ImmediateSplashLogo();
-              },
-            ),
-          ],
-        );
-      },
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        const ColoredBox(color: Colors.white),
+        Image.asset(
+          _loadingSplashAsset,
+          fit: BoxFit.contain,
+          alignment: Alignment.center,
+          gaplessPlayback: true,
+          frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+            if (frame != null) _reportLoaded();
+            return child;
+          },
+          errorBuilder: (context, error, stackTrace) {
+            _reportFailed(error);
+            return const _ImmediateSplashLogo();
+          },
+        ),
+      ],
     );
   }
 }
