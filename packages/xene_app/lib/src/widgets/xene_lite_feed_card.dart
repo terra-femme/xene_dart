@@ -145,7 +145,7 @@ String? _premiereLabel(FeedItem item) {
   if (item.platform.toLowerCase() != 'youtube') return null;
   final date = _upcomingDate(item);
   if (date == null) return null;
-  return 'PREMIERES ${_formatShortDateTime(date)}';
+  return 'PREMIERES ON ${_formatShortDateTime(date)}';
 }
 
 DateTime? _upcomingDate(FeedItem item) {
