@@ -426,6 +426,33 @@ class YouTubeService {
           } catch (_) {}
 
           final parsedDate = DateTime.parse(published);
+          // Premieres are only announced on recently-published entries. Gate
+          // the watch-page scrape so a refresh doesn't download the full HTML
+          // for every historical RSS entry (15/artist) on each cache miss.
+          final entryAge = DateTime.now().toUtc().difference(
+            parsedDate.toUtc(),
+          );
+          final premiere = entryAge <= const Duration(days: 30)
+              ? await _getPremiereDetailsFromWatchPage(id, link)
+              : null;
+          if (entryAge > const Duration(days: 30)) {
+            _logger.fine(
+              '[youtube] Skipping premiere lookup for $id: '
+              'entry is ${entryAge.inDays}d old',
+            );
+          }
+          final releaseAt = premiere?.scheduledStart;
+          final isUpcoming =
+              releaseAt != null &&
+              releaseAt.toUtc().isAfter(DateTime.now().toUtc());
+          final bodyWithPremiere =
+              premiere?.text != null && body?.contains(premiere!.text!) != true
+              ? [
+                  if (body != null && body.trim().isNotEmpty) body.trim(),
+                  premiere!.text!,
+                ].join('\n\n')
+              : body;
+
           items.add(
             FeedItem(
               id: id,
@@ -433,10 +460,14 @@ class YouTubeService {
               artistName: artistName,
               contentType: 'video',
               title: title,
-              body: body,
+              body: bodyWithPremiere,
               externalUrl: link,
               artworkUrl: artworkUrl,
               publishedAt: parsedDate,
+              releaseAt: releaseAt,
+              dateSource: premiere?.dateSource,
+              dateConfidence: releaseAt != null ? 'scheduled' : null,
+              isUpcoming: isUpcoming,
             ),
           );
           auditSink?.add({
@@ -447,6 +478,9 @@ class YouTubeService {
             'raw_rssPublished': published,
             'usedField': 'rss.published',
             'resolvedDate': parsedDate.toUtc().toIso8601String(),
+            'scheduledStartTime': releaseAt?.toUtc().toIso8601String(),
+            'premiereText': premiere?.text,
+            'isUpcoming': isUpcoming,
           });
         } catch (e) {
           _logger.warning('[youtube] Skipping entry for $artistName: $e');
@@ -481,6 +515,95 @@ class YouTubeService {
     }
   }
 
+  Future<_YouTubePremiereDetails?> _getPremiereDetailsFromWatchPage(
+    String videoId,
+    String link,
+  ) async {
+    try {
+      final uri = Uri.parse(link);
+      final watchUri = uri.replace(
+        queryParameters: {
+          ...uri.queryParameters,
+          'v': uri.queryParameters['v'] ?? videoId,
+          'hl': 'en',
+          'gl': 'US',
+        },
+      );
+      final response = await _dio.get<String>(watchUri.toString());
+      final html = response.data ?? '';
+      final scheduledStart =
+          _scheduledStartFromWatchHtml(html) ?? _premiereDateFromText(html);
+      final text = _premiereTextFromWatchHtml(html);
+      if (scheduledStart == null && text == null) return null;
+      return _YouTubePremiereDetails(
+        scheduledStart: scheduledStart,
+        text: text,
+        dateSource: scheduledStart != null
+            ? 'youtube.watch.scheduledStartTime'
+            : 'youtube.watch.premiereText',
+      );
+    } catch (e) {
+      _logger.warning(
+        '[youtube] watch premiere lookup failed for $videoId: $e',
+      );
+      return null;
+    }
+  }
+
+  DateTime? _scheduledStartFromWatchHtml(String html) {
+    final patterns = [
+      RegExp(r'"startTimestamp"\s*:\s*"([^"]+)"'),
+      RegExp(r'"scheduledStartTime"\s*:\s*"([^"]+)"'),
+    ];
+    for (final pattern in patterns) {
+      final match = pattern.firstMatch(html);
+      if (match == null) continue;
+      final raw = match.group(1);
+      if (raw == null || raw.isEmpty) continue;
+      final epochSeconds = int.tryParse(raw);
+      if (epochSeconds != null) {
+        return DateTime.fromMillisecondsSinceEpoch(
+          epochSeconds * 1000,
+          isUtc: true,
+        );
+      }
+      final parsed = DateTime.tryParse(raw);
+      if (parsed != null) return parsed.toUtc();
+    }
+    return null;
+  }
+
+  String? _premiereTextFromWatchHtml(String html) {
+    final textMatch = RegExp(
+      r'Premieres?\s+\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}(?:,?\s+\d{1,2}(?::\d{2})?\s*(?:AM|PM|a\.m\.|p\.m\.))?',
+      caseSensitive: false,
+    ).firstMatch(html);
+    return textMatch?.group(0)?.replaceAll(RegExp(r'\s+'), ' ').trim();
+  }
+
+  DateTime? _premiereDateFromText(String text) {
+    final match = RegExp(
+      r'premieres?\s+(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})(?:,?\s+(\d{1,2})(?::(\d{2}))?\s*([ap]\.?m\.?))?',
+      caseSensitive: false,
+    ).firstMatch(text);
+    if (match == null) return null;
+
+    final month = int.tryParse(match.group(1)!);
+    final day = int.tryParse(match.group(2)!);
+    var year = int.tryParse(match.group(3)!);
+    if (month == null || day == null || year == null) return null;
+    if (year < 100) year += 2000;
+
+    var hour = int.tryParse(match.group(4) ?? '0') ?? 0;
+    final minute = int.tryParse(match.group(5) ?? '0') ?? 0;
+    final period = match.group(6)?.toLowerCase().replaceAll('.', '');
+    if (period == 'pm' && hour < 12) hour += 12;
+    if (period == 'am' && hour == 12) hour = 0;
+
+    final parsed = DateTime(year, month, day, hour, minute);
+    return parsed.isAfter(DateTime.now()) ? parsed.toUtc() : null;
+  }
+
   Future<void> _saveItems(List<FeedItem> items) async {
     final dbItems = items
         .map(
@@ -505,4 +628,16 @@ class YouTubeService {
 
     await _db.saveFeedItems(dbItems);
   }
+}
+
+class _YouTubePremiereDetails {
+  const _YouTubePremiereDetails({
+    required this.scheduledStart,
+    required this.text,
+    required this.dateSource,
+  });
+
+  final DateTime? scheduledStart;
+  final String? text;
+  final String? dateSource;
 }
