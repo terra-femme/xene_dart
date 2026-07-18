@@ -44,6 +44,11 @@ class XeneFeedCard extends StatelessWidget {
     fontSize: 9,
     fontWeight: FontWeight.w700,
   );
+  // Same family as the "JUST DROPPED" feed masthead (feed_screen.dart).
+  static final TextStyle _tekoBold14 = GoogleFonts.teko(
+    fontSize: 14,
+    fontWeight: FontWeight.bold,
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -182,39 +187,47 @@ class XeneFeedCard extends StatelessWidget {
                       ),
                     Padding(
                       padding: EdgeInsets.all(cardPadding),
-                      child: Row(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // 1. Thumbnail (Left) — decorative, described by card label
-                          ExcludeSemantics(
-                            child: SizedBox.square(
-                              dimension: thumbnailSize,
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(5),
-                                child: Stack(
-                                  fit: StackFit.expand,
-                                  children: [
-                                    thumbnailProvider == null
-                                        ? Container(
-                                            width: thumbnailSize,
-                                            height: thumbnailSize,
-                                            color: placeholderColor,
-                                            alignment: Alignment.center,
-                                            child: Icon(
-                                              Icons.music_note,
-                                              size: compact ? 18 : 20,
-                                              color: errorIconColor,
-                                            ),
-                                          )
-                                        : Image(
-                                            image: thumbnailProvider,
-                                            width: thumbnailSize,
-                                            height: thumbnailSize,
-                                            fit: BoxFit.cover,
-                                            gaplessPlayback: true,
-                                            errorBuilder:
-                                                (context, error, stack) =>
-                                                    Container(
+                          // Row 1: thumbnail, badges, save button.
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // 1. Thumbnail (Left) — decorative, described by card label
+                              ExcludeSemantics(
+                                child: SizedBox.square(
+                                  dimension: thumbnailSize,
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(5),
+                                    child: Stack(
+                                      fit: StackFit.expand,
+                                      children: [
+                                        thumbnailProvider == null
+                                            ? Container(
+                                                width: thumbnailSize,
+                                                height: thumbnailSize,
+                                                color: placeholderColor,
+                                                alignment: Alignment.center,
+                                                child: Icon(
+                                                  Icons.music_note,
+                                                  size: compact ? 18 : 20,
+                                                  color: errorIconColor,
+                                                ),
+                                              )
+                                            : Image(
+                                                image: thumbnailProvider,
+                                                width: thumbnailSize,
+                                                height: thumbnailSize,
+                                                fit: BoxFit.cover,
+                                                gaplessPlayback: true,
+                                                errorBuilder:
+                                                    (
+                                                      context,
+                                                      error,
+                                                      stack,
+                                                    ) => Container(
                                                       width: thumbnailSize,
                                                       height: thumbnailSize,
                                                       color: placeholderColor,
@@ -226,32 +239,27 @@ class XeneFeedCard extends StatelessWidget {
                                                         color: errorIconColor,
                                                       ),
                                                     ),
+                                              ),
+                                        if (directPlay)
+                                          Center(
+                                            child: _ThumbnailPlayButton(
+                                              item: item,
+                                              visualSize: compact ? 22 : 24,
+                                              iconSize: compact ? 15 : 17,
+                                            ),
                                           ),
-                                    if (directPlay)
-                                      Center(
-                                        child: _ThumbnailPlayButton(
-                                          item: item,
-                                          visualSize: compact ? 22 : 24,
-                                          iconSize: compact ? 15 : 17,
-                                        ),
-                                      ),
-                                  ],
+                                      ],
+                                    ),
+                                  ),
                                 ),
                               ),
-                            ),
-                          ),
 
-                          SizedBox(width: contentGap),
+                              SizedBox(width: contentGap),
 
-                          // 2. Content Frame (Right)
-                          Expanded(
-                            child: ExcludeSemantics(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  // Top badges wrap instead of overflowing when the feed
-                                  // column gets narrow beside the fixed sidebar.
-                                  Wrap(
+                              // 2. Badges — beside the thumbnail, not the title.
+                              Expanded(
+                                child: ExcludeSemantics(
+                                  child: Wrap(
                                     spacing: 4,
                                     runSpacing: 3,
                                     crossAxisAlignment:
@@ -277,113 +285,132 @@ class XeneFeedCard extends StatelessWidget {
                                         const _PreOrderStar(),
                                     ],
                                   ),
-                                  const SizedBox(height: 4),
-                                  if (premiereLabel != null) ...[
-                                    _PremiereDateLabel(
-                                      label: premiereLabel,
-                                      dark: dark,
-                                    ),
-                                    const SizedBox(height: 3),
-                                  ],
+                                ),
+                              ),
+                              if ([
+                                'soundcloud',
+                                'youtube',
+                              ].contains(item.platform.toLowerCase()))
+                                _SaveButton(item: item, dark: dark),
+                            ],
+                          ),
 
-                                  // Title
-                                  Text(
-                                    item.title ?? 'Untitled',
-                                    style: _archivoBold13.copyWith(
-                                      color: titleColor,
-                                    ),
-                                    softWrap: true,
-                                    overflow: TextOverflow.fade,
+                          SizedBox(height: contentGap),
+
+                          // Row 2: title, artist and details — full card width,
+                          // using the space that used to sit empty below the
+                          // (much shorter) thumbnail/save-button row.
+                          ExcludeSemantics(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // Title
+                                Text(
+                                  item.title ?? 'Untitled',
+                                  style: _archivoBold13.copyWith(
+                                    color: titleColor,
                                   ),
+                                  softWrap: true,
+                                  overflow: TextOverflow.fade,
+                                ),
 
-                                  // Artist name
+                                // Artist name
+                                Text(
+                                  item.artistName,
+                                  textAlign: TextAlign.center,
+                                  style: _archivo13w700.copyWith(
+                                    color: dark ? Colors.white : Colors.black,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+
+                                if (repostAttribution != null)
                                   Text(
-                                    item.artistName,
-                                    textAlign: TextAlign.center,
-                                    style: _archivo13w700.copyWith(
-                                      color: dark ? Colors.white : Colors.black,
+                                    repostAttribution,
+                                    style: _dmMono9w700.copyWith(
+                                      color: XeneTheme.scOrange,
                                     ),
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                   ),
 
-                                  if (repostAttribution != null)
-                                    Text(
-                                      repostAttribution,
-                                      style: _dmMono9w700.copyWith(
-                                        color: XeneTheme.scOrange,
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
+                                // Snippet
+                                if (bodyText != null && bodyText.isNotEmpty)
+                                  Text(
+                                    bodyText,
+                                    style: _archivo10.copyWith(
+                                      color: snippetColor,
                                     ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
 
-                                  // Snippet
-                                  if (bodyText != null && bodyText.isNotEmpty)
-                                    Text(
-                                      bodyText,
-                                      style: _archivo10.copyWith(
-                                        color: snippetColor,
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-
-                                  // Duration (SC) or track count (BC) — mutually exclusive
-                                  if (item.durationSeconds != null &&
-                                      item.durationSeconds! > 0)
-                                    Align(
-                                      alignment: Alignment.centerRight,
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Icon(
-                                            Icons.schedule,
-                                            size: 9,
+                                // Duration (SC) or track count (BC) — mutually exclusive
+                                if (item.durationSeconds != null &&
+                                    item.durationSeconds! > 0)
+                                  Align(
+                                    alignment: Alignment.centerRight,
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.schedule,
+                                          size: 9,
+                                          color: snippetColor,
+                                        ),
+                                        const SizedBox(width: 2),
+                                        Text(
+                                          _formatDuration(
+                                            item.durationSeconds!,
+                                          ),
+                                          style: _dmMono9.copyWith(
                                             color: snippetColor,
                                           ),
-                                          const SizedBox(width: 2),
-                                          Text(
-                                            _formatDuration(
-                                              item.durationSeconds!,
-                                            ),
-                                            style: _dmMono9.copyWith(
-                                              color: snippetColor,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    )
-                                  else if (item.trackCount != null &&
-                                      item.trackCount! > 1)
-                                    Align(
-                                      alignment: Alignment.centerRight,
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Icon(
-                                            Icons.queue_music,
-                                            size: 9,
+                                        ),
+                                      ],
+                                    ),
+                                  )
+                                else if (item.trackCount != null &&
+                                    item.trackCount! > 1)
+                                  Align(
+                                    alignment: Alignment.centerRight,
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.queue_music,
+                                          size: 9,
+                                          color: snippetColor,
+                                        ),
+                                        const SizedBox(width: 2),
+                                        Text(
+                                          '${item.trackCount} tracks',
+                                          style: _dmMono9.copyWith(
                                             color: snippetColor,
                                           ),
-                                          const SizedBox(width: 2),
-                                          Text(
-                                            '${item.trackCount} tracks',
-                                            style: _dmMono9.copyWith(
-                                              color: snippetColor,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
+                                        ),
+                                      ],
                                     ),
+                                  ),
+
+                                // Premiere banner — sits at the base of the
+                                // card, below title/artist/details.
+                                if (premiereLabel != null) ...[
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    premiereLabel,
+                                    style: _tekoBold14.copyWith(
+                                      color: XeneTheme.ytRed,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
                                 ],
-                              ),
+                              ],
                             ),
                           ),
-                          if ([
-                            'soundcloud',
-                            'youtube',
-                          ].contains(item.platform.toLowerCase()))
-                            _SaveButton(item: item, dark: dark),
                         ],
                       ),
                     ),
@@ -417,6 +444,11 @@ class _YoutubeVideoCard extends StatelessWidget {
   static final TextStyle _archivo10w500 = GoogleFonts.archivo(
     fontSize: 10,
     fontWeight: FontWeight.w500,
+  );
+  // Same family as the "JUST DROPPED" feed masthead (feed_screen.dart).
+  static final TextStyle _tekoBold14 = GoogleFonts.teko(
+    fontSize: 14,
+    fontWeight: FontWeight.bold,
   );
 
   @override
@@ -524,16 +556,22 @@ class _YoutubeVideoCard extends StatelessWidget {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  if (premiereLabel != null) ...[
-                    const SizedBox(height: 4),
-                    _PremiereDateLabel(label: premiereLabel, dark: dark),
-                  ],
                   Text(
                     item.artistName,
                     style: _archivo10w500.copyWith(color: snippetColor),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
+                  // Premiere banner — sits at the base of the card.
+                  if (premiereLabel != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      premiereLabel,
+                      style: _tekoBold14.copyWith(color: XeneTheme.ytRed),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -594,6 +632,7 @@ class _SaveButton extends ConsumerWidget {
             }
           } else {
             ref.read(queueProvider.notifier).addItem(item);
+            _showSavedToast(context);
           }
         },
         child: SizedBox(
@@ -604,14 +643,129 @@ class _SaveButton extends ConsumerWidget {
             child: Padding(
               padding: const EdgeInsets.only(top: 1),
               child: Icon(
-                isQueued
-                    ? Icons.bookmark
-                    : (dark ? Icons.bookmark_add : Icons.bookmark_add_outlined),
+                isQueued ? Icons.bookmark : Icons.bookmark_add,
                 size: 24,
                 color: iconColor,
                 shadows: iconShadows,
               ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Shows a small "Saved to Profile Queue" pill anchored next to [context]'s
+/// render box (the tapped save button) for ~3s, then removes itself.
+void _showSavedToast(BuildContext context) {
+  final overlayState = Overlay.maybeOf(context);
+  final renderObject = context.findRenderObject();
+  if (overlayState == null || renderObject is! RenderBox) return;
+  if (!renderObject.attached) return;
+
+  final anchor = renderObject.localToGlobal(Offset.zero);
+  final anchorSize = renderObject.size;
+  final screenWidth = MediaQuery.of(context).size.width;
+
+  late OverlayEntry entry;
+  entry = OverlayEntry(
+    builder: (_) {
+      const toastWidth = 190.0;
+      final left = (anchor.dx + anchorSize.width / 2 - toastWidth / 2).clamp(
+        8.0,
+        screenWidth - toastWidth - 8.0,
+      );
+      final top = anchor.dy - 44;
+      return Positioned(
+        left: left,
+        top: top < 8.0 ? anchor.dy + anchorSize.height + 8.0 : top,
+        child: IgnorePointer(child: _SavedToast(onDone: () => entry.remove())),
+      );
+    },
+  );
+  overlayState.insert(entry);
+}
+
+class _SavedToast extends StatefulWidget {
+  const _SavedToast({required this.onDone});
+  final VoidCallback onDone;
+
+  @override
+  State<_SavedToast> createState() => _SavedToastState();
+}
+
+class _SavedToastState extends State<_SavedToast>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _opacity;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 3000),
+    );
+    _opacity = TweenSequence<double>([
+      TweenSequenceItem(
+        tween: Tween(
+          begin: 0.0,
+          end: 1.0,
+        ).chain(CurveTween(curve: Curves.easeOut)),
+        weight: 10,
+      ),
+      TweenSequenceItem(tween: ConstantTween(1.0), weight: 75),
+      TweenSequenceItem(
+        tween: Tween(
+          begin: 1.0,
+          end: 0.0,
+        ).chain(CurveTween(curve: Curves.easeIn)),
+        weight: 15,
+      ),
+    ]).animate(_controller);
+    _controller.forward().whenComplete(widget.onDone);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: _opacity,
+      child: Material(
+        color: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.88),
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.3),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.check_circle, size: 14, color: XeneTheme.teal),
+              const SizedBox(width: 6),
+              Text(
+                'Saved to Profile Queue',
+                style: GoogleFonts.archivo(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white,
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -828,36 +982,6 @@ class _PreOrderStar extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-class _PremiereDateLabel extends StatelessWidget {
-  const _PremiereDateLabel({required this.label, required this.dark});
-
-  final String label;
-  final bool dark;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        const Icon(Icons.event_available, size: 10, color: XeneTheme.ytRed),
-        const SizedBox(width: 3),
-        Flexible(
-          child: Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: GoogleFonts.dmMono(
-              fontSize: 9,
-              fontWeight: FontWeight.w700,
-              color: dark ? Colors.white70 : XeneTheme.ytRed,
-            ),
-          ),
-        ),
-      ],
     );
   }
 }
