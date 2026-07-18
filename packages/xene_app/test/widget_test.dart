@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:xene_app/src/layout/xene_layout_metrics.dart';
 import 'package:xene_app/src/providers/articles_provider.dart';
+import 'package:xene_app/src/providers/auth_provider.dart';
 import 'package:xene_app/src/providers/artists_provider.dart';
 import 'package:xene_app/src/providers/discovery_provider.dart';
+import 'package:xene_app/src/providers/dio_provider.dart';
 import 'package:xene_app/src/providers/feed_provider.dart';
 import 'package:xene_app/src/providers/following_provider.dart';
 import 'package:xene_app/src/providers/graph_provider.dart';
@@ -25,9 +29,11 @@ import 'package:xene_app/src/screens/network_screen.dart';
 import 'package:xene_app/src/screens/preset_playground_screen.dart';
 import 'package:xene_app/src/widgets/logo_pip_player.dart';
 import 'package:xene_app/src/widgets/preset_dial.dart';
+import 'package:xene_app/src/widgets/soundcloud_embed.dart';
 import 'package:xene_app/src/widgets/xene_content_modal.dart';
 import 'package:xene_app/src/widgets/xene_draggable_sheet.dart';
 import 'package:xene_app/src/widgets/xene_feed_card.dart';
+import 'package:xene_app/src/widgets/youtube_embed.dart';
 import 'package:xene_app/src/widgets/xene_sidebar.dart';
 import 'package:xene_domain/xene_domain.dart';
 
@@ -174,6 +180,10 @@ void main() {
             ),
             safePadding: viewport.safePadding,
             textScaleFactor: viewport.textScaleFactor,
+            overrides: [
+              isAnonymousProvider.overrideWith((ref) => true),
+              authenticatedDioProvider.overrideWithValue(Dio()),
+            ],
           ),
         );
         await tester.pump();
@@ -205,6 +215,72 @@ void main() {
       expect(find.text('A-VERY-LONG-PLATFORM-NAME'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
+
+    testWidgets(
+      'feed card shows premiere banner at the base for future YouTube items',
+      (WidgetTester tester) async {
+        await _setViewport(tester, const Size(390, 844));
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        await tester.pumpWidget(
+          _testApp(
+            Center(
+              child: SizedBox(
+                width: 260,
+                child: XeneFeedCard(item: _futureYouTubePremiereItem),
+              ),
+            ),
+            overrides: [
+              isAnonymousProvider.overrideWith((ref) => true),
+              authenticatedDioProvider.overrideWithValue(Dio()),
+            ],
+          ),
+        );
+        await tester.pump();
+
+        expect(find.textContaining('PREMIERES ON'), findsOneWidget);
+        expect(find.text('Incoming Premiere'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    testWidgets(
+      'tapping the save button shows a "Saved to Profile Queue" toast',
+      (WidgetTester tester) async {
+        await _setViewport(tester, const Size(390, 844));
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        await tester.pumpWidget(
+          _testApp(
+            Center(
+              child: SizedBox(
+                width: 300,
+                child: XeneFeedCard(item: _feedItems.first),
+              ),
+            ),
+            overrides: [
+              isAnonymousProvider.overrideWith((ref) => false),
+              authenticatedDioProvider.overrideWithValue(Dio()),
+            ],
+          ),
+        );
+        await tester.pump();
+
+        expect(find.text('Saved to Profile Queue'), findsNothing);
+
+        await tester.tap(find.byIcon(Icons.bookmark_add));
+        await tester.pump();
+
+        expect(find.text('Saved to Profile Queue'), findsOneWidget);
+
+        // Auto-dismisses after ~3s.
+        await tester.pump(const Duration(seconds: 4));
+        expect(find.text('Saved to Profile Queue'), findsNothing);
+        expect(tester.takeException(), isNull);
+      },
+    );
 
     testWidgets('preset dial long press overlay builds and dismisses', (
       WidgetTester tester,
@@ -640,6 +716,65 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
+    testWidgets(
+      'logo pip player shows static premiere preview for future YouTube',
+      (WidgetTester tester) async {
+        await _setViewport(tester, const Size(390, 844));
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        await tester.pumpWidget(
+          _testApp(
+            const Stack(children: [LogoPipPlayer()]),
+            overrides: [
+              playerProvider.overrideWith(
+                (ref) => _VisibleYouTubePremiereNotifier(ref),
+              ),
+              isAnonymousProvider.overrideWith((ref) => true),
+              authenticatedDioProvider.overrideWithValue(Dio()),
+            ],
+          ),
+        );
+        await tester.pump();
+
+        expect(find.textContaining('PREMIERES'), findsOneWidget);
+        expect(find.byType(YouTubeEmbed), findsNothing);
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    testWidgets('logo pip player gives SoundCloud embeds the track id', (
+      WidgetTester tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      await _setViewport(tester, const Size(390, 844));
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      await tester.pumpWidget(
+        _testApp(
+          const Stack(children: [LogoPipPlayer()]),
+          overrides: [
+            playerProvider.overrideWith(
+              (ref) => _VisibleSoundCloudPlayerNotifier(ref),
+            ),
+            isAnonymousProvider.overrideWith((ref) => true),
+            authenticatedDioProvider.overrideWithValue(Dio()),
+          ],
+        ),
+      );
+      await tester.pump();
+
+      final embed = tester.widget<SoundCloudEmbed>(
+        find.byType(SoundCloudEmbed),
+      );
+      expect(embed.trackId, '987654321');
+      expect(embed.trackId, isNot(contains('soundcloud.com')));
+      debugDefaultTargetPlatformOverride = null;
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets('artists narrow panels derive height from viewport', (
       WidgetTester tester,
     ) async {
@@ -949,6 +1084,26 @@ class _VisiblePlayerNotifier extends PlayerNotifier {
     state = PlayerState(
       currentTrack: _playableLongMetadataFeedItem,
       activePlatform: ActivePlatform.none,
+      isVisible: true,
+    );
+  }
+}
+
+class _VisibleYouTubePremiereNotifier extends PlayerNotifier {
+  _VisibleYouTubePremiereNotifier(super.ref) {
+    state = PlayerState(
+      currentTrack: _futureYouTubePremiereItem,
+      activePlatform: ActivePlatform.youtube,
+      isVisible: true,
+    );
+  }
+}
+
+class _VisibleSoundCloudPlayerNotifier extends PlayerNotifier {
+  _VisibleSoundCloudPlayerNotifier(super.ref) {
+    state = PlayerState(
+      currentTrack: _soundCloudPlayableItem,
+      activePlatform: ActivePlatform.soundcloud,
       isVisible: true,
     );
   }
@@ -1367,6 +1522,28 @@ final _playableLongMetadataFeedItem = FeedItem(
       'A playable modal title that should wrap without changing modal geometry',
   body: 'A compact playable modal body for content guardrail coverage.',
   externalUrl: 'https://youtube.com/watch?v=playable-long-metadata-card',
+  publishedAt: DateTime(2026, 5, 19),
+);
+
+final _futureYouTubePremiereItem = FeedItem(
+  id: 'future-premiere-video',
+  platform: 'youtube',
+  artistName: 'Future Channel',
+  contentType: 'video',
+  title: 'Incoming Premiere',
+  externalUrl: 'https://youtube.com/watch?v=future-premiere-video',
+  publishedAt: DateTime(2026, 5, 19),
+  releaseAt: DateTime(2026, 7, 30, 5, 30),
+  isUpcoming: true,
+);
+
+final _soundCloudPlayableItem = FeedItem(
+  id: '987654321',
+  platform: 'soundcloud',
+  artistName: 'Sound Person',
+  contentType: 'track',
+  title: 'Full Track',
+  externalUrl: 'https://soundcloud.com/sound-person/full-track',
   publishedAt: DateTime(2026, 5, 19),
 );
 

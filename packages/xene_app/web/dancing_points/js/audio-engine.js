@@ -135,6 +135,20 @@ class StemEngine {
     this.noteOffThresh = 0.54;
     this.maxPolyphony = 2;
 
+    // ---- drum onset detector (accessibility haptics) ----
+    // Band-split spectral-flux gate over the drums stem analyser. Each drum
+    // voice (kick/snare/hat) gets its own frequency band, adaptive threshold
+    // (EMA of flux + deviation), hysteresis re-arm, and refractory window, so
+    // haptic taps land on the drum PATTERN — kick/snare backbone, feathered
+    // hats — instead of firing on every transient in the stem. Built lazily in
+    // _ensureGraph (needs ctx.sampleRate); polled from app.js at ~120Hz,
+    // independent of the render loop, so onset timing isn't quantised to the
+    // native host's 30fps frame clamp. Works in BOTH live-DSP and chart mode:
+    // playlist.js keeps the drums stem raw+connected even when a chart drives
+    // the visuals, specifically so haptics stay live. See pollDrumOnset.
+    /** @type {any} */ this._drumOnset = null;
+    /** @type {Uint8Array|null} */ this._drumFreq = null;
+
     // ---- chart drive mode (playlist playback) ----
     // A precomputed reactivity chart (see chart-gen.js). When set, signals +
     // keyEnergies are read from the chart at currentTime instead of live DSP —
@@ -177,6 +191,40 @@ class StemEngine {
     this.master.connect(this.masterAnalyser);
 
     for (const key of STEM_KEYS) this.stemAnalyser[key] = cfg(ctx.createAnalyser());
+
+    // Drum onset bands in FFT-bin space (fftSize 1024 → binHz ≈ 43-47Hz).
+    // floor = minimum flux above the adaptive envelope to count as an onset;
+    // refractMs = per-voice dead time after a hit (a real drummer can't
+    // retrigger a kick in 80ms, but hats tick faster).
+    const binHz = ctx.sampleRate / 1024;
+    /** @param {number} lo @param {number} hi */
+    const bandBins = (lo, hi) => ({
+      lo: Math.max(1, Math.round(lo / binHz)),
+      hi: Math.max(1, Math.round(hi / binHz)),
+    });
+    /** @param {number} lo @param {number} hi @param {number} floor @param {number} refractMs */
+    const mkBand = (lo, hi, floor, refractMs) => ({
+      ...bandBins(lo, hi),
+      floor,
+      refractMs,
+      ring: new Float32Array(4), // energy history → flux vs ~24-32ms ago
+      idx: 0,
+      filled: 0,
+      env: 0,
+      dev: 0.02,
+      armed: true,
+      lastMs: -10000,
+    });
+    this._drumFreq = new Uint8Array(512);
+    this._drumOnset = {
+      bands: {
+        kick: mkBand(35, 130, 0.05, 110),
+        snare: mkBand(160, 550, 0.045, 100),
+        hat: mkBand(3000, 9500, 0.035, 70),
+      },
+      lastFireMs: -10000,
+      count: 0,
+    };
 
     // High-res spectrum on the melodic ('other') stem → 88 piano-key bands.
     const mf = ctx.createAnalyser();
@@ -435,6 +483,7 @@ class StemEngine {
       sig.level = 0; sig.hit = 0; sig.react = 0; sig.reactSlow = 0;
       sig.peak = 0.0001; sig.baseline = 0; sig.prevLevel = 0;
     }
+    this._resetDrumOnset();
     this.keyEnergies.fill(0);
     this._noteOn.fill(0);
     this._noteHold.fill(0);
@@ -517,6 +566,87 @@ class StemEngine {
     else sig.react *= this.decay;
     const slowDecay = Math.min(0.995, this.decay + 0.04);
     sig.reactSlow = Math.max(sig.reactSlow * slowDecay, sig.react * 0.9);
+  }
+
+  /**
+   * Drum onset poll for haptics — call at ~120Hz (see app.js).
+   * Returns one classified hit per call, or null. Exactly one voice can win
+   * per poll (strongest score); a 50ms global gap keeps simultaneous
+   * kick+snare from double-tapping (a flam IS one physical hit to the hand).
+   * @param {number} nowMs performance.now()
+   * @returns {{kind:'kick'|'snare'|'hat', strength:number}|null}
+   */
+  pollDrumOnset(nowMs) {
+    const st = this._drumOnset;
+    const an = this.stemAnalyser.drums;
+    const freq = this._drumFreq;
+    // NOTE: chart mode does NOT disqualify this. playlist.js deliberately
+    // keeps the raw drums stem downloaded and connected even when a chart
+    // drives the visuals (see loadTrack's fileEntries filter) specifically
+    // so live drum haptics keep working on charted tracks. Only bail when
+    // there is truly no analyser/signal to read.
+    if (!st || !an || !freq || !this._playing) return null;
+    an.getByteFrequencyData(freq);
+
+    /** @type {'kick'|'snare'|'hat'|null} */ let bestKind = null;
+    let bestScore = 0;
+    let bestStrength = 0;
+
+    for (const kind of /** @type {const} */ (['kick', 'snare', 'hat'])) {
+      const b = st.bands[kind];
+      let sum = 0;
+      for (let i = b.lo; i <= b.hi; i++) sum += freq[i];
+      const e = sum / ((b.hi - b.lo + 1) * 255);
+
+      // flux vs the energy ~4 polls ago — successive analyser windows overlap
+      // heavily at 120Hz, so a 1-poll diff would smear the attack to nothing.
+      const past = b.filled >= b.ring.length ? b.ring[b.idx] : e;
+      const flux = Math.max(0, e - past);
+      b.ring[b.idx] = e;
+      b.idx = (b.idx + 1) % b.ring.length;
+      b.filled = Math.min(b.filled + 1, b.ring.length);
+
+      const gate = b.env + Math.max(b.floor, b.dev * 3.5);
+      // adapt AFTER the gate check so an onset can't raise its own threshold
+      b.env += (flux - b.env) * 0.04;
+      b.dev += (Math.abs(flux - b.env) - b.dev) * 0.04;
+
+      if (!b.armed) {
+        if (flux < gate * 0.4) b.armed = true;
+        continue;
+      }
+      if (flux > gate && e > 0.03 && nowMs - b.lastMs >= b.refractMs) {
+        const score = flux / (gate + 1e-4);
+        if (score > bestScore) {
+          bestKind = kind;
+          bestScore = score;
+          bestStrength = Math.min(1, 0.4 + (score - 1) / 2.5);
+        }
+      }
+    }
+
+    if (!bestKind || nowMs - st.lastFireMs < 50) return null;
+    const winner = st.bands[bestKind];
+    winner.lastMs = nowMs;
+    winner.armed = false;
+    st.lastFireMs = nowMs;
+    st.count++;
+    return { kind: bestKind, strength: bestStrength };
+  }
+
+  _resetDrumOnset() {
+    const st = this._drumOnset;
+    if (!st) return;
+    for (const b of Object.values(st.bands)) {
+      b.ring.fill(0);
+      b.idx = 0;
+      b.filled = 0;
+      b.env = 0;
+      b.dev = 0.02;
+      b.armed = true;
+      b.lastMs = -10000;
+    }
+    st.lastFireMs = -10000;
   }
 
   update() {
