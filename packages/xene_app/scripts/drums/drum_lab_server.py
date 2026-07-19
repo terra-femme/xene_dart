@@ -40,6 +40,9 @@ logger = logging.getLogger("drum_lab_server")
 
 PIPE_DIR = Path(__file__).resolve().parent
 LAB_DIR = (PIPE_DIR / ".." / ".." / "tools" / "av_debug").resolve()
+# Lab pages reference shared visualizer JS via ../../web/dancing_points/...
+# which the browser normalizes to /web/... — serve that tree read-only too.
+WEB_DIR = (PIPE_DIR / ".." / ".." / "web").resolve()
 UPLOAD_DIR = PIPE_DIR / "uploads"
 PORT = 8123
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024
@@ -129,18 +132,24 @@ class LabHandler(SimpleHTTPRequestHandler):
                     "result": job.get("result"),
                 })
         if url.path.startswith("/files/"):
-            target = (PIPE_DIR / url.path[len("/files/"):]).resolve()
-            if not str(target).startswith(str(PIPE_DIR)) or not target.is_file():
-                return self._send_json({"error": "not found"}, 404)
-            body = target.read_bytes()
-            self.send_response(200)
-            ctype = "application/json" if target.suffix == ".json" else "audio/wav"
-            self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-            return
+            return self._send_file(PIPE_DIR, url.path[len("/files/"):])
+        if url.path.startswith("/web/"):
+            return self._send_file(WEB_DIR, url.path[len("/web/"):])
         return super().do_GET()
+
+    def _send_file(self, root, rel):
+        import mimetypes
+
+        target = (root / rel).resolve()
+        if not str(target).startswith(str(root)) or not target.is_file():
+            return self._send_json({"error": "not found"}, 404)
+        body = target.read_bytes()
+        self.send_response(200)
+        ctype = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def do_POST(self):
         url = urlparse(self.path)
