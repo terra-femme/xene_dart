@@ -49,11 +49,16 @@ conda run -n xene-drums python extract.py "C:\Users\aznkr\Music\StemRoller\Tweak
 conda run -n xene-drums python separate.py "C:\path\to\track.mp3" --shifts 2
 conda run -n xene-drums python extract.py "separated\htdemucs_ft\track\drums.wav"
 
-# 4. audit: serve the lab and load stem + JSON(s)
-cd ..\..\tools\av_debug
-python -m http.server 8000
-# open http://127.0.0.1:8000/drum-lab.html  (127.0.0.1, NOT file://)
+# 4. audit: run the lab server (serves the page AND runs the pipeline for it)
+conda run -n xene-drums python drum_lab_server.py
+# open http://127.0.0.1:8123/drum-lab.html  (127.0.0.1, NOT file://)
 ```
+
+The lab's **Track prep** section (enabled when served by `drum_lab_server.py`)
+does steps 3 in the browser: upload a full track, drag the 30 s crop window,
+click Separate — the server runs `separate.py` + `extract.py` and the lab
+auto-loads the drums stem + events when done. Uploads/outputs land in
+`uploads/` and `separated/` (both gitignored).
 
 In the lab: Set A = ground truth (solid), Set B = extracted (hollow). Solo the
 tap clicks per set to *hear* each grid against the stem, hand-correct B in edit
