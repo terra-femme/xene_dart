@@ -28,6 +28,8 @@ from pathlib import Path
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("separate")
 
+from events_io import add_verbosity_flag, apply_verbosity  # noqa: E402
+
 DEFAULT_REPO = Path(r"C:\Users\aznkr\stemroller\anyos-extra-files\Models")
 STEMS = ("drums", "bass", "other", "vocals")
 
@@ -106,7 +108,9 @@ def main():
                     help="shift-trick passes; 2+ for final artifacts (default 1)")
     ap.add_argument("--repo", default=str(DEFAULT_REPO),
                     help=f"local demucs model repo (default: StemRoller's, {DEFAULT_REPO})")
+    add_verbosity_flag(ap)
     args = ap.parse_args()
+    apply_verbosity(args)
 
     input_path = Path(args.input)
     if not input_path.exists():

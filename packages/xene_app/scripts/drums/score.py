@@ -28,7 +28,13 @@ import logging
 import sys
 from pathlib import Path
 
-from events_io import CORE_KINDS, events_by_kind, load_events_json
+from events_io import (
+    CORE_KINDS,
+    add_verbosity_flag,
+    apply_verbosity,
+    events_by_kind,
+    load_events_json,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("score")
@@ -113,7 +119,9 @@ def main():
     ap.add_argument("--tol-ms", type=float, default=50.0, help="match window in ms (default 50)")
     ap.add_argument("--report", help="also write a machine-readable JSON report here")
     ap.add_argument("--offset-hist", action="store_true", help="print ASCII offset histogram")
+    add_verbosity_flag(ap)
     args = ap.parse_args()
+    apply_verbosity(args)
 
     ref_doc = load_events_json(args.ref)
     est_doc = load_events_json(args.est)

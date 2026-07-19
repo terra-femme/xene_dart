@@ -39,6 +39,27 @@ CORE_KINDS = ("kick", "snare", "hat")
 KNOWN_KINDS = CORE_KINDS + ("other",)
 
 
+# Our loggers only — flipping the ROOT logger to DEBUG unleashes numba/librosa
+# internals (numba.core.byteflow dumps thousands of lines per compile).
+PIPELINE_LOGGERS = (
+    "events_io", "extract", "separate", "midi_to_events", "score", "make_test_clip",
+)
+
+
+def add_verbosity_flag(ap):
+    """Shared -v/--verbose flag for every CLI in this pipeline."""
+    ap.add_argument("-v", "--verbose", action="store_true",
+                    help="enable DEBUG logging for pipeline loggers (per-hit detail)")
+
+
+def apply_verbosity(args):
+    """Call right after parse_args(): DEBUG on pipeline loggers, libraries stay INFO."""
+    if getattr(args, "verbose", False):
+        for name in PIPELINE_LOGGERS:
+            logging.getLogger(name).setLevel(logging.DEBUG)
+        logger.debug("[events_io] DEBUG logging enabled for %s", ", ".join(PIPELINE_LOGGERS))
+
+
 def write_events_json(path, *, source, generator, source_file, duration, events, params):
     """Validate, sort, round, and write a drum-events.json. Returns the path."""
     path = Path(path)

@@ -26,7 +26,7 @@ import sys
 import time
 from pathlib import Path
 
-from events_io import write_events_json
+from events_io import add_verbosity_flag, apply_verbosity, write_events_json
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("extract")
@@ -83,6 +83,8 @@ def band_events(yp, sr, kind, lo, hi, delta, min_gap_ms):
     )
     times = librosa.frames_to_time(frames, sr=sr, hop_length=HOP)
     times = _refine_onsets(np, yb, sr, times)
+    logger.debug("[band] %s refined onset times (padded coords): %s",
+                 kind, np.round(times, 3).tolist())
 
     # velocity = peak band amplitude in the 30 ms after the onset
     win = int(0.03 * sr)
@@ -203,7 +205,9 @@ def main():
     ap.add_argument("--flam-ms", type=float, default=30,
                     help="kick+snare within this window = one hit, keep stronger (default 30)")
     ap.add_argument("--keep-flams", action="store_true", help="disable flam arbitration")
+    add_verbosity_flag(ap)
     args = ap.parse_args()
+    apply_verbosity(args)
 
     in_path = Path(args.input)
     if not in_path.exists():

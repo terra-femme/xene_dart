@@ -28,7 +28,7 @@ import logging
 import sys
 from pathlib import Path
 
-from events_io import write_events_json
+from events_io import add_verbosity_flag, apply_verbosity, write_events_json
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("make_test_clip")
@@ -161,7 +161,9 @@ def write_midi(events, path):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--out-dir", default=".", help="output directory (default: cwd)")
+    add_verbosity_flag(ap)
     args = ap.parse_args()
+    apply_verbosity(args)
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

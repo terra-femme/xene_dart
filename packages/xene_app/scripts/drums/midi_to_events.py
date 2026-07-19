@@ -26,7 +26,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-from events_io import CORE_KINDS, write_events_json
+from events_io import CORE_KINDS, add_verbosity_flag, apply_verbosity, write_events_json
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("midi_to_events")
@@ -116,7 +116,9 @@ def main():
                     help="read every instrument, not just drum-channel ones")
     ap.add_argument("--include-other", action="store_true",
                     help="keep unmapped notes as kind 'other' instead of dropping them")
+    add_verbosity_flag(ap)
     args = ap.parse_args()
+    apply_verbosity(args)
 
     in_path = Path(args.input)
     if not in_path.exists():
