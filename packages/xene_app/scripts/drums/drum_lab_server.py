@@ -106,6 +106,11 @@ def _process_job(job_id, wav_path, shifts):
         except Exception as e:
             logger.warning("[job %s] could not parse lint report: %s", job_id[:8], e)
 
+        # per-voice band renders (kick/snare/hat WAVs) — the lab's Voices slots
+        with JOBS_LOCK:
+            JOBS[job_id]["state"] = "rendering bands"
+        _run_step(job_id, [sys.executable, PIPE_DIR / "render_bands.py", stem])
+
         rel = lambda p: "/files/" + p.relative_to(PIPE_DIR).as_posix()
         with JOBS_LOCK:
             JOBS[job_id]["state"] = "done"
@@ -115,6 +120,7 @@ def _process_job(job_id, wav_path, shifts):
                 "eventsUrl": rel(events_out),
                 "lintUrl": rel(lint_out) if lint_out.exists() else None,
                 "lint": lint_summary,
+                "bandUrls": _band_urls(stem),
             }
         _job_log(job_id, "job complete (lint: %s)" % (lint_summary["status"] if lint_summary else "?"))
     except Exception as e:  # surface every failure to the browser, never swallow
@@ -122,6 +128,46 @@ def _process_job(job_id, wav_path, shifts):
         with JOBS_LOCK:
             JOBS[job_id]["state"] = "error"
             JOBS[job_id]["log"].append(f"ERROR: {e}")
+
+
+def _band_urls(stem):
+    """URLs for the per-voice band renders next to a drums stem, if present."""
+    bands_dir = stem.parent / f"{stem.stem}_bands"
+    urls = {}
+    for kind in ("kick", "snare", "hat"):
+        p = bands_dir / f"{kind}.wav"
+        if p.exists():
+            urls[kind] = "/files/" + p.relative_to(PIPE_DIR).as_posix()
+    return urls or None
+
+
+def _latest_from_disk():
+    """Newest uploads/<name>.drum-events.json whose separated drums stem exists.
+
+    Keeps 'Load latest' working across server restarts — results live on disk,
+    not just in this process's memory.
+    """
+    candidates = sorted(UPLOAD_DIR.glob("*.drum-events.json"),
+                        key=lambda p: p.stat().st_mtime, reverse=True) if UPLOAD_DIR.exists() else []
+    for events in candidates:
+        stem = PIPE_DIR / "separated" / "htdemucs_ft" / events.name[: -len(".drum-events.json")] / "drums.wav"
+        if not stem.exists():
+            continue
+        lint_path = events.with_name(events.name.replace(".drum-events.json", ".lint.json"))
+        lint_summary = None
+        if lint_path.exists():
+            try:
+                lint = json.loads(lint_path.read_text(encoding="utf-8"))
+                lint_summary = {"status": lint["status"], "fails": lint["fails"], "warns": lint["warns"]}
+            except Exception:
+                pass
+        rel = lambda p: "/files/" + p.relative_to(PIPE_DIR).as_posix()
+        logger.info("[latest] serving from disk: %s", events.name)
+        return {"job": "disk", "finishedAt": events.stat().st_mtime,
+                "stemUrl": rel(stem), "eventsUrl": rel(events),
+                "lintUrl": rel(lint_path) if lint_path.exists() else None,
+                "lint": lint_summary, "bandUrls": _band_urls(stem)}
+    return None
 
 
 class LabHandler(SimpleHTTPRequestHandler):
@@ -144,11 +190,16 @@ class LabHandler(SimpleHTTPRequestHandler):
             # most recently finished job — powers the blob lab's one-click load
             with JOBS_LOCK:
                 done = [(jid, j) for jid, j in JOBS.items() if j.get("state") == "done"]
-                if not done:
-                    return self._send_json({"error": "no completed jobs yet"}, 404)
+            if done:
                 jid, job = max(done, key=lambda kv: kv[1].get("finished", 0))
                 return self._send_json({"job": jid, "finishedAt": job.get("finished"),
                                         **job["result"]})
+            # no in-memory jobs (server restarted): scan disk for the newest
+            # stem+events pair so earlier sessions' results stay one click away
+            latest = _latest_from_disk()
+            if latest is None:
+                return self._send_json({"error": "no completed jobs yet"}, 404)
+            return self._send_json(latest)
         if url.path.startswith("/api/status/"):
             job_id = url.path.rsplit("/", 1)[-1]
             with JOBS_LOCK:
