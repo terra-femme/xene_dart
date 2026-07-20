@@ -5,7 +5,9 @@
 *.mp3
 *.mid
 separated/
+uploads/
 *.drum-events.json
 *.truth.json
 *.report.json
+*.lint.json
 __pycache__/

@@ -41,6 +41,11 @@ conda run -n xene-drums python extract.py test_beat.wav
 conda run -n xene-drums python score.py test_beat.truth.json test_beat.drum-events.json
 #    -> target F ~ 1.0 per voice, |mean offset| < 15 ms (DSP lane sanity)
 
+# lint gate: catches charts that would feel bad on skin (density > 10/s = FAIL,
+# min-gap/coincident/flat-velocity/empty-voice = WARN). Exit 1 on FAIL.
+conda run -n xene-drums python lint_events.py test_beat.drum-events.json
+#    -> expect PASS, clean
+
 # 2. real track, already-separated stem (e.g. StemRoller output)
 conda run -n xene-drums python extract.py "C:\Users\aznkr\Music\StemRoller\Tweakz - Unintentional_demo\drums.wav"
 

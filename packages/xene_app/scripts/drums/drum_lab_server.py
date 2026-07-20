@@ -92,11 +92,31 @@ def _process_job(job_id, wav_path, shifts):
         events_out = UPLOAD_DIR / f"{wav_path.stem}.drum-events.json"
         _run_step(job_id, [sys.executable, PIPE_DIR / "extract.py", stem, "-o", events_out])
 
+        # lint gate, in report mode: a FAIL is surfaced to the lab, not fatal
+        # to the job (the human decides what to do with a failing chart).
+        with JOBS_LOCK:
+            JOBS[job_id]["state"] = "linting"
+        lint_out = UPLOAD_DIR / f"{wav_path.stem}.lint.json"
+        _run_step(job_id, [sys.executable, PIPE_DIR / "lint_events.py", events_out,
+                           "--report", lint_out, "--warn-only"])
+        lint_summary = None
+        try:
+            lint = json.loads(lint_out.read_text(encoding="utf-8"))
+            lint_summary = {"status": lint["status"], "fails": lint["fails"], "warns": lint["warns"]}
+        except Exception as e:
+            logger.warning("[job %s] could not parse lint report: %s", job_id[:8], e)
+
         rel = lambda p: "/files/" + p.relative_to(PIPE_DIR).as_posix()
         with JOBS_LOCK:
             JOBS[job_id]["state"] = "done"
-            JOBS[job_id]["result"] = {"stemUrl": rel(stem), "eventsUrl": rel(events_out)}
-        _job_log(job_id, "job complete")
+            JOBS[job_id]["finished"] = time.time()
+            JOBS[job_id]["result"] = {
+                "stemUrl": rel(stem),
+                "eventsUrl": rel(events_out),
+                "lintUrl": rel(lint_out) if lint_out.exists() else None,
+                "lint": lint_summary,
+            }
+        _job_log(job_id, "job complete (lint: %s)" % (lint_summary["status"] if lint_summary else "?"))
     except Exception as e:  # surface every failure to the browser, never swallow
         logger.exception("[job %s] FAILED", job_id[:8])
         with JOBS_LOCK:
@@ -120,6 +140,15 @@ class LabHandler(SimpleHTTPRequestHandler):
         url = urlparse(self.path)
         if url.path == "/api/ping":
             return self._send_json({"ok": True})
+        if url.path == "/api/latest":
+            # most recently finished job — powers the blob lab's one-click load
+            with JOBS_LOCK:
+                done = [(jid, j) for jid, j in JOBS.items() if j.get("state") == "done"]
+                if not done:
+                    return self._send_json({"error": "no completed jobs yet"}, 404)
+                jid, job = max(done, key=lambda kv: kv[1].get("finished", 0))
+                return self._send_json({"job": jid, "finishedAt": job.get("finished"),
+                                        **job["result"]})
         if url.path.startswith("/api/status/"):
             job_id = url.path.rsplit("/", 1)[-1]
             with JOBS_LOCK:
