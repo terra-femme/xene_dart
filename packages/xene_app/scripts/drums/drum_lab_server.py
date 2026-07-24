@@ -44,6 +44,10 @@ LAB_DIR = (PIPE_DIR / ".." / ".." / "tools" / "av_debug").resolve()
 # which the browser normalizes to /web/... — serve that tree read-only too.
 WEB_DIR = (PIPE_DIR / ".." / ".." / "web").resolve()
 UPLOAD_DIR = PIPE_DIR / "uploads"
+# A correction layer staged by the browser (an edited export) to auto-apply to
+# the NEXT extraction — so a re-extraction inherits your manual edits. Consumed
+# and deleted by the job that uses it.
+PENDING_CORR = UPLOAD_DIR / "_pending.corrections.json"
 PORT = 8123
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024
 
@@ -92,6 +96,25 @@ def _process_job(job_id, wav_path, shifts):
         events_out = UPLOAD_DIR / f"{wav_path.stem}.drum-events.json"
         _run_step(job_id, [sys.executable, PIPE_DIR / "extract.py", stem, "-o", events_out])
 
+        # auto-apply a staged correction layer so a re-extraction inherits the
+        # user's manual edits. Non-fatal: a bad corrections file must not lose
+        # the fresh extraction — log and carry on with the un-merged chart.
+        applied_corr = False
+        if PENDING_CORR.exists():
+            with JOBS_LOCK:
+                JOBS[job_id]["state"] = "applying corrections"
+            try:
+                _run_step(job_id, [sys.executable, PIPE_DIR / "apply_corrections.py",
+                                   events_out, PENDING_CORR, "-o", events_out])
+                applied_corr = True
+            except Exception as e:
+                _job_log(job_id, f"WARNING corrections not applied ({e}) — using raw extraction")
+            finally:
+                try:
+                    PENDING_CORR.unlink()
+                except OSError:
+                    pass
+
         # lint gate, in report mode: a FAIL is surfaced to the lab, not fatal
         # to the job (the human decides what to do with a failing chart).
         with JOBS_LOCK:
@@ -121,8 +144,11 @@ def _process_job(job_id, wav_path, shifts):
                 "lintUrl": rel(lint_out) if lint_out.exists() else None,
                 "lint": lint_summary,
                 "bandUrls": _band_urls(stem),
+                "appliedCorrections": applied_corr,
             }
-        _job_log(job_id, "job complete (lint: %s)" % (lint_summary["status"] if lint_summary else "?"))
+        _job_log(job_id, "job complete (lint: %s%s)" % (
+            lint_summary["status"] if lint_summary else "?",
+            ", corrections applied" if applied_corr else ""))
     except Exception as e:  # surface every failure to the browser, never swallow
         logger.exception("[job %s] FAILED", job_id[:8])
         with JOBS_LOCK:
@@ -231,8 +257,35 @@ class LabHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _read_body(self):
+        length = int(self.headers.get("Content-Length") or 0)
+        if length <= 0 or length > MAX_UPLOAD_BYTES:
+            return None, self._send_json({"error": f"bad body size {length}"}, 400)
+        return self.rfile.read(length), None
+
     def do_POST(self):
         url = urlparse(self.path)
+
+        # Stage a correction layer for the NEXT extraction. Body = an edited
+        # drum-events export (it carries a `corrections` block).
+        if url.path == "/api/corrections":
+            data, err = self._read_body()
+            if err is not None:
+                return
+            try:
+                doc = json.loads(data)
+                if "corrections" not in doc:
+                    return self._send_json({"error": "no 'corrections' block in file"}, 400)
+            except Exception as e:
+                return self._send_json({"error": f"not valid JSON: {e}"}, 400)
+            UPLOAD_DIR.mkdir(exist_ok=True)
+            PENDING_CORR.write_bytes(data)
+            c = doc["corrections"]
+            logger.info("[corrections] staged: +%d added, -%d deleted",
+                        len(c.get("added", [])), len(c.get("deleted", [])))
+            return self._send_json({"ok": True, "added": len(c.get("added", [])),
+                                    "deleted": len(c.get("deleted", []))})
+
         if url.path != "/api/separate":
             return self._send_json({"error": "unknown endpoint"}, 404)
 
