@@ -1,0 +1,19 @@
+# Drum-events tooling — Python 3.11 (conda env: xene-drums).
+# Separate env from xene-chart: basic-pitch's TensorFlow pins conflict with
+# the torch stack demucs needs. Do not merge the two envs.
+#
+# torch/torchaudio: PyPI ships CPU wheels on Windows (~2.5 GB). Pinned so the
+# env is reproducible; demucs would pull torch anyway.
+torch==2.3.1
+torchaudio==2.3.1
+# demucs 4.x is not numpy-2 clean — keep numpy 1.x.
+numpy==1.26.4
+demucs==4.0.1
+librosa==0.10.2.post1
+soundfile==0.12.1
+scipy==1.13.1
+pretty_midi==0.2.10
+mir_eval==0.7
+# pretty_midi imports pkg_resources; fresh conda py3.11 envs don't ship
+# setuptools anymore (same pin as scripts/chart).
+setuptools==80.9.0
