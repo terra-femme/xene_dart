@@ -1,0 +1,13 @@
+# Generated artifacts — outputs of the pipeline, not source.
+# Blessed ground-truth JSONs for real tracks get committed at their asset
+# path when they graduate, not in this pipeline dir.
+*.wav
+*.mp3
+*.mid
+separated/
+uploads/
+*.drum-events.json
+*.truth.json
+*.report.json
+*.lint.json
+__pycache__/

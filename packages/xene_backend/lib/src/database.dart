@@ -1187,7 +1187,9 @@ class DatabaseService {
           .eq('template_id', templateId)
           .eq('enabled', true);
       final rows = List<Map<String, dynamic>>.from(response)..shuffle(Random());
-      return _resolvePresetSourceRows(rows);
+      // await, so a failure inside the resolve step is caught below rather than
+      // escaping to the caller as an unhandled async error.
+      return await _resolvePresetSourceRows(rows);
     } catch (e) {
       _logger.severe('Error fetching preset sources for $presetSlug: $e');
       return [];
@@ -1205,7 +1207,9 @@ class DatabaseService {
           .eq('user_id', userId)
           .eq('enabled', true);
       final rows = List<Map<String, dynamic>>.from(response)..shuffle(Random());
-      return _resolvePresetSourceRows(rows);
+      // await, so a failure inside the resolve step is caught below rather than
+      // escaping to the caller as an unhandled async error.
+      return await _resolvePresetSourceRows(rows);
     } catch (e) {
       _logger.severe('Error fetching custom preset sources for $userId: $e');
       return [];

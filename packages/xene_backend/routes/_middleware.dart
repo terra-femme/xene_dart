@@ -340,22 +340,25 @@ Handler _jwtMiddleware(Handler handler) {
     }
 
     final token = authHeader.substring(7).trim();
+
+    // Token verification only. The handler call is deliberately OUTSIDE this
+    // try: awaiting it in here would route any downstream route failure into
+    // the catch below and answer 401 "Authentication failed" for what is
+    // actually a 500 — misreporting server errors as auth errors and telling
+    // clients to re-authenticate for no reason.
+    final String userId;
+    final bool isAnon;
     try {
       final userResp = await _db.client.auth.getUser(token);
-      final userId = userResp.user?.id;
-      if (userId == null) {
+      final id = userResp.user?.id;
+      if (id == null) {
         return Response.json(
           statusCode: HttpStatus.unauthorized,
           body: {'error': 'Invalid or expired token'},
         );
       }
-      final isAnon = decodeIsAnonymous(token);
-      print('[JWT] auth ok user=$userId isAnonymous=$isAnon path=$path');
-      return handler(
-        context
-            .provide<String>(() => userId)
-            .provide<IsAnonymous>(() => IsAnonymous(isAnon)),
-      );
+      userId = id;
+      isAnon = decodeIsAnonymous(token);
     } catch (e) {
       print('[JWT] auth error path=$path: $e');
       return Response.json(
@@ -363,6 +366,13 @@ Handler _jwtMiddleware(Handler handler) {
         body: {'error': 'Authentication failed'},
       );
     }
+
+    print('[JWT] auth ok user=$userId isAnonymous=$isAnon path=$path');
+    return handler(
+      context
+          .provide<String>(() => userId)
+          .provide<IsAnonymous>(() => IsAnonymous(isAnon)),
+    );
   };
 }
 
