@@ -1,0 +1,21 @@
+# Test tags for xene_backend.
+#
+# Tests tagged `dragonfly` talk to a real DragonflyDB on localhost:6379. They are
+# skipped by default so `dart test` is green on a clean checkout — without this,
+# eight failures greet anyone who has not started Docker, which trains you to
+# ignore a red suite and hides real regressions.
+#
+# The DragonflyDB container app was retired from Azure on cost grounds (see
+# docs/AZURE_PAYG_AND_DOMAIN_RUNBOOK_2026-08-24.md), but the cache code and these
+# tests are kept for a possible return. Skipping preserves them as executable
+# documentation rather than deleting coverage that would have to be rewritten.
+#
+# To run them:
+#   docker compose up -d dragonfly          # from the repo root
+#   dart test --run-skipped -t dragonfly    # from packages/xene_backend
+tags:
+  dragonfly:
+    skip: >-
+      Needs a live DragonflyDB on localhost:6379. Start it with
+      `docker compose up -d dragonfly` from the repo root, then run
+      `dart test --run-skipped -t dragonfly`.

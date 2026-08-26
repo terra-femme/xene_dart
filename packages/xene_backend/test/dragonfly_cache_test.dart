@@ -2,13 +2,49 @@ import 'package:test/test.dart';
 import 'package:xene_backend/src/services/dragonfly_cache_service.dart';
 
 void main() {
-  group('DragonflyCache', () {
+  // Fail-open behaviour needs no server, so it stays outside the tagged group
+  // and runs on every `dart test`. This matters more than the rest of this file
+  // right now: with the DragonflyDB container app retired, the short-circuit is
+  // the only path production actually takes, and it was previously untested
+  // because the shared setUp below demanded a live connection first.
+  group('DragonflyCache fail-open (no server required)', () {
+    test('operations return safe defaults when never connected', () async {
+      // A fresh instance is disconnected by default — `_connected` starts false
+      // and every operation short-circuits on it, so this needs no init().
+      final cache = DragonflyCache();
+
+      expect(cache.isConnected, false);
+      expect(await cache.set('test:key', 'value'), false);
+      expect(await cache.get('test:key'), null);
+      expect(await cache.exists('test:key'), false);
+      expect(await cache.delete('test:key'), false);
+      expect(await cache.incr('test:key'), null);
+    });
+
+    test('operations return safe defaults after close()', () async {
+      final cache = DragonflyCache();
+      // failOpen: true — init against an absent server must not throw.
+      await cache.init(failOpen: true);
+      await cache.close();
+
+      expect(cache.isConnected, false);
+      expect(await cache.set('test:key', 'value'), false);
+      expect(await cache.get('test:key'), null);
+      expect(await cache.exists('test:key'), false);
+      expect(await cache.delete('test:key'), false);
+      expect(await cache.incr('test:key'), null);
+    });
+  });
+
+  // Everything below talks to a real DragonflyDB on localhost:6379. Skipped by
+  // default via the `dragonfly` tag in dart_test.yaml; see that file to run them.
+  group('DragonflyCache', tags: 'dragonfly', () {
     late DragonflyCache cache;
 
     setUp(() async {
       cache = DragonflyCache();
       // Note: DragonflyDB must be running on localhost:6379
-      // docker-compose up -d
+      // docker compose up -d dragonfly
       final connected = await cache.init(failOpen: false);
       expect(connected, true, reason: 'DragonflyDB must be running');
     });
@@ -26,7 +62,11 @@ void main() {
     });
 
     test('SET with TTL and expiry', () async {
-      final result = await cache.set('test:ttl', 'expires soon', expirySeconds: 2);
+      final result = await cache.set(
+        'test:ttl',
+        'expires soon',
+        expirySeconds: 2,
+      );
       expect(result, true);
 
       var value = await cache.get('test:ttl');
