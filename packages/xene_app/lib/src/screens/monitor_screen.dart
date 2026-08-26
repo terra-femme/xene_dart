@@ -67,9 +67,11 @@ class _MonitorScreenState extends ConsumerState<MonitorScreen> {
                 loading: () => const Center(
                   child: CircularProgressIndicator(color: _kTeal),
                 ),
+                // An access failure is not an outage — say which one it is
+                // rather than blaming the backend for a permissions problem.
                 error: (e, _) => Center(
                   child: Text(
-                    'Backend offline\n$e',
+                    e is MonitorAccessDenied ? '$e' : 'Backend unreachable\n$e',
                     textAlign: TextAlign.center,
                     style: const TextStyle(color: _kMuted),
                   ),
