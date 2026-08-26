@@ -1302,7 +1302,9 @@ class SoundCloudService {
       if (kind == 'playlist' && idText != null) {
         final embeddedTracks = _extractPlaylistTrackIds(data).toList();
         if (embeddedTracks.isNotEmpty) return embeddedTracks;
-        return _getPlaylistTrackIds(accessToken, idText);
+        // await, so a failure in the playlist lookup is caught below and logged
+        // against this URL rather than escaping as an unhandled async error.
+        return await _getPlaylistTrackIds(accessToken, idText);
       }
     } catch (e) {
       _logger.warning('[sc] Failed to resolve export URL $url: $e');
