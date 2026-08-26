@@ -21,10 +21,16 @@ Future<Response> onRequest(RequestContext context) async {
   try {
     final digest = await service.getOrGenerate(userId: userId, isAnon: isAnon);
     if (digest == null) {
-      return Response.json(
-        statusCode: HttpStatus.noContent,
-        body: {'message': 'No tracks dropped in the last 24 hours'},
-      );
+      // Must be bodyless — do NOT use Response.json here. A 204 must not carry
+      // a body (RFC 9110 §15.3.5), but Response.json encodes one anyway and it
+      // really does go out on the wire: `content-length: 52` followed by 52
+      // bytes of JSON. Browsers reject that and fail the request at the network
+      // layer, which reaches Dio as a connectionError carrying no status code —
+      // so the client's `statusCode == 204` branch never runs and a quiet feed
+      // day is indistinguishable from an outage. curl hides this (it stops
+      // reading the body on a 204); only a raw socket or a browser shows it.
+      // Guarded by test/inbox_daily_204_framing_test.dart.
+      return Response(statusCode: HttpStatus.noContent);
     }
     return Response.json(body: digest);
   } catch (e, stack) {
