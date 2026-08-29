@@ -56,6 +56,39 @@ class _XeneHeaderState extends ConsumerState<XeneHeader> {
     setState(() => _isAtEnd = !isScrollable);
   }
 
+  /// Advances the nav strip one "page" to the right.
+  ///
+  /// Backs the overflow chevron so users who don't discover the horizontal
+  /// swipe can still reach the nav items hidden past the right edge.
+  void _scrollNavRight() {
+    if (!_navScrollController.hasClients ||
+        !_navScrollController.position.hasContentDimensions) {
+      debugPrint('[XeneHeader] chevron tap ignored - nav scroll not ready');
+      return;
+    }
+    final position = _navScrollController.position;
+    // ~60% of the visible strip: far enough to feel like progress, short
+    // enough to leave a couple of already-seen items on screen as anchors.
+    final step = (position.viewportDimension * 0.6)
+        .clamp(120.0, position.viewportDimension)
+        .toDouble();
+    final target = (_navScrollController.offset + step)
+        .clamp(position.minScrollExtent, position.maxScrollExtent)
+        .toDouble();
+    debugPrint(
+      '[XeneHeader] chevron tap: offset='
+      '${_navScrollController.offset.toStringAsFixed(1)} '
+      'step=${step.toStringAsFixed(1)} '
+      'target=${target.toStringAsFixed(1)} '
+      'max=${position.maxScrollExtent.toStringAsFixed(1)}',
+    );
+    _navScrollController.animateTo(
+      target,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
   @override
   void dispose() {
     _navScrollController.removeListener(_onScroll);
@@ -338,7 +371,8 @@ class _XeneHeaderState extends ConsumerState<XeneHeader> {
                       ),
 
                       // Fixed inbox badge — always visible, not in scroll
-                      if (!_isAtEnd) const _NavOverflowChevron(),
+                      if (!_isAtEnd)
+                        _NavOverflowChevron(onTap: _scrollNavRight),
                       _InboxBadgeButton(onTap: () => showDailyInbox(context)),
                     ],
                   ),
@@ -467,26 +501,40 @@ class _HeaderNavButtonState extends State<_HeaderNavButton> {
 // ── Inbox badge button ────────────────────────────────────────────────────────
 
 class _NavOverflowChevron extends StatelessWidget {
-  const _NavOverflowChevron();
+  const _NavOverflowChevron({required this.onTap});
+
+  /// Scrolls the nav strip right - the chevron is a real control, not just a hint.
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return ExcludeSemantics(
-      child: SizedBox(
-        width: 28,
-        height: 44,
-        child: Center(
-          child: Container(
-            width: 22,
-            height: 22,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(color: XeneTheme.muted, width: 1.5),
-            ),
-            child: const Icon(
-              Icons.chevron_right,
-              size: 14,
-              color: XeneTheme.muted,
+    return Semantics(
+      label: 'Scroll navigation right',
+      button: true,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: onTap,
+          child: SizedBox(
+            width: 28,
+            height: 44,
+            child: Center(
+              child: Container(
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: XeneTheme.muted, width: 1.5),
+                ),
+                child: const ExcludeSemantics(
+                  child: Icon(
+                    Icons.chevron_right,
+                    size: 14,
+                    color: XeneTheme.muted,
+                  ),
+                ),
+              ),
             ),
           ),
         ),
