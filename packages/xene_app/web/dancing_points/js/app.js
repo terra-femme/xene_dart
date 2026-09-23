@@ -128,6 +128,15 @@
   let manualHapticEvents = null;
   let manualHapticIndex = 0;
   /** @type {number|null} */ let manualHapticLastTime = null;
+  const manualHapticVoices = { kick: true, snare: true, hat: false };
+
+  /** Keep the tactile groove legible and below iOS Core Haptics saturation. */
+  function manualHapticPasses(event) {
+    if (!manualHapticVoices[event.kind]) return false;
+    if (event.kind === 'kick') return event.v >= 0.4;
+    if (event.kind === 'snare') return event.v >= 0.6;
+    return event.v >= 0.8;
+  }
 
   /** @param {number} time */
   function firstManualEventAtOrAfter(time) {
@@ -153,7 +162,9 @@
     console.log(
       '[haptics] timing source',
       manualHapticEvents ? 'manual' : 'live-detector',
-      manualHapticEvents ? manualHapticEvents.length + ' events' : ''
+      manualHapticEvents
+        ? manualHapticEvents.filter(manualHapticPasses).length + ' groove events'
+        : ''
     );
   }
 
@@ -182,11 +193,13 @@
     }
     manualHapticLastTime = time;
 
-    if (manualHapticIndex >= events.length || events[manualHapticIndex].t > time) {
-      return null;
+    while (manualHapticIndex < events.length && events[manualHapticIndex].t <= time) {
+      const event = events[manualHapticIndex++];
+      if (manualHapticPasses(event)) {
+        return { kind: event.kind, strength: Math.min(1, Math.max(0, event.v)) };
+      }
     }
-    const event = events[manualHapticIndex++];
-    return { kind: event.kind, strength: Math.min(1, Math.max(0, event.v)) };
+    return null;
   }
   /** @param {'kick'|'snare'|'hat'} kind @param {number} strength */
   function fireDrumHaptic(kind, strength) {
@@ -563,6 +576,19 @@
     hapticsOn = !hapticsOn;
     syncHapticUi();
     if (hapticsOn) fireHaptic(0.3);
+  });
+
+  // Dev feel-test controls. Defaults to the structural groove; hats are opt-in
+  // because dense cymbal detail masks the kick/snare pattern in one actuator.
+  const hapticVoiceButtons = {
+    kick: $('hapticKick'), snare: $('hapticSnare'), hat: $('hapticHat'),
+  };
+  Object.entries(hapticVoiceButtons).forEach(([kind, button]) => {
+    button.addEventListener('click', () => {
+      manualHapticVoices[kind] = !manualHapticVoices[kind];
+      button.classList.toggle('active', manualHapticVoices[kind]);
+      console.log('[haptics] voice', kind, manualHapticVoices[kind] ? 'ON' : 'OFF');
+    });
   });
 
   // ---------- panel toggle ----------

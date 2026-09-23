@@ -404,8 +404,13 @@
         <div class="sec-h"><span>Accessibility</span><span class="meta" id="hapticMeta">vibration</span></div>
         <button class="mode active" id="haptics" style="width:100%;">
           <div class="mn" id="hapticLabel">Haptics: ON</div>
-          <div class="md">vibrate on bass + drum hits Â· Android browsers (not iOS Safari)</div>
+          <div class="md">manual drum map when available</div>
         </button>
+        <div class="modes" style="grid-template-columns:repeat(3,1fr);margin-top:8px;">
+          <button class="mode active" id="hapticKick"><div class="mn">KICK</div><div class="md">heavy</div></button>
+          <button class="mode active" id="hapticSnare"><div class="mn">SNARE</div><div class="md">rigid</div></button>
+          <button class="mode" id="hapticHat"><div class="mn">HAT</div><div class="md">light</div></button>
+        </div>
       </div>
 
       <!-- FORM -->
@@ -475,6 +480,6 @@
   <script src="js/track-export.js?v=playlist-4"></script>
   <script src="js/haptic-events-data.js?v=manual-1"></script>
   <script src="js/playlist.js?v=playlist-4"></script>
-  <script src="js/app.js?v=manual-haptics-1"></script>
+  <script src="js/app.js?v=manual-haptics-2"></script>
 </body>
 </html>
