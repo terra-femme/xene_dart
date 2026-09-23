@@ -228,6 +228,7 @@ class _DancingPointsViewState extends State<DancingPointsView> {
       'scene.js',
       'chart-gen.js',
       'track-export.js',
+      'haptic-events-data.js',
       'playlist.js',
       'app.js',
     ];

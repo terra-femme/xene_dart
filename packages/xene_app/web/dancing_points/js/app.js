@@ -120,6 +120,74 @@
     hat:   { indicator: 0.35, vibrateMs: 7,  baseIntensity: 0.45, intensitySpan: 0.25 },
   };
   let drumHapticLogCount = 0;
+
+  // A hand-edited sidecar wins over analyser guesses for tracks that have one.
+  // The cursor follows StemEngine.currentTime, so pause/resume stays aligned and
+  // a seek or crop-loop jump cannot replay a backlog of old impacts.
+  /** @type {Array<{t:number,kind:'kick'|'snare'|'hat',v:number}>|null} */
+  let manualHapticEvents = null;
+  let manualHapticIndex = 0;
+  /** @type {number|null} */ let manualHapticLastTime = null;
+
+  /** @param {number} time */
+  function firstManualEventAtOrAfter(time) {
+    const events = manualHapticEvents || [];
+    let lo = 0, hi = events.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (events[mid].t < time) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  }
+
+  /** @param {any} track */
+  function selectManualHaptics(track) {
+    const byTrack = /** @type {any} */ (window).XENE_HAPTIC_TRACKS || {};
+    const doc = track && byTrack[track.id];
+    manualHapticEvents = doc && Array.isArray(doc.events) ? doc.events : null;
+    manualHapticIndex = manualHapticEvents
+      ? firstManualEventAtOrAfter(engine.currentTime)
+      : 0;
+    manualHapticLastTime = null;
+    console.log(
+      '[haptics] timing source',
+      manualHapticEvents ? 'manual' : 'live-detector',
+      manualHapticEvents ? manualHapticEvents.length + ' events' : ''
+    );
+  }
+
+  /** @returns {{kind:'kick'|'snare'|'hat',strength:number}|null} */
+  function pollManualHaptic() {
+    const events = manualHapticEvents;
+    if (!events || !engine.isPlaying) {
+      manualHapticLastTime = null;
+      return null;
+    }
+
+    const time = engine.currentTime;
+    if (manualHapticLastTime === null) {
+      manualHapticIndex = firstManualEventAtOrAfter(time);
+      manualHapticLastTime = time;
+      return null;
+    }
+
+    // Re-index after a seek, loop, or a long timer stall. Skipping the event at
+    // the destination avoids a burst of impacts accumulated during the jump.
+    const delta = time - manualHapticLastTime;
+    if (delta < -0.03 || delta > 0.25) {
+      manualHapticIndex = firstManualEventAtOrAfter(time + 0.001);
+      manualHapticLastTime = time;
+      return null;
+    }
+    manualHapticLastTime = time;
+
+    if (manualHapticIndex >= events.length || events[manualHapticIndex].t > time) {
+      return null;
+    }
+    const event = events[manualHapticIndex++];
+    return { kind: event.kind, strength: Math.min(1, Math.max(0, event.v)) };
+  }
   /** @param {'kick'|'snare'|'hat'} kind @param {number} strength */
   function fireDrumHaptic(kind, strength) {
     const spec = DRUM_HAPTIC[kind];
@@ -610,6 +678,7 @@
       engine,
       applySettings: applyTrackSettings,
       onTrackLoaded: (/** @type {any} */ track, /** @type {string[]} */ loadedSlots) => {
+        selectManualHaptics(track);
         SLOTS.forEach((s) => {
           const el = $('slf-' + s.key);
           const has = loadedSlots.includes(s.key);
@@ -724,7 +793,9 @@
   // 30fps, which quantised every drum tap to a 33ms grid — enough jitter to
   // break rhythm perception. Reading the analyser here costs microseconds.
   setInterval(() => {
-    const ev = engine.pollDrumOnset(performance.now());
+    const ev = manualHapticEvents
+      ? pollManualHaptic()
+      : engine.pollDrumOnset(performance.now());
     if (!ev) return;
     pulseHapticIndicator(DRUM_HAPTIC[ev.kind].indicator);
     if (drumHapticLogCount < 12) {
